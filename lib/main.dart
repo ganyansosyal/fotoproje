@@ -71,6 +71,26 @@ const hookJs = r'''
    if(/json|text|javascript|xml/i.test(ct)) res.clone().text().then(scan).catch(function(){});
   }catch(e){} }).catch(function(){});
   return p; };
+ function vis(v){ var r=v.getBoundingClientRect();
+  var w=Math.max(0,Math.min(r.right,innerWidth)-Math.max(r.left,0));
+  var h=Math.max(0,Math.min(r.bottom,innerHeight)-Math.max(r.top,0)); return w*h; }
+ window.__cur=function(){ var best=null,ba=-1;
+  document.querySelectorAll('video').forEach(function(v){
+   var a=vis(v); if(a<=0) return;
+   var sc=a+((!v.paused&&!v.ended&&v.readyState>2)?1e9:0);
+   if(sc>ba){ba=sc;best=v;} });
+  if(!best) return null;
+  return {src:best.currentSrc||best.src||'',poster:best.poster||'',playing:!best.paused}; };
+ function rep(e){ try{ var v=e.target; if(!v||v.tagName!=='VIDEO') return;
+  window.flutter_inappwebview.callHandler('playing',{src:v.currentSrc||v.src||'',poster:v.poster||''});
+ }catch(x){} }
+ document.addEventListener('playing',rep,true);
+ document.addEventListener('play',rep,true);
+ var sre=/\.(m4s|ts|aac|m4a|cmfv|cmfa|m4v|mp4|webm)(\?|#|$)/i;
+ try{ new PerformanceObserver(function(l){ l.getEntries().forEach(function(e){
+  var u=e.name; if(/^https?:/.test(u)&&sre.test(u)){
+   try{window.flutter_inappwebview.callHandler('seg',u);}catch(x){} } }); })
+  .observe({type:'resource',buffered:false}); }catch(e){}
  document.addEventListener('play',dom,true);
  document.addEventListener('DOMContentLoaded',dom);
  window.addEventListener('load',dom);
@@ -181,6 +201,11 @@ class TabData {
   final ValueNotifier<double> progress = ValueNotifier<double>(0);
   bool opened = false;
   final Set<String> media = <String>{};
+  final Map<String, int> mediaAt = <String, int>{};
+  final List<(String, int)> segs = [];
+  String playSrc = '';
+  String playPoster = '';
+  int playAt = 0;
   TabData(this.url);
 }
 
@@ -697,6 +722,162 @@ class _BrowserState extends State<Browser> {
     }
   }
 
+  static final _segRe = RegExp(
+      r'\.(m4s|ts|aac|m4a|cmfv|cmfa|m4v|mp4|webm)(\?|#|$)',
+      caseSensitive: false);
+  static final _noiseRe = RegExp(
+      r'abs\.twimg\.com|/sticky/|radar_promo|/inapp_|doubleclick',
+      caseSensitive: false);
+
+  void addMedia(TabData x, String u) {
+    if (x.media.add(u)) x.mediaAt[u] = DateTime.now().millisecondsSinceEpoch;
+  }
+
+  void addSeg(TabData x, String u) {
+    x.segs.add((u, DateTime.now().millisecondsSinceEpoch));
+    if (x.segs.length > 150) x.segs.removeRange(0, x.segs.length - 150);
+  }
+
+  bool isNoise(String u) => _noiseRe.hasMatch(u);
+
+  // Küçük sayı = indirmeye daha uygun
+  int pref(String u) {
+    var n = 0;
+    if (u.startsWith('blob:')) {
+      n = 40;
+    } else {
+      final k = mediaKind(u) ?? hints[u] ?? '';
+      if (k == 'm3u8') {
+        n = RegExp(r'/\d+x\d+/|avc1|mp4a|/vid/|/aud/').hasMatch(u) ? 11 : 10;
+      } else if (k == 'mpd') {
+        n = 20;
+      } else if (k == 'blob') {
+        n = 40;
+      } else {
+        n = 0;
+      }
+    }
+    return isNoise(u) ? n + 100 : n;
+  }
+
+  List<String> _dirSegs(String u) {
+    final p = Uri.tryParse(u);
+    if (p == null) return const [];
+    final s = p.pathSegments.toList();
+    if (s.isNotEmpty) s.removeLast();
+    return s;
+  }
+
+  double _pathScore(String cand, String seg) {
+    final a = Uri.tryParse(cand);
+    final b = Uri.tryParse(seg);
+    if (a == null || b == null || a.host != b.host) return 0;
+    final x = _dirSegs(cand);
+    final y = _dirSegs(seg);
+    var n = 0;
+    while (n < x.length && n < y.length && x[n] == y[n]) {
+      n++;
+    }
+    return n + 0.5;
+  }
+
+  // Şu an izlenen videonun linkini bulur.
+  Future<({String url, String why, bool strong})?> detectPlaying(
+      List<String> urls) async {
+    var src = '';
+    var poster = '';
+    try {
+      final r = await t.c
+          ?.evaluateJavascript(source: 'window.__cur&&window.__cur()');
+      if (r is Map) {
+        src = (r['src'] ?? '').toString();
+        poster = (r['poster'] ?? '').toString();
+      }
+    } catch (_) {}
+    if (src.isEmpty) src = t.playSrc;
+    if (poster.isEmpty) poster = t.playPoster;
+
+    // 1) Oynatıcı doğrudan http kaynağı kullanıyorsa kesin odur
+    if (src.startsWith('http') && !isNoise(src)) {
+      if (!urls.contains(src)) urls.add(src);
+      return (
+        url: src,
+        why: 'Oynatıcının doğrudan kaynağı',
+        strong: true
+      );
+    }
+
+    final cands = urls.where((u) => u.startsWith('http') && !isNoise(u)).toList();
+    if (cands.isEmpty) return null;
+
+    // 2) Kapak resmindeki ID, video linkinde de geçiyorsa (X, vb.)
+    final toks =
+        RegExp(r'\d{8,}').allMatches(poster).map((m) => m[0]!).toSet();
+    if (toks.isNotEmpty) {
+      final hit = cands.where((u) => toks.any(u.contains)).toList()
+        ..sort((a, b) => pref(a).compareTo(pref(b)));
+      if (hit.isNotEmpty) {
+        return (
+          url: hit.first,
+          why: 'Videonun kapak resmiyle eşleşti',
+          strong: true
+        );
+      }
+    }
+
+    // 3) Oynarken inen parçalar hangi listeye aitse o
+    final segs = t.segs.length > 12 ? t.segs.sublist(t.segs.length - 12) : t.segs;
+    if (segs.isNotEmpty) {
+      final score = <String, double>{};
+      for (final u in cands) {
+        var sc = 0.0;
+        for (var i = 0; i < segs.length; i++) {
+          sc += _pathScore(u, segs[i].$1) * (i + 1);
+        }
+        score[u] = sc;
+      }
+      final sorted = cands.toList()
+        ..sort((a, b) {
+          final d = score[b]!.compareTo(score[a]!);
+          return d != 0 ? d : pref(a).compareTo(pref(b));
+        });
+      final top = sorted.first;
+      if (score[top]! > 0) {
+        final topScore = score[top]!;
+        final tied = sorted.where((u) => score[u]! == topScore).toList();
+        final best = (tied..sort((a, b) => pref(a).compareTo(pref(b)))).first;
+        final unique = sorted.where((u) => score[u]! >= topScore).length == 1;
+        return (
+          url: best,
+          why: 'Oynarken inen video parçalarıyla eşleşti',
+          strong: unique
+        );
+      }
+    }
+
+    // 4) Oynatma başladığı sırada yakalanan linkler
+    if (t.playAt > 0) {
+      final recent = cands
+          .where((u) => (t.mediaAt[u] ?? 0) >= t.playAt - 4000)
+          .toList()
+        ..sort((a, b) => pref(a).compareTo(pref(b)));
+      if (recent.isNotEmpty) {
+        return (
+          url: recent.first,
+          why: 'Oynatma başlarken yakalandı (tahmin)',
+          strong: false
+        );
+      }
+    }
+    return null;
+  }
+
+  void copyLink(String u) {
+    Clipboard.setData(ClipboardData(text: u));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('Link kopyalandı')));
+  }
+
   Future<void> videoMenu() async {
     final cu = t.url.toLowerCase();
     if (cu.contains('youtube.com/watch') ||
@@ -720,40 +901,116 @@ class _BrowserState extends State<Browser> {
     };
     final urls = all
         .where((u) => u.startsWith('http') || u.startsWith('blob:'))
-        .toList()
-      ..sort((a, b) =>
-          (a.startsWith('blob:') ? 1 : 0) - (b.startsWith('blob:') ? 1 : 0));
+        .toList();
+    final best = await detectPlaying(urls);
+    final others = urls.where((u) => u != best?.url).toList()
+      ..sort((a, b) => pref(a).compareTo(pref(b)));
     if (!mounted) return;
     if (urls.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('Video bulunamadı. Videoyu oynatıp tekrar dene.')));
-    } else if (urls.length == 1) {
-      downloadVideo(urls.first);
-    } else {
-      showModalBottomSheet(
-        context: context,
-        builder: (ctx) => ListView(
-          children: [
-            for (final u in urls)
-              ListTile(
-                leading: Chip(label: Text((mediaKind(u) ?? hints[u] ?? 'VIDEO').toUpperCase())),
-                title: Text(u, maxLines: 2, overflow: TextOverflow.ellipsis),
-                trailing: const Icon(Icons.download),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  downloadVideo(u);
-                },
-                onLongPress: () {
-                  Clipboard.setData(ClipboardData(text: u));
-                  Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Link kopyalandı')));
-                },
-              ),
-          ],
-        ),
-      );
+      return;
     }
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: ConstrainedBox(
+          constraints:
+              BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.85),
+          child: ListView(
+            padding: const EdgeInsets.all(12),
+            children: [
+              if (best != null)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    border: Border.all(
+                        color: best.strong ? Colors.green : Colors.orange,
+                        width: 2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(children: [
+                        Icon(Icons.play_circle,
+                            color: best.strong ? Colors.green : Colors.orange),
+                        const SizedBox(width: 8),
+                        const Text('İZLEDİĞİN VİDEO',
+                            style: TextStyle(fontWeight: FontWeight.bold)),
+                      ]),
+                      const SizedBox(height: 4),
+                      Text(best.why,
+                          style: TextStyle(
+                              fontSize: 12,
+                              color:
+                                  best.strong ? Colors.green : Colors.orange)),
+                      const SizedBox(height: 8),
+                      SelectableText(best.url,
+                          style: const TextStyle(fontSize: 12)),
+                      const SizedBox(height: 8),
+                      Row(children: [
+                        Expanded(
+                          child: FilledButton.icon(
+                            icon: const Icon(Icons.download),
+                            label: const Text('İndir'),
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              downloadVideo(best.url);
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.copy),
+                            label: const Text('Linki kopyala'),
+                            onPressed: () => copyLink(best.url),
+                          ),
+                        ),
+                      ]),
+                    ],
+                  ),
+                )
+              else
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.orange, width: 2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text(
+                      'İzlenen video belirlenemedi. Videoyu oynat, birkaç saniye bekle ve tekrar dene. Aşağıdaki diğer bağlantılara da bakabilirsin.'),
+                ),
+              if (others.isNotEmpty) ...[
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(4, 16, 4, 4),
+                  child: Text('Sayfadaki diğer bağlantılar',
+                      style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+                for (final u in others)
+                  ListTile(
+                    leading: Chip(
+                        label: Text(
+                            (mediaKind(u) ?? hints[u] ?? 'VIDEO').toUpperCase())),
+                    title: Text(u, maxLines: 2, overflow: TextOverflow.ellipsis),
+                    trailing: const Icon(Icons.download),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      downloadVideo(u);
+                    },
+                    onLongPress: () {
+                      Navigator.pop(ctx);
+                      copyLink(u);
+                    },
+                  ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void showTabs() {
@@ -900,10 +1157,29 @@ class _BrowserState extends State<Browser> {
                             callback: (args) {
                               if (args.isEmpty) return null;
                               final u = args[0].toString();
-                              x.media.add(u);
+                              addMedia(x, u);
                               if (args.length > 1 && args[1] != null) {
                                 final k = args[1].toString();
                                 if (k.isNotEmpty) hints[u] = k;
+                              }
+                              return null;
+                            });
+                        c.addJavaScriptHandler(
+                            handlerName: 'seg',
+                            callback: (args) {
+                              if (args.isNotEmpty) addSeg(x, args[0].toString());
+                              return null;
+                            });
+                        c.addJavaScriptHandler(
+                            handlerName: 'playing',
+                            callback: (args) {
+                              if (args.isNotEmpty && args[0] is Map) {
+                                final m = args[0] as Map;
+                                final s = (m['src'] ?? '').toString();
+                                x.playSrc = s;
+                                x.playPoster = (m['poster'] ?? '').toString();
+                                x.playAt =
+                                    DateTime.now().millisecondsSinceEpoch;
                               }
                               return null;
                             });
@@ -918,10 +1194,19 @@ class _BrowserState extends State<Browser> {
                           downloadVideo(u);
                         }
                       },
-                      onLoadStart: (_, __) => x.media.clear(),
+                      onLoadStart: (_, __) {
+                        x.media.clear();
+                        x.mediaAt.clear();
+                        x.segs.clear();
+                        x.playSrc = '';
+                        x.playPoster = '';
+                        x.playAt = 0;
+                      },
                       onLoadResource: (_, res) {
                         final u = res.url?.toString();
-                        if (u != null && mediaKind(u) != null) x.media.add(u);
+                        if (u == null) return;
+                        if (mediaKind(u) != null) addMedia(x, u);
+                        if (_segRe.hasMatch(u)) addSeg(x, u);
                       },
                       onProgressChanged: (_, p) => x.progress.value = p / 100,
                       onTitleChanged: (_, title) => x.title = title ?? '',
