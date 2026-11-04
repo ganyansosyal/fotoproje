@@ -28,6 +28,14 @@ jobs:
 
       - run: flutter pub get
 
+      - name: inappwebview Proguard hatasini yamala
+        run: |
+          for f in $HOME/.pub-cache/hosted/pub.dev/flutter_inappwebview_android-*/android/build.gradle; do
+            echo "Yamalaniyor: $f"
+            sed -i "s/proguard-android\.txt/proguard-android-optimize.txt/g" "$f"
+            grep -n "proguard" "$f" || true
+          done
+
       - run: flutter build apk --release
 
       - uses: actions/upload-artifact@v4
