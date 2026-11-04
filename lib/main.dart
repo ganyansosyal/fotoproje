@@ -12,6 +12,7 @@ import 'package:gal/gal.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:xml/xml.dart';
+import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 final darkMode = ValueNotifier<bool>(true);
 const home = 'about:home';
@@ -29,13 +30,51 @@ const defaultSites = <List<String>>[
 
 const hookJs = r'''
 (function(){ if(window.__hk) return; window.__hk=1; window.__media=[];
- var re=/\.(m3u8|mpd|mp4|webm|mov|m4v|mkv|flv|3gp|ogv)(\?|#|\/|&|$)/i;
- function add(u){try{u=new URL(u,location.href).href;
-  if(re.test(u) && window.__media.indexOf(u)<0) window.__media.push(u);}catch(e){}}
+ var re=/\.(m3u8|mpd|mp4|webm|mov|m4v|mkv|flv|3gp|ogv|avi|wmv)(\?|#|\/|&|$)/i;
+ var rx=/https?:(?:\\?\/){2}[^"'\s<>()\\]+?\.(?:m3u8|mpd|mp4|webm|mov|m4v|mkv|flv|3gp|ogv|avi|wmv)(?:\?[^"'\s<>()\\]*)?/gi;
+ var seen={};
+ function send(u,k){ try{u=new URL(u,location.href).href;}catch(e){return}
+  if(!/^(https?|blob):/.test(u)||seen[u]) return; seen[u]=1; window.__media.push(u);
+  try{window.flutter_inappwebview.callHandler('media',u,k||'');}catch(e){} }
+ function add(u){ if(u && re.test(String(u))) send(u); }
+ function ctype(ct,u){ ct=(ct||'').toLowerCase();
+  if(ct.indexOf('mpegurl')>-1){send(u,'m3u8');return true}
+  if(ct.indexOf('dash+xml')>-1){send(u,'mpd');return true}
+  if(ct.indexOf('video/')===0){send(u,'mp4');return true}
+  return false; }
+ function scan(t){ if(!t||t.length>3000000) return;
+  t=t.replace(/\\\//g,'/').replace(/\\u0026/g,'&').replace(/&amp;/g,'&');
+  var m=t.match(rx); if(m) m.forEach(function(u){add(u)}); }
+ function dom(){ try{
+  document.querySelectorAll('video,audio,source,embed').forEach(function(e){
+   var u=e.currentSrc||e.src; if(u) send(u); });
+  document.querySelectorAll('a[href]').forEach(function(a){ add(a.href); });
+  document.querySelectorAll('meta[property^="og:video"],meta[name^="twitter:player:stream"]').forEach(function(m){
+   var c=m.getAttribute('content'); if(c) add(c); });
+  scan(document.documentElement.innerHTML);
+ }catch(e){} }
  var o=XMLHttpRequest.prototype.open;
- XMLHttpRequest.prototype.open=function(m,u){add(u);return o.apply(this,arguments)};
+ XMLHttpRequest.prototype.open=function(m,u){ add(u); var x=this;
+  try{ x.addEventListener('load',function(){ try{
+   var ct=x.getResponseHeader('content-type')||'';
+   if(ctype(ct,x.responseURL||u)) return;
+   var rt=x.responseType;
+   if((rt===''||rt==='text')&&/json|text|javascript|xml/i.test(ct)) scan(x.responseText);
+  }catch(e){} }); }catch(e){}
+  return o.apply(this,arguments)};
  var f=window.fetch;
- if(f) window.fetch=function(i){add(typeof i==='string'?i:(i&&i.url));return f.apply(this,arguments)};
+ if(f) window.fetch=function(i){ var u=typeof i==='string'?i:(i&&i.url); add(u);
+  var p=f.apply(this,arguments);
+  p.then(function(res){ try{
+   var ct=res.headers.get('content-type')||'';
+   if(ctype(ct,res.url||u)) return;
+   if(/json|text|javascript|xml/i.test(ct)) res.clone().text().then(scan).catch(function(){});
+  }catch(e){} }).catch(function(){});
+  return p; };
+ document.addEventListener('play',dom,true);
+ document.addEventListener('DOMContentLoaded',dom);
+ window.addEventListener('load',dom);
+ var n=0; var iv=setInterval(function(){dom(); if(++n>30) clearInterval(iv)},2000);
 })();
 ''';
 
@@ -45,7 +84,7 @@ String? mediaKind(String u) {
   if (l.contains('.m3u8')) return 'm3u8';
   if (l.contains('.mpd')) return 'mpd';
   final path = (Uri.tryParse(u)?.path ?? l).toLowerCase();
-  return RegExp(r'\.(mp4|webm|mov|m4v|mkv|flv|3gp|ogv)$')
+  return RegExp(r'\.(mp4|webm|mov|m4v|mkv|flv|3gp|ogv|avi|wmv)$')
       .firstMatch(path)
       ?.group(1);
 }
@@ -157,6 +196,7 @@ class _BrowserState extends State<Browser> {
   final tc = TextEditingController(text: '');
   List<String> bookmarks = [];
   SharedPreferences? prefs;
+  final Map<String, String> hints = {};
 
   TabData get t => tabs[cur];
 
@@ -579,7 +619,7 @@ class _BrowserState extends State<Browser> {
     try {
       final dir = await getTemporaryDirectory();
       final ts = DateTime.now().millisecondsSinceEpoch;
-      final kind = mediaKind(url) ?? 'mp4';
+      final kind = mediaKind(url) ?? hints[url] ?? 'mp4';
       final streamLike = kind == 'm3u8' || kind == 'mpd' || kind == 'blob';
       final path = '${dir.path}/video_$ts.${streamLike ? 'mp4' : kind}';
       final apath = '${dir.path}/ses_$ts.m4a';
@@ -616,7 +656,55 @@ class _BrowserState extends State<Browser> {
     }
   }
 
+  Future<void> downloadYoutube(String url) async {
+    final m = ScaffoldMessenger.of(context);
+    final prog = ValueNotifier<String>('YouTube hazırlanıyor...');
+    m.hideCurrentSnackBar();
+    m.showSnackBar(SnackBar(
+      content: ValueListenableBuilder<String>(
+          valueListenable: prog, builder: (_, v, __) => Text(v)),
+      duration: const Duration(minutes: 30),
+    ));
+    final yt = YoutubeExplode();
+    try {
+      final manifest =
+          await yt.videos.streamsClient.getManifest(VideoId(url));
+      final s = manifest.muxed.withHighestBitrate();
+      final dir = await getTemporaryDirectory();
+      final path = '${dir.path}/yt_${DateTime.now().millisecondsSinceEpoch}.mp4';
+      final sink = File(path).openWrite();
+      final total = s.size.totalBytes;
+      var got = 0;
+      try {
+        await for (final c in yt.videos.streamsClient.get(s)) {
+          got += c.length;
+          sink.add(c);
+          prog.value = total > 0
+              ? 'İndiriliyor: %${got * 100 ~/ total}'
+              : 'İndiriliyor: ${(got / 1048576).toStringAsFixed(1)} MB';
+        }
+      } finally {
+        await sink.close();
+      }
+      final msg = await saveFile(path);
+      m.hideCurrentSnackBar();
+      m.showSnackBar(SnackBar(content: Text(msg)));
+    } catch (e) {
+      m.hideCurrentSnackBar();
+      m.showSnackBar(SnackBar(content: Text('İndirilemedi: $e')));
+    } finally {
+      yt.close();
+    }
+  }
+
   Future<void> videoMenu() async {
+    final cu = t.url.toLowerCase();
+    if (cu.contains('youtube.com/watch') ||
+        cu.contains('youtube.com/shorts') ||
+        cu.contains('youtu.be/')) {
+      downloadYoutube(t.url);
+      return;
+    }
     final r = await t.c?.evaluateJavascript(source: """
       (function(){var r=[];
         document.querySelectorAll('video,audio,source').forEach(function(e){
@@ -648,12 +736,18 @@ class _BrowserState extends State<Browser> {
           children: [
             for (final u in urls)
               ListTile(
-                leading: Chip(label: Text((mediaKind(u) ?? '?').toUpperCase())),
+                leading: Chip(label: Text((mediaKind(u) ?? hints[u] ?? 'VIDEO').toUpperCase())),
                 title: Text(u, maxLines: 2, overflow: TextOverflow.ellipsis),
                 trailing: const Icon(Icons.download),
                 onTap: () {
                   Navigator.pop(ctx);
                   downloadVideo(u);
+                },
+                onLongPress: () {
+                  Clipboard.setData(ClipboardData(text: u));
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Link kopyalandı')));
                 },
               ),
           ],
@@ -773,7 +867,8 @@ class _BrowserState extends State<Browser> {
                         UserScript(
                             source: hookJs,
                             injectionTime:
-                                UserScriptInjectionTime.AT_DOCUMENT_START),
+                                UserScriptInjectionTime.AT_DOCUMENT_START,
+                            forMainFrameOnly: false),
                       ]),
                       initialUrlRequest: x.url == home
                           ? null
@@ -798,7 +893,21 @@ class _BrowserState extends State<Browser> {
                         useOnDownloadStart: true,
                         useHybridComposition: false,
                       ),
-                      onWebViewCreated: (c) => x.c = c,
+                      onWebViewCreated: (c) {
+                        x.c = c;
+                        c.addJavaScriptHandler(
+                            handlerName: 'media',
+                            callback: (args) {
+                              if (args.isEmpty) return null;
+                              final u = args[0].toString();
+                              x.media.add(u);
+                              if (args.length > 1 && args[1] != null) {
+                                final k = args[1].toString();
+                                if (k.isNotEmpty) hints[u] = k;
+                              }
+                              return null;
+                            });
+                      },
                       onDownloadStartRequest: (_, req) {
                         final u = req.url.toString();
                         final mt = (req.mimeType ?? '').toLowerCase();
