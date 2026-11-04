@@ -899,6 +899,156 @@ class _BrowserState extends State<Browser> {
     return null;
   }
 
+  static const _ua =
+      'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36';
+
+  // Uygulamanın kendi ağıyla linki dener (tarayıcı kısıtı / CORS yok)
+  Future<String> probe(String url) async {
+    final dio = Dio();
+    final h = {'Referer': t.url, 'User-Agent': _ua};
+    final b = StringBuffer();
+    Future<Response<String>> get(String u) => dio.get<String>(u,
+        options: Options(
+            headers: h,
+            responseType: ResponseType.plain,
+            validateStatus: (_) => true,
+            receiveTimeout: const Duration(seconds: 20),
+            sendTimeout: const Duration(seconds: 20)));
+    try {
+      final r = await get(url);
+      final code = r.statusCode ?? 0;
+      b.writeln('Liste isteği: HTTP $code');
+      if (code != 200 && code != 206) {
+        if (code == 403) {
+          b.writeln('✘ 403: Link süresi dolmuş ya da engellenmiş. Yeni link kopyala ve hemen dene.');
+        } else if (code == 404 || code == 410) {
+          b.writeln('✘ $code: Link artık yok (yayın bitmiş olabilir).');
+        } else {
+          b.writeln('✘ Link açılmadı.');
+        }
+        return b.toString();
+      }
+      final body = (r.data ?? '').trim();
+      if (!body.startsWith('#EXTM3U')) {
+        final ct = r.headers.value('content-type') ?? '';
+        if (ct.startsWith('video/')) {
+          b.writeln('✔ Doğrudan video dosyası ($ct).');
+        } else {
+          final head = body.length > 80 ? body.substring(0, 80) : body;
+          b.writeln('✘ Beklenmeyen içerik: $head');
+        }
+        return b.toString();
+      }
+      var lines = body.split('\n').map((e) => e.trim()).toList();
+      var base = Uri.parse(url);
+      final vars = <String>[];
+      String? first;
+      for (var i = 0; i < lines.length; i++) {
+        if (!lines[i].startsWith('#EXT-X-STREAM-INF')) continue;
+        final res = _attr(lines[i], 'RESOLUTION') ?? '?';
+        final bw = int.tryParse(_attr(lines[i], 'BANDWIDTH') ?? '') ?? 0;
+        vars.add('$res, ${bw ~/ 1000} kbps');
+        var j = i + 1;
+        while (j < lines.length && (lines[j].isEmpty || lines[j].startsWith('#'))) {
+          j++;
+        }
+        if (first == null && j < lines.length) first = lines[j];
+      }
+      if (vars.isNotEmpty) {
+        b.writeln('Ana liste açıldı, ${vars.length} kalite:');
+        for (final v in vars) {
+          b.writeln(' - $v');
+        }
+        if (first != null) {
+          base = base.resolve(first);
+          final r2 = await get(base.toString());
+          b.writeln('Kalite listesi: HTTP ${r2.statusCode}');
+          lines = (r2.data ?? '').split('\n').map((e) => e.trim()).toList();
+        }
+      }
+      final segs =
+          lines.where((l) => l.isNotEmpty && !l.startsWith('#')).toList();
+      final live = !lines.contains('#EXT-X-ENDLIST');
+      b.writeln('${segs.length} parça var, ${live ? 'canlı yayın' : 'kayıt (bitmiş)'}.');
+      if (segs.isEmpty) {
+        b.writeln('✘ Parça bulunamadı.');
+        return b.toString();
+      }
+      final sr = await dio.get<List<int>>(base.resolve(segs.first).toString(),
+          options: Options(
+              headers: {...h, 'Range': 'bytes=0-2047'},
+              responseType: ResponseType.bytes,
+              validateStatus: (_) => true,
+              receiveTimeout: const Duration(seconds: 20)));
+      final sc = sr.statusCode ?? 0;
+      b.writeln('İlk parça: HTTP $sc, ${sr.data?.length ?? 0} bayt');
+      if (sc == 200 || sc == 206) {
+        b.writeln('✔ Link çalışıyor, uygulama indirebilir.');
+      } else {
+        b.writeln('✘ Parçalar inmedi.');
+      }
+    } catch (e) {
+      b.writeln('✘ Bağlantı hatası: $e');
+    }
+    return b.toString();
+  }
+
+  Future<void> testLink(String url) async {
+    if (url.isEmpty) return;
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const AlertDialog(
+          content: Row(children: [
+        CircularProgressIndicator(),
+        SizedBox(width: 16),
+        Expanded(child: Text('Link test ediliyor...')),
+      ])),
+    );
+    final res = await probe(url);
+    if (!mounted) return;
+    Navigator.of(context, rootNavigator: true).pop();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Test sonucu'),
+        content: SingleChildScrollView(child: SelectableText(res)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Kapat')),
+        ],
+      ),
+    );
+  }
+
+  Future<void> testDialog() async {
+    var clip = '';
+    try {
+      clip = (await Clipboard.getData('text/plain'))?.text?.trim() ?? '';
+    } catch (_) {}
+    final c = TextEditingController(text: clip.startsWith('http') ? clip : '');
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Link test'),
+        content: TextField(
+            controller: c,
+            maxLines: 5,
+            decoration: const InputDecoration(hintText: 'Linki yapıştır')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Kapat')),
+          FilledButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                testLink(c.text.trim());
+              },
+              child: const Text('Test et')),
+        ],
+      ),
+    );
+  }
+
   void copyLink(String u) {
     Clipboard.setData(ClipboardData(text: u));
     ScaffoldMessenger.of(context)
@@ -1001,6 +1151,15 @@ class _BrowserState extends State<Browser> {
                           ),
                         ),
                       ]),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.fact_check),
+                          label: const Text('Linki test et'),
+                          onPressed: () => testLink(best.url),
+                        ),
+                      ),
                     ],
                   ),
                 )
@@ -1281,6 +1440,7 @@ class _BrowserState extends State<Browser> {
                   if (v == 'bm') toggleBookmark();
                   if (v == 'list') showBookmarks();
                   if (v == 'video') videoMenu();
+                  if (v == 'test') testDialog();
                   if (v == 'dark') {
                     darkMode.value = !darkMode.value;
                     prefs?.setBool('dark', darkMode.value);
@@ -1293,6 +1453,7 @@ class _BrowserState extends State<Browser> {
                   const PopupMenuItem(value: 'list', child: Text('Yer imleri')),
                   const PopupMenuItem(
                       value: 'video', child: Text('Videoyu indir')),
+                  const PopupMenuItem(value: 'test', child: Text('Link test')),
                   const PopupMenuItem(
                       value: 'dark', child: Text('Karanlık / açık mod')),
                 ],
