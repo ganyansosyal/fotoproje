@@ -729,11 +729,21 @@ class _BrowserState extends State<Browser> {
       m.hideCurrentSnackBar();
       m.showSnackBar(SnackBar(content: Text(msg)));
     } catch (e) {
+      String? live;
+      try {
+        live = await yt.videos.streamsClient.getHttpLiveStreamUrl(VideoId(url));
+      } catch (_) {}
       m.hideCurrentSnackBar();
-      m.showSnackBar(const SnackBar(
-          content: Text(
-              'YouTube doğrudan vermedi, sayfadaki bağlantılar deneniyor. Video oynarken menüyü aç.')));
-      await videoMenu(skipYt: true);
+      if (live != null) {
+        await videoMenu(
+            skipYt: true,
+            forced: (url: live, why: 'YouTube canlı yayın linki (HLS)', strong: true));
+      } else {
+        m.showSnackBar(const SnackBar(
+            content: Text(
+                'YouTube doğrudan vermedi, sayfadaki bağlantılar deneniyor. Video oynarken menüyü aç.')));
+        await videoMenu(skipYt: true);
+      }
     } finally {
       yt.close();
     }
@@ -895,7 +905,9 @@ class _BrowserState extends State<Browser> {
         .showSnackBar(const SnackBar(content: Text('Link kopyalandı')));
   }
 
-  Future<void> videoMenu({bool skipYt = false}) async {
+  Future<void> videoMenu(
+      {bool skipYt = false,
+      ({String url, String why, bool strong})? forced}) async {
     final cu = t.url.toLowerCase();
     if (!skipYt &&
         (cu.contains('youtube.com/watch') ||
@@ -920,7 +932,8 @@ class _BrowserState extends State<Browser> {
     final urls = all
         .where((u) => u.startsWith('http') || u.startsWith('blob:'))
         .toList();
-    final best = await detectPlaying(urls);
+    if (forced != null && !urls.contains(forced.url)) urls.add(forced.url);
+    final best = forced ?? await detectPlaying(urls);
     final others = urls.where((u) => u != best?.url).toList()
       ..sort((a, b) => pref(a).compareTo(pref(b)));
     if (!mounted) return;
