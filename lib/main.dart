@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 
@@ -22,6 +23,17 @@ const defaultSites = <List<String>>[
   ['GitHub', 'https://github.com'],
   ['Vikipedi', 'https://tr.wikipedia.org'],
 ];
+
+const hookJs = r'''
+(function(){ if(window.__hk) return; window.__hk=1; window.__m3u8=[];
+ function add(u){try{u=new URL(u,location.href).href;
+  if(u.indexOf('.m3u8')>-1 && window.__m3u8.indexOf(u)<0) window.__m3u8.push(u);}catch(e){}}
+ var o=XMLHttpRequest.prototype.open;
+ XMLHttpRequest.prototype.open=function(m,u){add(u);return o.apply(this,arguments)};
+ var f=window.fetch;
+ if(f) window.fetch=function(i){add(typeof i==='string'?i:(i&&i.url));return f.apply(this,arguments)};
+})();
+''';
 
 String shown(String u) => u == home ? '' : u;
 String norm(String? u, String fallback) {
@@ -180,17 +192,100 @@ class _BrowserState extends State<Browser> {
     prefs?.setStringList('bm', bookmarks);
   }
 
+  Future<void> downloadHls(
+      String url, String path, ValueNotifier<String> prog) async {
+    final dio = Dio();
+    final h = {'Referer': t.url};
+    Future<String> text(String u) async => (await dio.get<String>(u,
+            options: Options(headers: h, responseType: ResponseType.plain)))
+        .data!;
+    Future<List<int>> bytes(Uri u) async {
+      for (var k = 0;; k++) {
+        try {
+          final r = await dio.get<List<int>>(u.toString(),
+              options: Options(headers: h, responseType: ResponseType.bytes));
+          return r.data!;
+        } catch (e) {
+          if (k >= 2) rethrow;
+        }
+      }
+    }
+
+    var pl = url;
+    var body = await text(pl);
+    var lines = body.split('\n').map((e) => e.trim()).toList();
+    String? best;
+    var bw = -1;
+    for (var i = 0; i < lines.length; i++) {
+      if (!lines[i].startsWith('#EXT-X-STREAM-INF')) continue;
+      final m = RegExp(r'BANDWIDTH=(\d+)').firstMatch(lines[i]);
+      final b = int.tryParse(m?.group(1) ?? '') ?? 0;
+      var j = i + 1;
+      while (j < lines.length && (lines[j].isEmpty || lines[j].startsWith('#'))) {
+        j++;
+      }
+      if (j < lines.length && b > bw) {
+        bw = b;
+        best = lines[j];
+      }
+    }
+    if (best != null) {
+      pl = Uri.parse(pl).resolve(best).toString();
+      body = await text(pl);
+      lines = body.split('\n').map((e) => e.trim()).toList();
+    }
+    final base = Uri.parse(pl);
+    Uri? init;
+    final segs = <Uri>[];
+    for (final l in lines) {
+      if (l.startsWith('#EXT-X-KEY') && !l.contains('METHOD=NONE')) {
+        throw 'Şifreli yayın desteklenmiyor';
+      }
+      if (l.startsWith('#EXT-X-MAP')) {
+        final m = RegExp(r'URI="([^"]+)"').firstMatch(l);
+        if (m != null) init = base.resolve(m.group(1)!);
+      } else if (l.isNotEmpty && !l.startsWith('#')) {
+        segs.add(base.resolve(l));
+      }
+    }
+    if (segs.isEmpty) throw 'Video parçaları bulunamadı';
+    final sink = File(path).openWrite();
+    try {
+      if (init != null) sink.add(await bytes(init));
+      for (var i = 0; i < segs.length; i += 4) {
+        final end = i + 4 < segs.length ? i + 4 : segs.length;
+        final parts = await Future.wait([
+          for (var j = i; j < end; j++) bytes(segs[j]),
+        ]);
+        for (final p in parts) {
+          sink.add(p);
+        }
+        prog.value = 'İndiriliyor: parça $end/${segs.length}';
+      }
+    } finally {
+      await sink.close();
+    }
+  }
+
   Future<void> downloadVideo(String url) async {
     final m = ScaffoldMessenger.of(context);
+    final prog = ValueNotifier<String>('Video indiriliyor...');
     m.hideCurrentSnackBar();
-    m.showSnackBar(const SnackBar(
-        content: Text('Video indiriliyor...'), duration: Duration(minutes: 10)));
+    m.showSnackBar(SnackBar(
+      content: ValueListenableBuilder<String>(
+          valueListenable: prog, builder: (_, v, __) => Text(v)),
+      duration: const Duration(minutes: 30),
+    ));
     try {
       final dir = await getTemporaryDirectory();
       final path =
           '${dir.path}/video_${DateTime.now().millisecondsSinceEpoch}.mp4';
-      await Dio().download(url, path,
-          options: Options(headers: {'Referer': t.url}));
+      if (url.contains('.m3u8')) {
+        await downloadHls(url, path, prog);
+      } else {
+        await Dio().download(url, path,
+            options: Options(headers: {'Referer': t.url}));
+      }
       await Gal.putVideo(path);
       File(path).delete().ignore();
       m.hideCurrentSnackBar();
@@ -203,18 +298,21 @@ class _BrowserState extends State<Browser> {
 
   Future<void> videoMenu() async {
     final r = await t.c?.evaluateJavascript(source: """
-      Array.from(document.querySelectorAll('video,source'))
-        .map(e => e.currentSrc || e.src).filter(u => u && u.startsWith('http'))
+      (function(){var r=[];
+        document.querySelectorAll('video,source').forEach(function(e){
+          var u=e.currentSrc||e.src; if(u) r.push(u)});
+        (window.__m3u8||[]).forEach(function(u){r.push(u)});
+        return r;})()
     """);
     final urls = <String>{
       if (r is List)
         for (final u in r)
-          if (u is String && !u.contains('.m3u8')) u
+          if (u is String && u.startsWith('http')) u
     }.toList();
     if (!mounted) return;
     if (urls.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('İndirilebilir video bulunamadı (blob/akış desteklenmiyor)')));
+          content: Text('İndirilebilir video bulunamadı (blob veya şifreli yayın olabilir)')));
     } else if (urls.length == 1) {
       downloadVideo(urls.first);
     } else {
@@ -344,6 +442,12 @@ class _BrowserState extends State<Browser> {
               x.opened
                   ? InAppWebView(
                       key: ObjectKey(x),
+                      initialUserScripts: UnmodifiableListView<UserScript>([
+                        UserScript(
+                            source: hookJs,
+                            injectionTime:
+                                UserScriptInjectionTime.AT_DOCUMENT_START),
+                      ]),
                       initialUrlRequest: x.url == home
                           ? null
                           : URLRequest(url: WebUri(x.url)),
@@ -365,6 +469,7 @@ class _BrowserState extends State<Browser> {
                         useWideViewPort: true,
                         allowsInlineMediaPlayback: true,
                         useOnDownloadStart: true,
+                        useHybridComposition: false,
                       ),
                       onWebViewCreated: (c) => x.c = c,
                       onDownloadStartRequest: (_, req) {
