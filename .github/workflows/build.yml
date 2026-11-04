@@ -26,6 +26,11 @@ jobs:
         run: |
           sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' android/app/src/main/AndroidManifest.xml
 
+      - name: Skia motoruna gec (Impeller kapali)
+        run: |
+          sed -i 's#</application>#    <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false"/>\n    </application>#' android/app/src/main/AndroidManifest.xml
+          grep -n "Impeller" android/app/src/main/AndroidManifest.xml
+
       - run: flutter pub get
 
       - name: inappwebview Proguard hatasini yamala
