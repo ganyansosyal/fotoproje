@@ -340,7 +340,7 @@ class _BrowserState extends State<Browser> {
   Future<bool> downloadHls(String url, String path, String audioPath,
       ValueNotifier<String> prog) async {
     final dio = Dio();
-    final h = {'Referer': t.url};
+    final h = await webHeaders();
     Future<String> text(String u) async => (await dio.get<String>(u,
             options: Options(headers: h, responseType: ResponseType.plain)))
         .data!;
@@ -475,7 +475,7 @@ class _BrowserState extends State<Browser> {
 
   Future<bool> downloadDash(String url, String path, String audioPath,
       ValueNotifier<String> prog) async {
-    final h = {'Referer': t.url};
+    final h = await webHeaders();
     final txt = (await Dio().get<String>(url,
             options: Options(headers: h, responseType: ResponseType.plain)))
         .data!;
@@ -657,14 +657,31 @@ class _BrowserState extends State<Browser> {
         await downloadBlob(url, path);
       } else {
         await Dio().download(url, path,
-            options: Options(headers: {'Referer': t.url}),
+            options: Options(headers: await webHeaders()),
             onReceiveProgress: (r, tot) {
           prog.value = tot > 0
               ? 'İndiriliyor: %${r * 100 ~/ tot}'
               : 'İndiriliyor: ${(r / 1048576).toStringAsFixed(1)} MB';
         });
       }
-      var msg = await saveFile(path);
+      String msg;
+      if (sepAudio) {
+        final outp = '${dir.path}/merged_$ts.mp4';
+        try {
+          prog.value = 'Video ve ses birleştiriliyor...';
+          await const MethodChannel('mux').invokeMethod(
+              'merge', {'video': path, 'audio': apath, 'out': outp});
+          File(path).delete().ignore();
+          File(apath).delete().ignore();
+          msg = await saveFile(outp);
+          sepAudio = false;
+        } catch (e) {
+          msg = await saveFile(path);
+          msg += '\nBirleştirilemedi ($e)';
+        }
+      } else {
+        msg = await saveFile(path);
+      }
       if (sepAudio) {
         final d = await getExternalStorageDirectory() ??
             await getApplicationDocumentsDirectory();
@@ -902,10 +919,31 @@ class _BrowserState extends State<Browser> {
   static const _ua =
       'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36';
 
+  String? _uaCache;
+  // Sayfadaki gerçek tarayıcı gibi görünen başlıklar
+  Future<Map<String, String>> webHeaders() async {
+    if (_uaCache == null) {
+      try {
+        final r = await t.c?.evaluateJavascript(source: 'navigator.userAgent');
+        if (r is String && r.isNotEmpty) _uaCache = r;
+      } catch (_) {}
+      _uaCache ??= _ua;
+    }
+    final u = Uri.tryParse(t.url);
+    final origin = (u != null && u.hasScheme && u.host.isNotEmpty)
+        ? '${u.scheme}://${u.host}'
+        : '';
+    return {
+      'User-Agent': _uaCache!,
+      if (origin.isNotEmpty) 'Referer': '$origin/',
+      if (origin.isNotEmpty) 'Origin': origin,
+    };
+  }
+
   // Uygulamanın kendi ağıyla linki dener (tarayıcı kısıtı / CORS yok)
   Future<String> probe(String url) async {
     final dio = Dio();
-    final h = {'Referer': t.url, 'User-Agent': _ua};
+    final h = await webHeaders();
     final b = StringBuffer();
     Future<Response<String>> get(String u) => dio.get<String>(u,
         options: Options(
@@ -974,18 +1012,35 @@ class _BrowserState extends State<Browser> {
         b.writeln('✘ Parça bulunamadı.');
         return b.toString();
       }
-      final sr = await dio.get<List<int>>(base.resolve(segs.first).toString(),
-          options: Options(
-              headers: {...h, 'Range': 'bytes=0-2047'},
-              responseType: ResponseType.bytes,
-              validateStatus: (_) => true,
-              receiveTimeout: const Duration(seconds: 20)));
-      final sc = sr.statusCode ?? 0;
-      b.writeln('İlk parça: HTTP $sc, ${sr.data?.length ?? 0} bayt');
-      if (sc == 200 || sc == 206) {
-        b.writeln('✔ Link çalışıyor, uygulama indirebilir.');
+      final segUrl = base.resolve(segs.first).toString();
+      Future<int> segTry(Map<String, String> hh) async {
+        final sr = await dio.get<List<int>>(segUrl,
+            options: Options(
+                headers: hh,
+                responseType: ResponseType.bytes,
+                validateStatus: (_) => true,
+                receiveTimeout: const Duration(seconds: 25)));
+        return sr.statusCode ?? 0;
+      }
+
+      final variants = <String, Map<String, String>>{
+        'tarayıcı başlıkları': h,
+        'Range ile': {...h, 'Range': 'bytes=0-'},
+        'sadece User-Agent': {'User-Agent': h['User-Agent'] ?? _ua},
+      };
+      var okName = '';
+      for (final e in variants.entries) {
+        final c = await segTry(e.value);
+        b.writeln('İlk parça (${e.key}): HTTP $c');
+        if (c == 200 || c == 206) {
+          okName = e.key;
+          break;
+        }
+      }
+      if (okName.isNotEmpty) {
+        b.writeln('✔ Link çalışıyor ($okName ile). Uygulama indirebilir.');
       } else {
-        b.writeln('✘ Parçalar inmedi.');
+        b.writeln('✘ Parçalar hiçbir yöntemle inmedi.');
       }
     } catch (e) {
       b.writeln('✘ Bağlantı hatası: $e');
