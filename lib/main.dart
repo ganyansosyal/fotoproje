@@ -690,10 +690,24 @@ class _BrowserState extends State<Browser> {
           valueListenable: prog, builder: (_, v, __) => Text(v)),
       duration: const Duration(minutes: 30),
     ));
-    final yt = YoutubeExplode();
+    var yt = YoutubeExplode();
     try {
-      final manifest =
-          await yt.videos.streamsClient.getManifest(VideoId(url));
+      StreamManifest? manifest;
+      Object? lastErr;
+      for (var k = 0; k < 3 && manifest == null; k++) {
+        try {
+          if (k > 0) {
+            prog.value = 'YouTube tekrar deneniyor ($k/2)...';
+            yt.close();
+            yt = YoutubeExplode();
+            await Future.delayed(const Duration(seconds: 1));
+          }
+          manifest = await yt.videos.streamsClient.getManifest(VideoId(url));
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      if (manifest == null) throw lastErr ?? 'YouTube yanıt vermedi';
       final s = manifest.muxed.withHighestBitrate();
       final dir = await getTemporaryDirectory();
       final path = '${dir.path}/yt_${DateTime.now().millisecondsSinceEpoch}.mp4';
@@ -716,7 +730,10 @@ class _BrowserState extends State<Browser> {
       m.showSnackBar(SnackBar(content: Text(msg)));
     } catch (e) {
       m.hideCurrentSnackBar();
-      m.showSnackBar(SnackBar(content: Text('İndirilemedi: $e')));
+      m.showSnackBar(const SnackBar(
+          content: Text(
+              'YouTube doğrudan vermedi, sayfadaki bağlantılar deneniyor. Video oynarken menüyü aç.')));
+      await videoMenu(skipYt: true);
     } finally {
       yt.close();
     }
@@ -878,11 +895,12 @@ class _BrowserState extends State<Browser> {
         .showSnackBar(const SnackBar(content: Text('Link kopyalandı')));
   }
 
-  Future<void> videoMenu() async {
+  Future<void> videoMenu({bool skipYt = false}) async {
     final cu = t.url.toLowerCase();
-    if (cu.contains('youtube.com/watch') ||
+    if (!skipYt &&
+        (cu.contains('youtube.com/watch') ||
         cu.contains('youtube.com/shorts') ||
-        cu.contains('youtu.be/')) {
+        cu.contains('youtu.be/'))) {
       downloadYoutube(t.url);
       return;
     }
