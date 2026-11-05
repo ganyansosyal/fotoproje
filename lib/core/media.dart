@@ -105,6 +105,15 @@ const hookJs = r'''
 ''';
 
 
+/// Dikey kaydırmayı öncelikli yapar (pinch-zoom açık kalır); dokunma gecikmesini azaltır.
+const touchJs = r'''
+(function(){ if(window.__ta) return; window.__ta=1;
+ try{ var st=document.createElement('style');
+  st.textContent='html{touch-action:pan-y pinch-zoom}html::before{content:"";display:block;height:62px}';
+  (document.head||document.documentElement).appendChild(st); }catch(e){}
+})();
+''';
+
 /// Kaydırma yönünü bildirir (üst barı gizlemek/göstermek için).
 /// Yalnızca yön değişince Flutter'a haber verir; kare başına mesaj yok.
 const scrollJs = r'''
