@@ -51,7 +51,7 @@ class _BrowserPageState extends State<BrowserPage>
   // Üst bar kaydırınca gizlensin mi? Gizleme, sayfanın boyutunu/konumunu
   // kaydırma sırasında değiştirdiği için takılma yapar. false: bar sabit, sayfa
   // kaydırma sırasında hiç yeniden yerleşmez (en akıcı).
-  static const bool _autoHideBar = true;
+  static const bool _autoHideBar = false;
   static const double _barH = 62; // üst bar yüksekliği (60 + 2 ilerleme çizgisi)
   // Üst bar sayfanın üstüne biner; kaplamalar barın altından başlar
   double get _top => (section == 0 && barShown) ? _barH : 0;
@@ -746,7 +746,7 @@ class _BrowserPageState extends State<BrowserPage>
               final show = args[0].toString() != 'down';
               final now = DateTime.now();
               // Çok sık açılıp kapanmasın
-              if (now.difference(_lastBarToggle).inMilliseconds < 700) {
+              if (now.difference(_lastBarToggle).inMilliseconds < 500) {
                 return null;
               }
               if (show != barShown && !focus.hasFocus) {
@@ -946,9 +946,7 @@ class _BrowserPageState extends State<BrowserPage>
                               // Sayfa (platform görünümü) animasyonla kaydırılmaz:
                               // her karede yeniden konumlandırmak takılma ve
                               // bulanıklık yapar. Tek karede yer değiştirir.
-                              AnimatedPositioned(
-                                duration: const Duration(milliseconds: 380),
-                                curve: Curves.easeInOutCubic,
+                              Positioned(
                                 left: 0,
                                 right: 0,
                                 top: barShown ? _barH : 0,
@@ -959,8 +957,8 @@ class _BrowserPageState extends State<BrowserPage>
                                 ),
                               ),
                               AnimatedPositioned(
-                                duration: const Duration(milliseconds: 380),
-                                curve: Curves.easeInOutCubic,
+                                duration: const Duration(milliseconds: 180),
+                                curve: Curves.easeOutCubic,
                                 left: 0,
                                 right: 0,
                                 top: barShown ? 0 : -_barH,
@@ -1131,8 +1129,8 @@ class _BrowserPageState extends State<BrowserPage>
           ),
         ),
         // Alt çubuk klavyeyle birlikte yukarı kaymaz (takılma yapıyordu):
-        // adres düzenlerken yerinde durur, klavye üstüne kayıp onu örter;
-        // sayfadaki bir alana yazarken ise klavye açıkken gizlenir.
+        // adres düzenlerken klavyenin arkasında sabit kalır, sayfadaki bir
+        // alana yazarken ise klavye açıkken gizlenir.
         bottomNavigationBar: _KbHide(
             editing: editing || _hold,
             child: ListenableBuilder(
@@ -1187,8 +1185,8 @@ class _BrowserPageState extends State<BrowserPage>
 }
 
 /// Alt çubuk klavyeyle hiç kaymaz ve hiçbir şeyi yeniden boyutlandırmaz.
-/// - Adres düzenlerken: çubuk yerinde görünür kalır, klavye açılırken/kapanırken
-///   üstüne kayıp onu örter (sayfa ve çubuk oynamaz).
+/// - Adres düzenlerken: çubuk anında görünmez olur ama yeri korunur
+///   (sayfa/WebView boyutu değişmez; klavye üstüne kayarken çubuk görünmez).
 /// - Sayfadaki bir alana yazarken: klavye açıkken tek seferde gizlenir.
 class _KbHide extends StatelessWidget {
   final Widget child;
@@ -1197,7 +1195,15 @@ class _KbHide extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!editing && MediaQuery.viewInsetsOf(context).bottom > 0) {
+    if (editing) {
+      return Visibility(
+          visible: false,
+          maintainSize: true,
+          maintainState: true,
+          maintainAnimation: true,
+          child: child);
+    }
+    if (MediaQuery.viewInsetsOf(context).bottom > 0) {
       return const SizedBox.shrink();
     }
     return child;
