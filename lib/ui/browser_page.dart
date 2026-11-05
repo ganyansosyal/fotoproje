@@ -66,7 +66,7 @@ class _BrowserPageState extends State<BrowserPage>
   // Üst bar kaydırınca gizlensin mi? Sayfa (WebView) hiç taşınmaz/boyutlanmaz;
   // bar bağımsız olarak sayfanın üstünde kayar (GPU, sadece bar yeniden çizilir).
   // Sorun çıkarsa false yapmak eski sabit bara döndürür.
-  static const bool _autoHideBar = false;
+  static const bool _autoHideBar = true;
   static const double _barH = 54; // üst bar yüksekliği (52 + 2 ilerleme çizgisi)
   // 1 = bar görünür, 0 = gizli. Sadece barı yeniden çizer.
   late final AnimationController _barAnim = AnimationController(
@@ -229,6 +229,26 @@ class _BrowserPageState extends State<BrowserPage>
     }
   }
 
+  // Aynı anda en fazla bu kadar canlı WebView tutulur (düşük RAM'de takılmayı önler)
+  static const int _maxLive = 4;
+
+  void _trimTabs() {
+    final live = tabs.where((x) => !x.frozen).length;
+    if (live <= _maxLive) return;
+    final cand = tabs
+        .where((x) => !x.frozen && x != t && x.windowId == null)
+        .toList()
+      ..sort((a, b) => a.used.compareTo(b.used));
+    var extra = live - _maxLive;
+    for (final x in cand) {
+      if (extra <= 0) break;
+      x.frozen = true;
+      x.c = null;
+      x.loading.value = false;
+      extra--;
+    }
+  }
+
   void selectTab(int i) {
     if (i == cur) {
       setState(() => panelOpen = false);
@@ -237,6 +257,9 @@ class _BrowserPageState extends State<BrowserPage>
     final old = t;
     setState(() {
       cur = i;
+      tabs[i].frozen = false;
+      tabs[i].used = DateTime.now();
+      _trimTabs();
       panelOpen = false;
       section = 0;
       barShown = true;
@@ -256,6 +279,7 @@ class _BrowserPageState extends State<BrowserPage>
       cur = tabs.length - 1;
       panelOpen = false;
       section = 0;
+      _trimTabs();
     });
     try {
       old.c?.pause();
@@ -277,6 +301,8 @@ class _BrowserPageState extends State<BrowserPage>
           cur--;
         }
       }
+      t.frozen = false;
+      t.used = DateTime.now();
       // WebView widget'ı kaldırılmadan önce dispose etme (çökme olmasın)
       WidgetsBinding.instance.addPostFrameCallback((_) => removed.dispose());
     });
@@ -615,7 +641,10 @@ class _BrowserPageState extends State<BrowserPage>
         verticalScrollBarEnabled: false,
         horizontalScrollBarEnabled: false,
         transparentBackground: false,
-        userAgent: _mobileUa,
+        userAgent: x.desktop ? _desktopUa : _mobileUa,
+        preferredContentMode: x.desktop
+            ? UserPreferredContentMode.DESKTOP
+            : UserPreferredContentMode.MOBILE,
         contentBlockers: _blockers(),
       ),
       onWebViewCreated: (c) {
@@ -694,6 +723,7 @@ class _BrowserPageState extends State<BrowserPage>
           tabs.add(nt);
           cur = tabs.length - 1;
           section = 0;
+          _trimTabs();
         });
         return true;
       },
@@ -874,7 +904,10 @@ class _BrowserPageState extends State<BrowserPage>
                                 height: (_autoHideBar || fullScreen) ? h : h - _barH,
                                 child: IndexedStack(
                                   index: cur,
-                                  children: [for (final x in tabs) _webView(x)],
+                                  children: [
+                                    for (final x in tabs)
+                                      x.frozen ? const SizedBox.shrink() : _webView(x)
+                                  ],
                                 ),
                               ),
                               if (!fullScreen)
