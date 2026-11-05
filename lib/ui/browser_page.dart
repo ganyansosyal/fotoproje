@@ -45,6 +45,7 @@ class _BrowserPageState extends State<BrowserPage>
   bool panelOpen = false;
   bool _dark = false;
   bool barShown = true; // üst bar (kaydırınca gizlenir)
+  DateTime _lastBarToggle = DateTime.fromMillisecondsSinceEpoch(0);
   MediaInfo? _bannerInfo;
   bool _bannerOn = false;
   Timer? _bannerTimer;
@@ -648,9 +649,9 @@ class _BrowserPageState extends State<BrowserPage>
         mixedContentMode: MixedContentMode.MIXED_CONTENT_COMPATIBILITY_MODE,
         // Akıcılık: hybrid composition = yerel WebView (dokunma/kaydırma doğrudan sisteme gider)
         useHybridComposition: true,
-        // Açık temada siteler koyu çizilmesin (sayfa beyaz kalsın)
-        forceDark: _dark ? ForceDark.AUTO : ForceDark.OFF,
-        algorithmicDarkeningAllowed: _dark,
+        // Performans: sayfaları zorla koyulaştırma (kaydırmayı çok yavaşlatır)
+        forceDark: ForceDark.OFF,
+        algorithmicDarkeningAllowed: false,
         overScrollMode: OverScrollMode.NEVER,
         verticalScrollBarEnabled: false,
         horizontalScrollBarEnabled: false,
@@ -674,7 +675,13 @@ class _BrowserPageState extends State<BrowserPage>
             callback: (args) {
               if (x != t || section != 0 || args.isEmpty || !mounted) return null;
               final show = args[0].toString() != 'down';
+              final now = DateTime.now();
+              // Çok sık açılıp kapanmasın
+              if (now.difference(_lastBarToggle).inMilliseconds < 600) {
+                return null;
+              }
               if (show != barShown && !focus.hasFocus) {
+                _lastBarToggle = now;
                 setState(() => barShown = show);
               }
               return null;
