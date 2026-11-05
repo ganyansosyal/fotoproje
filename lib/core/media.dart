@@ -1,61 +1,91 @@
 // Video algılama scripti ve akış (HLS/DASH) yardımcıları.
 
 const hookJs = r'''
-(function(){ if(window.__hk) return; window.__hk=1; window.__media=[];
- var EXT='m3u8|mpd|mp4|webm|mov|m4v|mkv|flv|3gp|ogv|avi|wmv';
- var re=new RegExp('\\.('+EXT+')(\\?|#|\\/|&|$)','i');
- var quick=new RegExp('\\.('+EXT+')','i');
- var rx=new RegExp('https?:(?:\\\\?\\/){2}[^"\'\\s<>()\\\\]+?\\.(?:'+EXT+')(?:\\?[^"\'\\s<>()\\\\]*)?','gi');
- var seen={};
- function send(u,k){ try{u=new URL(u,location.href).href;}catch(e){return}
-  if(!/^(https?|blob):/.test(u)||seen[u]) return; seen[u]=1; window.__media.push(u);
-  try{window.flutter_inappwebview.callHandler('media',u,k||'');}catch(e){} }
- function add(u){ if(u && re.test(String(u))) send(u); }
- function ctype(ct,u){ ct=(ct||'').toLowerCase();
-  if(ct.indexOf('mpegurl')>-1){send(u,'m3u8');return true}
-  if(ct.indexOf('dash+xml')>-1){send(u,'mpd');return true}
-  if(ct.indexOf('video/')===0){send(u,'mp4');return true}
-  return false; }
- function scan(t,max){ if(!t||t.length>(max||250000)) return;
-  if(!quick.test(t)) return;
-  t=t.replace(/\\\//g,'/').replace(/\\u0026/g,'&').replace(/&amp;/g,'&');
-  var m=t.match(rx); if(m) m.forEach(function(u){add(u)}); }
- var busy=false, again=false;
- function dom(){ if(busy){again=true;return} busy=true;
-  var run=function(){ try{
-   document.querySelectorAll('video,audio,source,embed').forEach(function(e){
-    var u=e.currentSrc||e.src; if(u) send(u); });
-   document.querySelectorAll('meta[property^="og:video"],meta[name^="twitter:player:stream"]').forEach(function(m){
-    var c=m.getAttribute('content'); if(c) add(c); });
-   var h=document.documentElement.innerHTML; scan(h,1500000);
-  }catch(e){} busy=false; if(again){again=false; setTimeout(dom,1500)} };
-  if(window.requestIdleCallback) requestIdleCallback(run,{timeout:2500}); else setTimeout(run,50); }
- var o=XMLHttpRequest.prototype.open;
- XMLHttpRequest.prototype.open=function(m,u){ add(u); var x=this;
-  try{ x.addEventListener('load',function(){ try{
-   var ct=x.getResponseHeader('content-type')||'';
-   if(ctype(ct,x.responseURL||u)) return;
-   var rt=x.responseType;
-   if((rt===''||rt==='text')&&/json|text|javascript|xml/i.test(ct)) scan(x.responseText);
-  }catch(e){} }); }catch(e){}
-  return o.apply(this,arguments)};
+(function(){ if(window.__hk) return; window.__hk=1;
+ // YouTube'u uygulama kendi yöntemiyle indirir; orada kanca gereksiz ve yavaştır.
+ if(/(^|\.)(youtube\.com|youtube-nocookie\.com|googlevideo\.com)$/.test(location.hostname)) return;
+ var ID=Math.random().toString(36).slice(2);
+ var RE=/\.(m3u8|mpd|mp4|webm|mov|m4v|mkv|flv|3gp|ogv|avi|wmv)(\?|#|\/|&|$)/i;
+ // Reklam, izleyici, önizleme ve küçük resim adresleri aday değildir.
+ var BAD=/(doubleclick|googlesyndication|googleadservices|imasdk|adservice|adsystem|adnxs|adsrvr|taboola|outbrain|[\/_.-]ads?[\/_.-]|[\/_.-]advert|adserver|preroll|midroll|[\/_.-]vast[\/_.?-]|vpaid|tracking|beacon|analytics|thumb|sprite|storyboard|preview)/i;
+ // Parça (segment) adresleri tam video değildir.
+ var SEGN=/((seg|segment|chunk|frag|fragment)[-_.]?\d|^init[-_.])/i;
+ var SEGQ=/[?&](bytestart|byterange|range|sq|seg|segment|chunk)=/i;
+ var cand=[];
+ function norm(u){ try{u=new URL(String(u),location.href).href;}catch(e){return ''} return /^https?:/i.test(u)?u:''; }
+ function good(u){ if(!u||BAD.test(u)||SEGQ.test(u)) return false;
+  var p=u.split('#')[0].split('?')[0]; return !SEGN.test(p.substring(p.lastIndexOf('/')+1)); }
+ // Adaylar sadece kaydedilir; Flutter'a oynatıcı açılınca bildirilir.
+ function note(u,k){ u=norm(u); if(!u||!good(u)) return; var now=Date.now();
+  for(var i=0;i<cand.length;i++){ if(cand[i].u===u){ cand[i].t=now; if(k&&!cand[i].k) cand[i].k=k; poke(); return; } }
+  cand.push({u:u,k:k||'',t:now}); if(cand.length>60) cand.shift(); poke(); }
+ function ctype(c,u,cr,cl){ c=(c||'').toLowerCase(); if(!u) return;
+  if(c.indexOf('mpegurl')>-1){ note(u,'m3u8'); return; }
+  if(c.indexOf('dash+xml')>-1){ note(u,'mpd'); return; }
+  if(c.indexOf('video/')===0){ var tot=0, m=cr&&/\/(\d+)\s*$/.exec(cr); if(m) tot=+m[1];
+   if(!tot) tot=parseInt(cl||'0',10)||0; if(tot>=3000000) note(u,'mp4'); } }
+ var xo=XMLHttpRequest.prototype.open;
+ XMLHttpRequest.prototype.open=function(m,u){ var x=this;
+  try{ if(RE.test(String(u))) note(u);
+   x.addEventListener('load',function(){ try{
+    ctype(x.getResponseHeader('content-type'),x.responseURL||u,x.getResponseHeader('content-range'),x.getResponseHeader('content-length'));
+   }catch(e){} }); }catch(e){}
+  return xo.apply(this,arguments)};
  var f=window.fetch;
- if(f) window.fetch=function(i){ var u=typeof i==='string'?i:(i&&i.url); add(u);
+ if(f) window.fetch=function(i){ var u=typeof i==='string'?i:(i&&i.url);
+  try{ if(u&&RE.test(String(u))) note(u); }catch(e){}
   var p=f.apply(this,arguments);
-  p.then(function(res){ try{
-   var ct=res.headers.get('content-type')||'';
-   if(ctype(ct,res.url||u)) return;
-   var len=parseInt(res.headers.get('content-length')||'0',10);
-   if(len>250000) return;
-   if(/json|text|javascript|xml/i.test(ct)) res.clone().text().then(function(t){scan(t)}).catch(function(){});
+  p.then(function(r){ try{
+   ctype(r.headers.get('content-type'),r.url||u,r.headers.get('content-range'),r.headers.get('content-length'));
   }catch(e){} }).catch(function(){});
   return p; };
- var pt=0;
- document.addEventListener('play',function(){ var n=Date.now(); if(n-pt>1500){pt=n; dom();} },true);
- window.addEventListener('load',function(){ setTimeout(dom,800); });
- setTimeout(dom,3000); setTimeout(dom,8000); setTimeout(dom,16000);
+
+ // ---- Oynatıcı takibi: yalnızca gerçekten oynayan video raporlanır ----
+ var act=null, wd=0, ft=0, last='', t0=new WeakMap();
+ function alive(v){ if(!v||!v.isConnected) return false;
+  var r=v.getBoundingClientRect(); if(r.width<=0||r.height<=0) return false;
+  var cs=getComputedStyle(v); return cs.visibility!=='hidden'&&cs.display!=='none'; }
+ function qual(v){ if(!alive(v)) return false;
+  var r=v.getBoundingClientRect(); if(r.width<200||r.height<110) return false;
+  var d=v.duration; if(isFinite(d)&&d<10) return false;
+  if(v.loop&&(!isFinite(d)||d<180)) return false;
+  return true; }
+ function send(o){ o.id=ID; try{window.flutter_inappwebview.callHandler('player',JSON.stringify(o));}catch(e){} }
+ function stop(){ if(!act) return; act=null; last=''; if(wd){clearInterval(wd);wd=0;} send({stop:true}); }
+ function sched(ms){ if(ft) return; ft=setTimeout(report,ms||500); }
+ function poke(){ if(act) sched(700); }
+ function report(){ ft=0; var v=act; if(!v) return;
+  if(!alive(v)){ stop(); return; }
+  var d=v.duration; if(isNaN(d)){ sched(600); return; }
+  if(!qual(v)) return;
+  var live=!isFinite(d), src=v.currentSrc||'', urls=[], hints={}, i;
+  var direct=/^https?:/i.test(src)&&good(src);
+  if(direct){ urls=[src]; }
+  else{
+   // Bu videonun yüklenmesinden kısa süre önce/sonra istenen adresler
+   var from=(t0.get(v)||(Date.now()-120000))-30000;
+   for(i=0;i<cand.length;i++){ if(cand[i].t>=from){ urls.push(cand[i].u); if(cand[i].k) hints[cand[i].u]=cand[i].k; } }
+   urls=urls.slice(-12);
+   if(!urls.length&&/^blob:/i.test(src)) urls=[src];
+  }
+  var o={d:live?0:Math.round(d*10)/10, live:live, w:v.videoWidth||0, h:v.videoHeight||0,
+   src:direct?src:'', ref:location.href, urls:urls, hints:hints};
+  var s=JSON.stringify(o); if(s===last) return; last=s; send(o); }
+ function onEv(e){ var v=e.target; if(!v||v.tagName!=='VIDEO') return; var t=e.type;
+  if(t==='loadstart'){ t0.set(v,Date.now()); if(v===act) last=''; return; }
+  if(t==='emptied'||t==='abort'){ if(v===act) stop(); return; }
+  if(t==='durationchange'||t==='loadedmetadata'){ if(v===act){ last=''; sched(400); return; } if(v.paused) return; }
+  if(!qual(v)) return;
+  if(act!==v){ act=v; last=''; }
+  if(!wd) wd=setInterval(function(){ if(act&&!alive(act)) stop(); },2000);
+  sched(300);
+  setTimeout(function(){ if(act===v) sched(10); },2500);
+  setTimeout(function(){ if(act===v) sched(10); },6000); }
+ ['loadstart','playing','durationchange','loadedmetadata','emptied','abort'].forEach(function(n){
+  document.addEventListener(n,onEv,true); });
 })();
 ''';
+
 
 /// Kaydırma yönünü bildirir (üst barı gizlemek/göstermek için).
 /// Yalnızca yön değişince Flutter'a haber verir; kare başına mesaj yok.
