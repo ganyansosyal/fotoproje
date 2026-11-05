@@ -41,18 +41,29 @@ class BrowserPage extends StatefulWidget {
 }
 
 class _BrowserPageState extends State<BrowserPage>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   final List<TabData> tabs = [TabData(homeUrl)];
   int cur = 0;
   int section = 0; // 0 sekme, 1 ilerleme, 2 bitti
   bool panelOpen = false;
   bool _dark = false;
   bool barShown = true; // üst bar (kaydırınca gizlenir)
-  // Üst bar kaydırınca gizlensin mi? Gizleme, sayfanın boyutunu/konumunu
-  // kaydırma sırasında değiştirdiği için takılma yapar. false: bar sabit, sayfa
-  // kaydırma sırasında hiç yeniden yerleşmez (en akıcı).
-  static const bool _autoHideBar = false;
-  static const double _barH = 62; // üst bar yüksekliği (60 + 2 ilerleme çizgisi)
+  // Üst bar kaydırınca gizlensin mi? Sayfa (WebView) hiç taşınmaz/boyutlanmaz;
+  // bar bağımsız olarak sayfanın üstünde kayar (GPU, sadece bar yeniden çizilir).
+  // Sorun çıkarsa false yapmak eski sabit bara döndürür.
+  static const bool _autoHideBar = true;
+  static const double _barH = 54; // üst bar yüksekliği (52 + 2 ilerleme çizgisi)
+  // 1 = bar görünür, 0 = gizli. Sadece barı yeniden çizer.
+  late final AnimationController _barAnim = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 180), value: 1);
+  double _barTarget = 1;
+  void _syncBar() {
+    final want = barShown ? 1.0 : 0.0;
+    if (want == _barTarget) return;
+    _barTarget = want;
+    _barAnim.animateTo(want, curve: Curves.easeOutCubic);
+  }
+
   // Üst bar sayfanın üstüne biner; kaplamalar barın altından başlar
   double get _top => (section == 0 && barShown) ? _barH : 0;
   final _meter = PerfMeter();
@@ -131,6 +142,7 @@ class _BrowserPageState extends State<BrowserPage>
     s.removeListener(_onSettings);
     _bannerTimer?.cancel();
     _meter.stop();
+    _barAnim.dispose();
     tc.dispose();
     focus.dispose();
     for (final x in tabs) {
@@ -654,6 +666,9 @@ class _BrowserPageState extends State<BrowserPage>
   }
 
   Widget _webView(TabData x) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _syncBar();
+    });
     final fresh = x.windowId == null;
     return InAppWebView(
       key: ObjectKey(x),
@@ -667,6 +682,21 @@ class _BrowserPageState extends State<BrowserPage>
             source: viewportJs,
             injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
             forMainFrameOnly: true),
+        // Sayfa hep tam boyda; bar altında kalan üst boşluk sayfa içinden verilir
+        // (sayfayla birlikte kayıp gider, WebView hiç oynamaz)
+        if (_autoHideBar)
+          UserScript(
+              source: '(function(){var H=${_barH.toInt()};function a(){'
+                  'var sw=screen.width||window.innerWidth||360;'
+                  'var r=Math.max(1,(window.innerWidth||sw)/sw);'
+                  'var e=document.documentElement; if(!e) return;'
+                  'if(location.href.indexOf("$homeBase")===0) return;'
+                  'e.style.setProperty("box-sizing","border-box","important");'
+                  'e.style.setProperty("padding-top",(H*r)+"px","important");}'
+                  'a(); window.addEventListener("resize",a);'
+                  'document.addEventListener("DOMContentLoaded",a);})();',
+              injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+              forMainFrameOnly: true),
         // Kaydırma dinleyicisi yalnızca bar gizleme açıkken eklenir
         if (_autoHideBar)
           UserScript(
@@ -757,7 +787,9 @@ class _BrowserPageState extends State<BrowserPage>
               }
               if (show != barShown && !focus.hasFocus) {
                 _lastBarToggle = now;
-                setState(() => barShown = show);
+                barShown = show;
+                _syncBar();
+                if (_bannerOn) setState(() {});
               }
               return null;
             });
@@ -955,21 +987,28 @@ class _BrowserPageState extends State<BrowserPage>
                               Positioned(
                                 left: 0,
                                 right: 0,
-                                top: barShown ? _barH : 0,
+                                top: _autoHideBar ? 0 : _barH,
                                 height: _autoHideBar ? h : h - _barH,
                                 child: IndexedStack(
                                   index: cur,
                                   children: [for (final x in tabs) _webView(x)],
                                 ),
                               ),
-                              AnimatedPositioned(
-                                duration: const Duration(milliseconds: 180),
-                                curve: Curves.easeOutCubic,
+                              Positioned(
                                 left: 0,
                                 right: 0,
-                                top: barShown ? 0 : -_barH,
+                                top: 0,
                                 height: _barH,
-                                child: _topBar(cs),
+                                child: RepaintBoundary(
+                                  child: AnimatedBuilder(
+                                    animation: _barAnim,
+                                    builder: (_, c) => Transform.translate(
+                                        offset: Offset(
+                                            0, -_barH * (1 - _barAnim.value)),
+                                        child: c),
+                                    child: _topBar(cs),
+                                  ),
+                                ),
                               ),
                             ],
                           );
@@ -1152,6 +1191,7 @@ class _BrowserPageState extends State<BrowserPage>
             onDestinationSelected: (i) => setState(() {
               section = i;
               panelOpen = false;
+              barShown = true; // sekmeye dönünce bar görünür olsun
             }),
             destinations: [
               NavigationDestination(
