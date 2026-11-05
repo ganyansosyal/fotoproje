@@ -51,7 +51,7 @@ class App extends StatelessWidget {
       onSurface: light ? const Color(0xFF202124) : const Color(0xFFE8EAED),
     );
     final bold = TextStyle(
-        fontWeight: FontWeight.w700, fontSize: 17, color: cs.onSurface);
+        fontWeight: FontWeight.w600, fontSize: 15, color: cs.onSurface);
     return ThemeData(
       useMaterial3: true,
       colorScheme: cs,
@@ -64,7 +64,7 @@ class App extends StatelessWidget {
       splashFactory: InkSparkle.splashFactory,
       textTheme: ThemeData(brightness: b).textTheme.copyWith(
             titleLarge: TextStyle(
-                fontWeight: FontWeight.w800, fontSize: 26, color: cs.onSurface),
+                fontWeight: FontWeight.w700, fontSize: 22, color: cs.onSurface),
           ),
       cardTheme: CardThemeData(
         color: white,
@@ -116,17 +116,17 @@ class App extends StatelessWidget {
         backgroundColor: white,
         surfaceTintColor: Colors.transparent,
         shadowColor: Colors.black,
-        elevation: 6,
+        elevation: 2,
         indicatorColor: cs.primaryContainer,
         labelTextStyle: WidgetStateProperty.resolveWith((st) => TextStyle(
             fontWeight:
-                st.contains(WidgetState.selected) ? FontWeight.w800 : FontWeight.w700,
-            fontSize: 12.5,
+                st.contains(WidgetState.selected) ? FontWeight.w700 : FontWeight.w500,
+            fontSize: 11,
             color: st.contains(WidgetState.selected)
                 ? cs.primary
                 : cs.onSurface.withValues(alpha: .72))),
         iconTheme: WidgetStateProperty.resolveWith((st) => IconThemeData(
-            size: 25,
+            size: 22,
             color: st.contains(WidgetState.selected)
                 ? cs.primary
                 : cs.onSurface.withValues(alpha: .72))),
