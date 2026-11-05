@@ -92,10 +92,8 @@ List<ContentBlocker> buildContentBlockers({bool ads = true, bool fast = false}) 
     trigger: ContentBlockerTrigger(urlFilter: '.*($alt).*'),
     action: ContentBlockerAction(type: ContentBlockerActionType.BLOCK),
   ));
-  list.add(ContentBlocker(
-    trigger: ContentBlockerTrigger(urlFilter: '.*'),
-    action: ContentBlockerAction(
-        type: ContentBlockerActionType.CSS_DISPLAY_NONE, selector: _hideCss),
-  ));
+  // Not: Sayfadaki reklam kutularını gizleyen CSS kuralı (_hideCss) kaydırma
+  // akıcılığı için kapatıldı: [class*=...] seçicileri her sayfada, her yeniden
+  // çizimde tüm öğelere karşı denenir. Ağ seviyesindeki engelleme sürüyor.
   return list;
 }
