@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/media.dart';
 import '../core/strings.dart';
+import '../services/probe.dart';
 import 'tab_data.dart';
 
 const _green = Color(0xFF1E9E4A);
