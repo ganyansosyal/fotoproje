@@ -127,6 +127,13 @@ jobs:
           sed -i 's#</application>#    <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false"/>\n    </application>#' android/app/src/main/AndroidManifest.xml
           grep -n "Impeller" android/app/src/main/AndroidManifest.xml
 
+      - name: Yerel tema her zaman acik (WebView sistemin koyu modunu almasin)
+        run: |
+          for f in android/app/src/main/res/values*/styles.xml; do
+            [ -f "$f" ] && sed -i 's#Theme\.Black\.NoTitleBar#Theme.Light.NoTitleBar#g; s#Theme\.DeviceDefault\.NoActionBar#Theme.DeviceDefault.Light.NoActionBar#g' "$f"
+          done
+          cat android/app/src/main/res/values*/styles.xml || true
+
       - run: flutter pub get
 
       - name: inappwebview Proguard hatasini yamala
