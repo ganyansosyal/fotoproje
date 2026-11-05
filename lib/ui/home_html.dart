@@ -2,6 +2,19 @@ import 'dart:convert';
 
 import '../core/settings.dart';
 import '../core/strings.dart';
+import '../services/fav_icons.dart';
+
+/// Ana sayfadaki sitelerin alan adları (logoları önceden indirmek için).
+List<String> homeHosts(AppSettings s) {
+  final out = <String>[];
+  for (final e in s.homeSites()) {
+    var u = e[1].trim();
+    if (!u.contains('://')) u = 'https://$u';
+    final h = Uri.tryParse(u)?.host ?? '';
+    if (h.isNotEmpty) out.add(h);
+  }
+  return out;
+}
 
 /// Ana sayfa (yeni sekme) HTML'i. WebView içinde, arka plan titremesi olmaması
 /// için tema rengiyle birebir aynı zeminle çizilir.
@@ -17,8 +30,13 @@ String buildHomeHtml(AppSettings s, bool dark) {
     var u = e[1].trim();
     if (!u.contains('://')) u = 'https://$u';
     final host = Uri.tryParse(u)?.host ?? '';
+    // Önbellekte logo varsa doğrudan gömülür: ağ yok, boş daire yok, titreme yok.
+    final cached = FavIcons.i.get(host);
+    final img = cached != null
+        ? '<img class="lg ok" width="32" height="32" alt="" src="$cached">'
+        : '<img class="lg" width="32" height="32" alt="" data-h="${esc.convert(host)}">';
     tiles.write('<a class="t" href="${esc.convert(u)}">'
-        '<div class="i"><img class="lg" alt="" data-h="${esc.convert(host)}"></div>'
+        '<div class="i">$img</div>'
         '<span>${esc.convert(name)}</span></a>');
   }
   tiles.write('<a class="t" href="#" id="addfav">'
@@ -41,7 +59,9 @@ background:$card;color:$fg;font-size:16px;outline:none}
 .t:active{transform:scale(.92)}
 .i{width:56px;height:56px;border-radius:50%;margin:0 auto 6px;background:$card;overflow:hidden;
 display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:600}
-.i img{width:32px;height:32px;object-fit:contain}
+.i img{width:32px;height:32px;object-fit:contain;opacity:0;transition:opacity .18s}
+.i img.ok,.i img.show{opacity:1}
+.i img.ok{transition:none}
 .t span{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style></head><body>
 <h1>${esc.convert(S.t('home'))}</h1><p>${esc.convert(S.t('favHint'))}</p>
@@ -50,12 +70,12 @@ display:flex;align-items:center;justify-content:center;font-size:28px;font-weigh
 <script>
 var base=$base;
 var globe='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#9aa0a6" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></svg>');
-document.querySelectorAll('img.lg').forEach(function(im){
+document.querySelectorAll('img.lg:not(.ok)').forEach(function(im){
  var h=im.getAttribute('data-h'), k=0;
  var src=['https://www.google.com/s2/favicons?domain='+h+'&sz=128','https://icons.duckduckgo.com/ip3/'+h+'.ico','https://'+h+'/favicon.ico'];
  function next(){ im.src = k<src.length ? src[k++] : globe; }
  im.onerror=function(){ if(im.src!==globe) next(); };
- im.onload=function(){ if(im.src.indexOf('s2/favicons')>0 && im.naturalWidth<=16) next(); };
+ im.onload=function(){ if(im.src.indexOf('s2/favicons')>0 && im.naturalWidth<=16){ next(); return; } im.classList.add('show'); };
  if(!h){ im.src=globe; } else { next(); }
 });
 function H(n,a,b){try{window.flutter_inappwebview.callHandler(n,a,b)}catch(e){}}

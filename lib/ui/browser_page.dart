@@ -12,7 +12,7 @@ import '../core/media.dart';
 import '../core/settings.dart';
 import '../core/strings.dart';
 import '../services/download_manager.dart';
-import '../services/net_filter.dart';
+import '../services/fav_icons.dart';
 import '../services/probe.dart';
 import 'perf_meter.dart';
 import 'downloads_pages.dart';
@@ -48,6 +48,9 @@ class _BrowserPageState extends State<BrowserPage>
   bool panelOpen = false;
   bool _dark = false;
   bool barShown = true; // üst bar (kaydırınca gizlenir)
+  static const double _barH = 62; // üst bar yüksekliği (60 + 2 ilerleme çizgisi)
+  // Üst bar sayfanın üstüne biner; kaplamalar barın altından başlar
+  double get _top => (section == 0 && barShown) ? _barH : 0;
   final _meter = PerfMeter();
   bool _meterOn = false;
   DateTime _lastBarToggle = DateTime.fromMillisecondsSinceEpoch(0);
@@ -70,16 +73,7 @@ class _BrowserPageState extends State<BrowserPage>
   @override
   void initState() {
     super.initState();
-    _lastAds = '${s.blockAds}|${s.fastMode}';
-    NetClassifier.instance.onMedia = (id, url, kind) {
-      for (final x in tabs) {
-        if (x.id == id) {
-          x.addNet(url, kind);
-          if (x.playerId != null) _scheduleProbe(x);
-          break;
-        }
-      }
-    };
+    _lastAds = '${s.blockAds}';
     s.addListener(_onSettings);
     WidgetsBinding.instance.addObserver(this);
     focus.addListener(() {
@@ -133,7 +127,6 @@ class _BrowserPageState extends State<BrowserPage>
     s.removeListener(_onSettings);
     _bannerTimer?.cancel();
     _meter.stop();
-    NetClassifier.instance.onMedia = null;
     tc.dispose();
     focus.dispose();
     for (final x in tabs) {
@@ -144,24 +137,22 @@ class _BrowserPageState extends State<BrowserPage>
 
   // ---------------------------------------------------------------- ayarlar
 
-  List<ContentBlocker> _blockers() => (s.blockAds || s.fastMode)
-      ? buildContentBlockers(ads: s.blockAds, fast: s.fastMode)
-      : <ContentBlocker>[];
+  List<ContentBlocker> _blockers() =>
+      s.blockAds ? buildContentBlockers(ads: true) : <ContentBlocker>[];
 
   void _onSettings() {
-    final adKey = '${s.blockAds}|${s.fastMode}';
+    final adKey = '${s.blockAds}';
     if (adKey != _lastAds) {
       _lastAds = adKey;
       for (final x in tabs) {
         x.c?.setSettings(
-            settings: InAppWebViewSettings(
-                contentBlockers: _blockers(),
-                useShouldInterceptRequest: s.fastMode));
+            settings: InAppWebViewSettings(contentBlockers: _blockers()));
       }
     }
     final key = '${s.lang}|${s.recentSites}|${s.engine}|${s.bookmarks.length}';
     if (key != _lastKey) {
       _lastKey = key;
+      FavIcons.i.ensure(homeHosts(s));
       _refreshHomeTabs();
     }
   }
@@ -173,8 +164,8 @@ class _BrowserPageState extends State<BrowserPage>
   }
 
   void _loadHome(TabData x) {
-    x.c?.loadData(
-        data: buildHomeHtml(s, _dark), baseUrl: WebUri(homeBase));
+    x.homeHtml = buildHomeHtml(s, _dark);
+    x.c?.loadData(data: x.homeHtml!, baseUrl: WebUri(homeBase));
   }
 
   // ---------------------------------------------------------------- gezinme
@@ -672,7 +663,9 @@ class _BrowserPageState extends State<BrowserPage>
           : null,
       initialData: fresh && x.url == homeUrl
           ? InAppWebViewInitialData(
-              data: buildHomeHtml(s, _dark), baseUrl: WebUri(homeBase))
+              // Her yeniden çizimde HTML tekrar üretilmesin
+              data: x.homeHtml ??= buildHomeHtml(s, _dark),
+              baseUrl: WebUri(homeBase))
           : null,
       initialSettings: InAppWebViewSettings(
         javaScriptEnabled: true,
@@ -705,7 +698,6 @@ class _BrowserPageState extends State<BrowserPage>
         transparentBackground: false,
         userAgent: _mobileUa,
         contentBlockers: _blockers(),
-        useShouldInterceptRequest: s.fastMode,
       ),
       onWebViewCreated: (c) {
         x.c = c;
@@ -736,7 +728,7 @@ class _BrowserPageState extends State<BrowserPage>
               final show = args[0].toString() != 'down';
               final now = DateTime.now();
               // Çok sık açılıp kapanmasın
-              if (now.difference(_lastBarToggle).inMilliseconds < 600) {
+              if (now.difference(_lastBarToggle).inMilliseconds < 250) {
                 return null;
               }
               if (show != barShown && !focus.hasFocus) {
@@ -801,7 +793,10 @@ class _BrowserPageState extends State<BrowserPage>
       },
       onLoadStart: (_, u) {
         x.clearMedia();
-        x.loading.value = true;
+        final u0 = u?.toString() ?? '';
+        final internal = u0.startsWith('about:blank') ||
+            u0.startsWith('https://home.local');
+        x.loading.value = !internal;
         if (x == t && mounted) {
           if (!barShown || _bannerOn) {
             setState(() {
@@ -825,15 +820,6 @@ class _BrowserPageState extends State<BrowserPage>
           if (!focus.hasFocus) tc.text = shownUrl(nu);
           if (changed && mounted) setState(() {});
         }
-      },
-      shouldInterceptRequest: (_, req) async {
-        if (!s.fastMode) return null;
-        if (req.isForMainFrame ?? false) return null;
-        final u = req.url.toString();
-        if (!u.startsWith('http')) return null;
-        if (shouldBlockUrl(u)) return blockedResponse;
-        NetClassifier.instance.submit(x.id, u); // sınıflandırma isolate'ta
-        return null;
       },
       onLoadStop: (_, u) {
         x.loading.value = false;
@@ -920,12 +906,9 @@ class _BrowserPageState extends State<BrowserPage>
           bottom: false,
           child: Column(
             children: [
-              if (section == 0)
-                // Animasyonsuz: WebView her karede yeniden boyutlanmasın
-                barShown
-                    ? _topBar(cs)
-                    : const SizedBox(width: double.infinity)
-              else
+              // Üst bar sayfayı yeniden boyutlandırmaz: sayfa sabit boyutta kalır,
+              // bar kayarak gizlenir/görünür (zıplama ve yeniden yerleşim yok).
+              if (section != 0)
                 _sectionTitle(section == 1
                     ? S.t('progress')
                     : section == 2
@@ -937,10 +920,35 @@ class _BrowserPageState extends State<BrowserPage>
                     IndexedStack(
                       index: section,
                       children: [
-                        IndexedStack(
-                          index: cur,
-                          children: [for (final x in tabs) _webView(x)],
-                        ),
+                        LayoutBuilder(builder: (ctx, box) {
+                          final h = box.maxHeight;
+                          return Stack(
+                            clipBehavior: Clip.hardEdge,
+                            children: [
+                              AnimatedPositioned(
+                                duration: const Duration(milliseconds: 180),
+                                curve: Curves.easeOutCubic,
+                                left: 0,
+                                right: 0,
+                                top: barShown ? _barH : 0,
+                                height: h,
+                                child: IndexedStack(
+                                  index: cur,
+                                  children: [for (final x in tabs) _webView(x)],
+                                ),
+                              ),
+                              AnimatedPositioned(
+                                duration: const Duration(milliseconds: 180),
+                                curve: Curves.easeOutCubic,
+                                left: 0,
+                                right: 0,
+                                top: barShown ? 0 : -_barH,
+                                height: _barH,
+                                child: _topBar(cs),
+                              ),
+                            ],
+                          );
+                        }),
                         ProgressPage(dm),
                         DonePage(dm),
                         SettingsPage(
@@ -956,7 +964,11 @@ class _BrowserPageState extends State<BrowserPage>
                     ),
                     // Adres düzenleme: tam ekran beyaz alan
                     if (editing)
-                      Positioned.fill(
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        top: _top,
+                        bottom: 0,
                         child: GestureDetector(
                           behavior: HitTestBehavior.opaque,
                           onTap: () => focus.unfocus(),
@@ -964,7 +976,11 @@ class _BrowserPageState extends State<BrowserPage>
                         ),
                       ),
                     // Karartma
-                    Positioned.fill(
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      top: _top,
+                      bottom: 0,
                       child: IgnorePointer(
                         ignoring: !panelOpen,
                         child: GestureDetector(
@@ -979,14 +995,14 @@ class _BrowserPageState extends State<BrowserPage>
                     ),
                     if (_meterOn)
                       Positioned(
-                        top: 6,
+                        top: _top + 6,
                         right: 6,
                         child: IgnorePointer(child: PerfPanel(m: _meter)),
                       ),
                     // Sekme paneli
                     Positioned(
                       left: 0,
-                      top: 0,
+                      top: _top,
                       bottom: 0,
                       width: panelW,
                       child: IgnorePointer(
@@ -1163,6 +1179,13 @@ class _SettledInsetsState extends State<SettledInsets> {
     final cur = MediaQuery.viewInsetsOf(context).bottom;
     _timer?.cancel();
     if (cur == _settled) return;
+    // Klavye tamamen kapandıysa hemen uygula. Gecikmeli uygulanırsa, klavye
+    // yüksekliği 110 ms daha geçerli sayılır, sayfa (WebView) ezilip tekrar
+    // büyür ve yeniden çizilir: "klavye kapanırken sayfa oynuyor" sorunu.
+    if (cur == 0) {
+      _settled = 0;
+      return;
+    }
     _timer = Timer(const Duration(milliseconds: 110), () {
       if (mounted) setState(() => _settled = MediaQuery.viewInsetsOf(context).bottom);
     });

@@ -14,6 +14,8 @@ String shownUrl(String u) => u == homeUrl ? '' : u;
 String normUrl(String? u, String fallback) {
   if (u == null) return fallback;
   if (u.startsWith('https://home.local')) return homeUrl;
+  // Boş sayfa geçişi adres çubuğuna "about:blank" olarak yansımasın
+  if (u.startsWith('about:blank')) return fallback;
   return u;
 }
 
@@ -35,6 +37,7 @@ class TabData {
   static int _seq = 0;
   final int id = ++_seq;
   InAppWebViewController? c;
+  String? homeHtml; // ana sayfa HTML'i (bir kez üretilir)
 
   /// Ağ seviyesinde (isolate'ta sınıflandırılmış) yakalanan medya adayları
   final List<NetCand> netCands = [];
