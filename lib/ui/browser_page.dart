@@ -51,7 +51,7 @@ class _BrowserPageState extends State<BrowserPage>
   // Üst bar kaydırınca gizlensin mi? Sayfa (WebView) hiç taşınmaz/boyutlanmaz;
   // bar bağımsız olarak sayfanın üstünde kayar (GPU, sadece bar yeniden çizilir).
   // Sorun çıkarsa false yapmak eski sabit bara döndürür.
-  static const bool _autoHideBar = true;
+  static const bool _autoHideBar = false;
   static const double _barH = 54; // üst bar yüksekliği (52 + 2 ilerleme çizgisi)
   // 1 = bar görünür, 0 = gizli. Sadece barı yeniden çizer.
   late final AnimationController _barAnim = AnimationController(

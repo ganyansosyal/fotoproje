@@ -48,7 +48,7 @@ String buildHomeHtml(AppSettings s, bool dark) {
 <style>
 *{-webkit-tap-highlight-color:transparent}
 html,body{margin:0;background:$bg;color:$fg;font-family:sans-serif;overscroll-behavior-y:auto}
-body{padding:74px 16px 32px;min-height:100vh;box-sizing:border-box}
+body{padding:20px 16px 32px;min-height:100vh;box-sizing:border-box}
 h1{text-align:center;font-weight:600;font-size:22px;margin:22px 0 6px}
 p{text-align:center;margin:0 0 20px;color:$sub;font-size:12px}
 form{max-width:520px;margin:0 auto 30px}
