@@ -105,6 +105,7 @@ class _BrowserPageState extends State<BrowserPage>
     super.initState();
     _lastAds = '${s.blockAds}';
     s.addListener(_onSettings);
+    _brCh.setMethodCallHandler(_onBrowserCall);
     WidgetsBinding.instance.addObserver(this);
     focus.addListener(() {
       if (focus.hasFocus) {
@@ -155,6 +156,7 @@ class _BrowserPageState extends State<BrowserPage>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     s.removeListener(_onSettings);
+    _brCh.setMethodCallHandler(null);
     _bannerTimer?.cancel();
     _meter.stop();
     if (fullScreen) {
@@ -547,6 +549,45 @@ class _BrowserPageState extends State<BrowserPage>
     }
   }
 
+  static const _brCh = MethodChannel('app/browser');
+
+  /// Yerel (Kotlin) tarayıcı ekranından gelen istekler: video inceleme ve indirme.
+  Future<dynamic> _onBrowserCall(MethodCall call) async {
+    final a = Map<String, dynamic>.from((call.arguments as Map?) ?? const {});
+    final tt = a['title']?.toString() ?? '';
+    switch (call.method) {
+      case 'probe':
+        final urls = [
+          for (final u in (a['urls'] as List? ?? const [])) u.toString()
+        ];
+        final hints = <String, String>{};
+        (a['hints'] as Map?)
+            ?.forEach((k, v) => hints[k.toString()] = v.toString());
+        final items = await probeAll(urls, hints, a['ref']?.toString() ?? '',
+            expectDur: (a['dur'] as num?)?.toDouble() ?? 0,
+            exactSrc: a['src']?.toString() ?? '',
+            height: (a['h'] as num?)?.toInt() ?? 0);
+        return [
+          for (final i in items)
+            {
+              'url': i.url,
+              'kind': i.kind,
+              'title': i.title,
+              'subtitle': i.subtitle,
+            }
+        ];
+      case 'download':
+        return dm.start(a['url'].toString(),
+            referer: a['ref']?.toString() ?? '',
+            hint: a['kind']?.toString(),
+            title: tt.isEmpty ? null : tt);
+      case 'youtube':
+        return dm.startYoutube(a['url'].toString(),
+            title: tt.isEmpty ? null : tt);
+    }
+    return null;
+  }
+
   /// Yerel (Kotlin) tarayıcı ekranını açar: kaydırma akıcılığı denemesi.
   Future<void> _openNative() async {
     final u = (t.url == homeUrl || t.url.isEmpty)
@@ -554,7 +595,11 @@ class _BrowserPageState extends State<BrowserPage>
         : t.url;
     try {
       await const MethodChannel('app/native')
-          .invokeMethod('openNative', {'url': u});
+          .invokeMethod('openNative', {
+        'url': u,
+        'hook': hookJs,
+        'noAutoplay': noAutoplayJs,
+      });
     } catch (_) {
       _toast('Yerel tarayıcı açılamadı');
     }
