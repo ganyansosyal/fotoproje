@@ -24,11 +24,23 @@ const hookJs = r'''
   if(c.indexOf('dash+xml')>-1){ note(u,'mpd'); return; }
   if(c.indexOf('video/')===0){ var tot=0, m=cr&&/\/(\d+)\s*$/.exec(cr); if(m) tot=+m[1];
    if(!tot) tot=parseInt(cl||'0',10)||0; if(tot>=3000000) note(u,'mp4'); } }
+ // Biçime göre tanıma: adres/uzantı ne olursa olsun yanıtın başı HLS (#EXTM3U)
+ // veya DASH (<MPD) ise aday sayılır. Yalnızca küçük, metin benzeri yanıtlara bakılır.
+ function sniffOK(c){ c=(c||'').toLowerCase(); return !c||/text|json|xml|javascript|octet-stream|mpegurl|plain|binary|css/.test(c); }
+ function sniff(t,u){ if(!t||!u) return; t=String(t).replace(/^\uFEFF/,'');
+  if(/^\s*#EXTM3U/.test(t)) note(u,'m3u8'); else if(/<MPD[\s>]/.test(t)) note(u,'mpd'); }
+ function head(buf){ try{ return String.fromCharCode.apply(null,new Uint8Array(buf,0,Math.min(512,buf.byteLength))); }catch(e){ return ''; } }
  var xo=XMLHttpRequest.prototype.open;
  XMLHttpRequest.prototype.open=function(m,u){ var x=this;
   try{ if(RE.test(String(u))) note(u);
    x.addEventListener('load',function(){ try{
-    ctype(x.getResponseHeader('content-type'),x.responseURL||u,x.getResponseHeader('content-range'),x.getResponseHeader('content-length'));
+    var c=x.getResponseHeader('content-type')||'', ru=x.responseURL||u;
+    var cl=parseInt(x.getResponseHeader('content-length')||'0',10)||0;
+    ctype(c,ru,x.getResponseHeader('content-range'),x.getResponseHeader('content-length'));
+    if(!sniffOK(c)||cl>1500000) return;
+    var rt=x.responseType;
+    if(rt===''||rt==='text') sniff((x.responseText||'').slice(0,512),ru);
+    else if(rt==='arraybuffer'&&x.response&&x.response.byteLength<1500000) sniff(head(x.response),ru);
    }catch(e){} }); }catch(e){}
   return xo.apply(this,arguments)};
  var f=window.fetch;
@@ -36,7 +48,13 @@ const hookJs = r'''
   try{ if(u&&RE.test(String(u))) note(u); }catch(e){}
   var p=f.apply(this,arguments);
   p.then(function(r){ try{
-   ctype(r.headers.get('content-type'),r.url||u,r.headers.get('content-range'),r.headers.get('content-length'));
+   var c=r.headers.get('content-type')||'', ru=r.url||u;
+   var cl=parseInt(r.headers.get('content-length')||'0',10)||0;
+   ctype(c,ru,r.headers.get('content-range'),r.headers.get('content-length'));
+   if(!sniffOK(c)||cl>1500000||!r.body) return;
+   var rd=r.clone().body.getReader();
+   rd.read().then(function(s){ try{rd.cancel();}catch(e){}
+    if(s&&s.value) sniff(String.fromCharCode.apply(null,s.value.subarray(0,512)),ru); }).catch(function(){});
   }catch(e){} }).catch(function(){});
   return p; };
 
@@ -47,7 +65,7 @@ const hookJs = r'''
   var cs=getComputedStyle(v); return cs.visibility!=='hidden'&&cs.display!=='none'; }
  function qual(v){ if(!alive(v)) return false;
   var r=v.getBoundingClientRect(); if(r.width<200||r.height<110) return false;
-  var d=v.duration; if(isFinite(d)&&d<10) return false;
+  var d=v.duration; if(isFinite(d)&&d<2) return false;
   if(v.loop&&(!isFinite(d)||d<180)) return false;
   return true; }
  function send(o){ o.id=ID; try{window.flutter_inappwebview.callHandler('player',JSON.stringify(o));}catch(e){} }
