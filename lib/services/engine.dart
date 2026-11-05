@@ -196,26 +196,136 @@ Future<void> saveSegments({
   final sink = File(path).openWrite();
   try {
     if (init != null) sink.add(await bytes(init));
-    for (var i = 0; i < urls.length; i += 4) {
-      _check(cancel);
-      final end = i + 4 < urls.length ? i + 4 : urls.length;
-      if (prepare != null) {
-        for (var j = i; j < end; j++) {
-          await prepare(j);
+    // 8 paralel işçi; parçalar sırayla dosyaya yazılır (yavaş parça diğerlerini bekletmez).
+    final results = List<List<int>?>.filled(urls.length, null);
+    var next = 0;
+    var written = 0;
+    Object? err;
+    void flush() {
+      while (written < urls.length && results[written] != null) {
+        final raw = results[written]!;
+        results[written] = null;
+        sink.add(cleanSegment(decrypt == null ? raw : decrypt(raw, written)));
+        written++;
+      }
+      report(start + span * written / urls.length,
+          '$label: $written/${urls.length}');
+    }
+
+    Future<void> worker() async {
+      while (err == null) {
+        final i = next++;
+        if (i >= urls.length) return;
+        // Bellek şişmesin: çok ilerideki parçalar bekler
+        while (err == null && i - written > 32) {
+          await Future.delayed(const Duration(milliseconds: 50));
+        }
+        try {
+          _check(cancel);
+          if (prepare != null) await prepare(i);
+          results[i] = await bytes(urls[i]);
+          flush();
+        } catch (e) {
+          err ??= e;
+          return;
         }
       }
-      final parts = await Future.wait([
-        for (var j = i; j < end; j++) bytes(urls[j]),
-      ]);
-      for (var j = 0; j < parts.length; j++) {
-        sink.add(cleanSegment(
-            decrypt == null ? parts[j] : decrypt(parts[j], i + j)));
-      }
-      report(start + span * end / urls.length, '$label: $end/${urls.length}');
     }
+
+    await Future.wait([for (var c = 0; c < 8; c++) worker()]);
+    if (err != null) throw err!;
+    flush();
   } finally {
     await sink.close();
   }
+}
+
+/// Büyük doğrudan dosyaları paralel parçalarla indirir (sunucu Range destekliyorsa);
+/// desteklemiyorsa tek bağlantıyla indirir.
+Future<void> downloadParallel(String url, String path,
+    Map<String, String> headers, CancelToken cancel, Report report,
+    {int connections = 6}) async {
+  final dio = Dio(BaseOptions(connectTimeout: const Duration(seconds: 20)));
+  var total = 0;
+  try {
+    final r = await dio.get<ResponseBody>(url,
+        cancelToken: cancel,
+        options: Options(
+            headers: {...headers, 'Range': 'bytes=0-0'},
+            responseType: ResponseType.stream));
+    final cr = r.headers.value('content-range') ?? '';
+    await r.data?.stream.listen((_) {}).cancel();
+    final m = RegExp(r'/(\d+)\s*$').firstMatch(cr);
+    if (r.statusCode == 206 && m != null) total = int.parse(m.group(1)!);
+  } catch (e) {
+    if (e is DioException && CancelToken.isCancel(e)) throw CanceledException();
+  }
+  if (total < 4 * 1024 * 1024) {
+    await Dio().download(url, path,
+        cancelToken: cancel,
+        options: Options(headers: headers), onReceiveProgress: (r, tot) {
+      report(tot > 0 ? r / tot : -1,
+          tot > 0 ? '%${r * 100 ~/ tot}' : '${(r / 1048576).toStringAsFixed(1)} MB');
+    });
+    return;
+  }
+  const chunk = 2 * 1024 * 1024;
+  final n = (total + chunk - 1) ~/ chunk;
+  final raf = await File(path).open(mode: FileMode.write);
+  var lock = Future<void>.value(); // yazmalar sırayla (konum yarışı olmasın)
+  var next = 0;
+  var got = 0;
+  Object? err;
+
+  Future<void> worker() async {
+    while (err == null) {
+      final i = next++;
+      if (i >= n) return;
+      final from = i * chunk;
+      final to = math.min(total, from + chunk) - 1;
+      for (var k = 0;; k++) {
+        try {
+          _check(cancel);
+          final r = await dio.get<List<int>>(url,
+              cancelToken: cancel,
+              options: Options(
+                  headers: {...headers, 'Range': 'bytes=$from-$to'},
+                  responseType: ResponseType.bytes,
+                  receiveTimeout: const Duration(seconds: 60)));
+          final data = r.data!;
+          if (r.statusCode != 206 || data.length != to - from + 1) {
+            throw 'Parça eksik geldi';
+          }
+          final w = lock.then((_) async {
+            await raf.setPosition(from);
+            await raf.writeFrom(data);
+          });
+          lock = w.catchError((_) {});
+          await w;
+          break;
+        } catch (e) {
+          if (e is CanceledException ||
+              (e is DioException && CancelToken.isCancel(e))) {
+            err ??= CanceledException();
+            return;
+          }
+          if (k >= 2) {
+            err ??= e;
+            return;
+          }
+        }
+      }
+      got += to - from + 1;
+      report(got / total, '%${got * 100 ~/ total}');
+    }
+  }
+
+  try {
+    await Future.wait([for (var c = 0; c < connections && c < n; c++) worker()]);
+  } finally {
+    await raf.close();
+  }
+  if (err != null) throw err!;
 }
 
 /// Dönüş: ayrı ses dosyası yazıldı mı
