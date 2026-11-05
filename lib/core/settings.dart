@@ -39,6 +39,7 @@ class AppSettings extends ChangeNotifier {
 
   bool wifiOnly = false;
   bool blockAds = false;
+  bool fastMode = false; // resim/yazı tipi yükleme (hız denemesi)
   bool recentSites = true;
   bool syncGallery = true;
   bool publicFolder = false; // false: uygulama klasörü
@@ -56,6 +57,7 @@ class AppSettings extends ChangeNotifier {
     _p = await SharedPreferences.getInstance();
     wifiOnly = _p.getBool('wifiOnly') ?? false;
     blockAds = _p.getBool('blockAds') ?? false;
+    fastMode = _p.getBool('fastMode') ?? false;
     recentSites = _p.getBool('recentSites') ?? true;
     syncGallery = _p.getBool('syncGallery') ?? true;
     publicFolder = _p.getBool('publicFolder') ?? false;
@@ -96,6 +98,8 @@ class AppSettings extends ChangeNotifier {
         wifiOnly = v;
       case 'blockAds':
         blockAds = v;
+      case 'fastMode':
+        fastMode = v;
       case 'recentSites':
         recentSites = v;
       case 'syncGallery':

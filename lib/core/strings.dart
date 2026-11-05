@@ -16,6 +16,7 @@ class S {
   static const _m = <String, Map<String, String>>{
     'tr': {
       'newTab': 'Yeni Sekme',
+      'perfMeter': 'Performans ölçer',
       'share': 'Paylaş',
       'history': 'Geçmiş',
       'copyLink': 'Bağlantıyı Kopyala',
@@ -36,6 +37,7 @@ class S {
       'wifiOnly': 'Sadece Wi-Fi ile indirin',
       'browser': 'Tarayıcı',
       'blockAds': 'Reklamları Engelle',
+      'fastMode': 'Hızlı mod (ağ seviyesinde engelle ve yakala)',
       'recentSites': 'Yakında kullanılan web siteleri',
       'searchEngine': 'Arama Motoru',
       'clearCache': 'Önbelleği temizle',
@@ -114,6 +116,7 @@ class S {
     },
     'en': {
       'newTab': 'New Tab',
+      'perfMeter': 'Performance meter',
       'share': 'Share',
       'history': 'History',
       'copyLink': 'Copy Link',
@@ -134,6 +137,7 @@ class S {
       'wifiOnly': 'Download over Wi-Fi only',
       'browser': 'Browser',
       'blockAds': 'Block ads',
+      'fastMode': 'Fast mode (network-level block and capture)',
       'recentSites': 'Recently used websites',
       'searchEngine': 'Search engine',
       'clearCache': 'Clear cache',
