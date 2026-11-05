@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -39,6 +40,24 @@ class CanceledException implements Exception {
 
 void _check(CancelToken c) {
   if (c.isCancelled) throw CanceledException();
+}
+
+/// Bazı siteler TS parçalarının başına sahte resim başlığı (PNG/JPG/GIF) ekler.
+/// Gerçek TS paket dizisi (her 188 baytta 0x47) başlayana kadar baştaki fazlalığı atar.
+List<int> cleanSegment(List<int> d) {
+  if (d.length < 600) return d;
+  if (d[0] == 0x47 && d[188] == 0x47) return d; // zaten temiz TS
+  final fmp4 = d[4] == 0x66 && d[5] == 0x74 && d[6] == 0x79 && d[7] == 0x70 || // ftyp
+      d[4] == 0x6D && d[5] == 0x6F && d[6] == 0x6F && d[7] == 0x66 || // moof
+      d[4] == 0x73 && d[5] == 0x74 && d[6] == 0x79 && d[7] == 0x70; // styp
+  if (fmp4) return d;
+  final lim = math.min(d.length - 377, 16384);
+  for (var i = 1; i < lim; i++) {
+    if (d[i] == 0x47 && d[i + 188] == 0x47 && d[i + 376] == 0x47) {
+      return d.sublist(i);
+    }
+  }
+  return d;
 }
 
 /// Parçalı (segment) indirmeleri tek dosyaya birleştirir.
@@ -90,7 +109,8 @@ Future<void> saveSegments({
         for (var j = i; j < end; j++) bytes(urls[j]),
       ]);
       for (var j = 0; j < parts.length; j++) {
-        sink.add(decrypt == null ? parts[j] : decrypt(parts[j], i + j));
+        sink.add(cleanSegment(
+            decrypt == null ? parts[j] : decrypt(parts[j], i + j)));
       }
       report(start + span * end / urls.length, '$label: $end/${urls.length}');
     }

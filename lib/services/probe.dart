@@ -84,9 +84,29 @@ Future<String> _text(String url, String referer) async =>
         .data ??
     '';
 
+/// Uzantısı/ipucu olmayan adreste ilk baytlara bakarak biçimi bulur.
+Future<String?> _sniffKind(String url, String referer) async {
+  try {
+    final h = await dlHeaders(url, referer);
+    h['Range'] = 'bytes=0-1023';
+    final r = await _dio.get<List<int>>(url,
+        options: Options(headers: h, responseType: ResponseType.bytes));
+    final d = r.data ?? const <int>[];
+    if (d.length < 8) return null;
+    final head = String.fromCharCodes(d.take(600));
+    if (head.trimLeft().startsWith('#EXTM3U')) return 'm3u8';
+    if (head.contains('<MPD')) return 'mpd';
+    if (d[4] == 0x66 && d[5] == 0x74 && d[6] == 0x79 && d[7] == 0x70) return 'mp4';
+    if (d[0] == 0x1A && d[1] == 0x45 && d[2] == 0xDF && d[3] == 0xA3) return 'webm';
+  } catch (_) {}
+  return null;
+}
+
 Future<MediaInfo> _probeOne(
     String url, String hint, String referer, Set<String> children) async {
-  final kind = mediaKind(url) ?? (hint.isNotEmpty ? hint : 'mp4');
+  // Biçim: önce adresten/ipucundan, yoksa içeriğin başına bakarak anla.
+  var kind = mediaKind(url) ?? (hint.isNotEmpty ? hint : '');
+  if (kind.isEmpty) kind = await _sniffKind(url, referer) ?? 'mp4';
   final info = MediaInfo(url, kind);
   try {
     if (kind == 'blob') return info;
@@ -144,13 +164,15 @@ Future<MediaInfo> _probeOne(
         return info;
       }
       final first = segs.first.toLowerCase().split('?').first;
-      if (first.endsWith('.vtt') ||
-          first.endsWith('.webvtt') ||
-          first.endsWith('.srt') ||
-          first.endsWith('.jpg') ||
+      final isText =
+          first.endsWith('.vtt') || first.endsWith('.webvtt') || first.endsWith('.srt');
+      final isImg = first.endsWith('.jpg') ||
           first.endsWith('.jpeg') ||
           first.endsWith('.png') ||
-          first.endsWith('.webp')) {
+          first.endsWith('.webp');
+      // .jpg/.png uzantılı parçalar çoğu zaman kılık değiştirmiş video parçasıdır;
+      // yalnızca açıkça "sadece resim" listeleri ve altyazılar elenir.
+      if (isText || (isImg && lines.any((l) => l.startsWith('#EXT-X-IMAGES-ONLY')))) {
         info.usable = false; // altyazı / küçük resim listesi
         return info;
       }
@@ -195,9 +217,10 @@ Future<MediaInfo> _probeOne(
   return info;
 }
 
-/// Adayları paralel inceler. Oynayan videonun süresiyle (ve doğrudan adresiyle)
-/// eşleşenleri doğrulanmış sayar; süresi uyuşmayanları (reklam, önizleme,
-/// başka video) eler. Doğrulanmış varsa yalnızca onları döndürür.
+/// Adayları paralel inceler. Oynayan video uzunsa (90 sn+) süresiyle eşleşenleri
+/// doğrulanmış sayar, uyuşmayanları (reklam, önizleme, başka video) eler.
+/// Oynayan şey kısaysa (logo, reklam, kısa klip) elenmez; en uzun video öne çıkar,
+/// böylece asıl film hazırsa o önerilir.
 Future<List<MediaInfo>> probeAll(
     List<String> urls, Map<String, String> hints, String referer,
     {double expectDur = 0, String exactSrc = '', int height = 0}) async {
@@ -206,13 +229,14 @@ Future<List<MediaInfo>> probeAll(
     for (final u in urls.take(14))
       _probeOne(u, hints[u] ?? '', referer, children),
   ]);
+  final strict = expectDur >= 90;
   var ok = list.where((e) => e.usable && !children.contains(e.url)).toList();
   for (final e in ok) {
     if (exactSrc.isNotEmpty && e.url == exactSrc) {
-      e.verified = true;
       if (e.duration <= 0) e.duration = expectDur;
       if (e.height <= 0) e.height = height;
-    } else if (expectDur > 0 && e.duration > 0) {
+      if (strict) e.verified = true;
+    } else if (strict && e.duration > 0) {
       final tol = math.max(4.0, expectDur * 0.04);
       if ((e.duration - expectDur).abs() <= tol) {
         e.verified = true;
