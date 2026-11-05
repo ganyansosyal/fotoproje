@@ -963,14 +963,14 @@ class _BrowserPageState extends State<BrowserPage>
                                   customBorder: const StadiumBorder(),
                                   onTap: downloadPressed,
                                   child: Container(
-                                    height: 60,
+                                    height: 46,
                                     padding: EdgeInsets.symmetric(
-                                        horizontal: on ? 20 : 15),
+                                        horizontal: on ? 16 : 11),
                                     child: Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         Icon(Icons.download_rounded,
-                                            size: 32,
+                                            size: 24,
                                             color: on ? Colors.white : cs.surface),
                                         if (on) ...[
                                           const SizedBox(width: 8),
@@ -978,7 +978,7 @@ class _BrowserPageState extends State<BrowserPage>
                                               style: const TextStyle(
                                                   color: Colors.white,
                                                   fontWeight: FontWeight.w700,
-                                                  fontSize: 16)),
+                                                  fontSize: 14)),
                                         ],
                                       ],
                                     ),
@@ -997,7 +997,12 @@ class _BrowserPageState extends State<BrowserPage>
         ),
         bottomNavigationBar: ListenableBuilder(
           listenable: dm,
-          builder: (_, __) => NavigationBar(
+          builder: (_, __) {
+            // Bitti sekmesi açıkken kırmızı sayıyı sıfırla
+            if (section == 2 && dm.unseen > 0) {
+              WidgetsBinding.instance.addPostFrameCallback((_) => dm.markSeen());
+            }
+            return NavigationBar(
             height: 68,
             selectedIndex: section,
             onDestinationSelected: (i) => setState(() {
@@ -1017,15 +1022,24 @@ class _BrowserPageState extends State<BrowserPage>
                   selectedIcon: const Icon(Icons.download_rounded),
                   label: S.t('progress')),
               NavigationDestination(
-                  icon: const Icon(Icons.folder_outlined),
-                  selectedIcon: const Icon(Icons.folder_rounded),
+                  icon: Badge(
+                      isLabelVisible: dm.unseen > 0,
+                      backgroundColor: Colors.red,
+                      label: Text('${dm.unseen}'),
+                      child: const Icon(Icons.folder_outlined)),
+                  selectedIcon: Badge(
+                      isLabelVisible: dm.unseen > 0,
+                      backgroundColor: Colors.red,
+                      label: Text('${dm.unseen}'),
+                      child: const Icon(Icons.folder_rounded)),
                   label: S.t('done')),
               NavigationDestination(
                   icon: const Icon(Icons.settings_outlined),
                   selectedIcon: const Icon(Icons.settings_rounded),
                   label: S.t('settings')),
             ],
-          ),
+          );
+          },
         ),
       ),
     );
