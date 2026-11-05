@@ -51,14 +51,13 @@ class _BrowserPageState extends State<BrowserPage>
   // Üst bar kaydırınca gizlensin mi? Gizleme, sayfanın boyutunu/konumunu
   // kaydırma sırasında değiştirdiği için takılma yapar. false: bar sabit, sayfa
   // kaydırma sırasında hiç yeniden yerleşmez (en akıcı).
-  static const bool _autoHideBar = true;
+  static const bool _autoHideBar = false;
   static const double _barH = 62; // üst bar yüksekliği (60 + 2 ilerleme çizgisi)
   // Üst bar sayfanın üstüne biner; kaplamalar barın altından başlar
   double get _top => (section == 0 && barShown) ? _barH : 0;
   final _meter = PerfMeter();
   bool _meterOn = false;
   DateTime _lastBarToggle = DateTime.fromMillisecondsSinceEpoch(0);
-  Timer? _barTimer;
   MediaInfo? _bannerInfo;
   bool _bannerOn = false;
   Timer? _bannerTimer;
@@ -131,7 +130,6 @@ class _BrowserPageState extends State<BrowserPage>
     WidgetsBinding.instance.removeObserver(this);
     s.removeListener(_onSettings);
     _bannerTimer?.cancel();
-    _barTimer?.cancel();
     _meter.stop();
     tc.dispose();
     focus.dispose();
@@ -207,10 +205,6 @@ class _BrowserPageState extends State<BrowserPage>
       return;
     }
     final old = t;
-    // Yeni sekmeyi görünmeden ÖNCE uyandır: ilk karede beyaz/boş görünmesin
-    try {
-      tabs[i].c?.resume();
-    } catch (_) {}
     setState(() {
       cur = i;
       panelOpen = false;
@@ -218,12 +212,10 @@ class _BrowserPageState extends State<BrowserPage>
       barShown = true;
       _bannerOn = false;
     });
-    // Eski sekmeyi geçiş çizildikten sonra durdur
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      try {
-        if (old != t) old.c?.pause();
-      } catch (_) {}
-    });
+    try {
+      old.c?.pause();
+      t.c?.resume();
+    } catch (_) {}
     tc.text = shownUrl(t.url);
   }
 
@@ -291,7 +283,7 @@ class _BrowserPageState extends State<BrowserPage>
           ? UserPreferredContentMode.DESKTOP
           : UserPreferredContentMode.MOBILE,
     ));
-    if (x.url != homeUrl) _softReload(x);
+    if (x.url != homeUrl) x.c?.reload();
     if (mounted) setState(() {});
   }
 
@@ -579,7 +571,7 @@ class _BrowserPageState extends State<BrowserPage>
                               visualDensity: VisualDensity.compact,
                               icon: Icon(l ? Icons.close : Icons.refresh),
                               onPressed: () =>
-                                  l ? t.c?.stopLoading() : _softReload(t),
+                                  l ? t.c?.stopLoading() : t.c?.reload(),
                             ),
                           ),
                       ],
@@ -655,61 +647,10 @@ class _BrowserPageState extends State<BrowserPage>
     );
   }
 
-  /// Yenileme: eski sayfanın görüntüsünü yenisi çizilene kadar ekranda tutar.
-  Future<void> _softReload(TabData x) async {
-    final c = x.c;
-    if (c == null) return;
-    try {
-      final img = await c.takeScreenshot(
-          screenshotConfiguration: ScreenshotConfiguration(
-              compressFormat: CompressFormat.JPEG, quality: 85));
-      if (img != null && !x.disposed) {
-        x.shotTimer?.cancel();
-        x.shot.value = img;
-        x.shotOn.value = true;
-        // Görüntü çizilsin, sonra yenile
-        await WidgetsBinding.instance.endOfFrame;
-        // Güvenlik: sayfa hiç çizim bildirmese de görüntü kalmasın
-        x.shotTimer = Timer(const Duration(seconds: 5), x.dropShot);
-      }
-    } catch (_) {}
-    c.reload();
-  }
-
   Widget _webView(TabData x) {
-    return Stack(
-      key: ObjectKey(x),
-      fit: StackFit.expand,
-      children: [
-        _webViewCore(x),
-        Positioned.fill(
-          child: ValueListenableBuilder<Uint8List?>(
-            valueListenable: x.shot,
-            builder: (_, bytes, __) => bytes == null
-                ? const SizedBox.shrink()
-                : ValueListenableBuilder<bool>(
-                    valueListenable: x.shotOn,
-                    builder: (_, on, __) => IgnorePointer(
-                      child: AnimatedOpacity(
-                        opacity: on ? 1 : 0,
-                        duration: on
-                            ? Duration.zero
-                            : const Duration(milliseconds: 220),
-                        child: Image.memory(bytes,
-                            fit: BoxFit.fill, gaplessPlayback: true),
-                      ),
-                    ),
-                  ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _webViewCore(TabData x) {
     final fresh = x.windowId == null;
     return InAppWebView(
-      key: ValueKey('wv${x.id}'),
+      key: ObjectKey(x),
       windowId: x.windowId,
       initialUserScripts: UnmodifiableListView<UserScript>([
         UserScript(
@@ -717,15 +658,7 @@ class _BrowserPageState extends State<BrowserPage>
             injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
             forMainFrameOnly: false),
         UserScript(
-            source: paintJs,
-            injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-            forMainFrameOnly: true),
-        UserScript(
             source: viewportJs,
-            injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-            forMainFrameOnly: true),
-        UserScript(
-            source: touchJs,
             injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
             forMainFrameOnly: true),
         // Kaydırma dinleyicisi yalnızca bar gizleme açıkken eklenir
@@ -791,15 +724,6 @@ class _BrowserPageState extends State<BrowserPage>
               return null;
             });
         c.addJavaScriptHandler(
-            handlerName: 'paint',
-            callback: (args) {
-              if (x.shotOn.value && !x.disposed) {
-                // İçerik çizildi; küçük bir gecikmeyle görüntüyü solarak kaldır
-                Future.delayed(const Duration(milliseconds: 120), x.dropShot);
-              }
-              return null;
-            });
-        c.addJavaScriptHandler(
             handlerName: 'player',
             callback: (args) {
               if (args.isEmpty || x.disposed) return null;
@@ -820,21 +744,14 @@ class _BrowserPageState extends State<BrowserPage>
                 return null;
               }
               final show = args[0].toString() != 'down';
-              _barTimer?.cancel();
-              void apply() {
-                if (!mounted || focus.hasFocus || show == barShown) return;
-                _lastBarToggle = DateTime.now();
-                setState(() => barShown = show);
+              final now = DateTime.now();
+              // Çok sık açılıp kapanmasın
+              if (now.difference(_lastBarToggle).inMilliseconds < 500) {
+                return null;
               }
-
-              // Çok sık açılıp kapanmasın; ama mesaj düşmesin (JS aynı yönü
-              // tekrar göndermez): erken geldiyse kalan süre sonra uygula.
-              final wait = 150 -
-                  DateTime.now().difference(_lastBarToggle).inMilliseconds;
-              if (wait > 0) {
-                _barTimer = Timer(Duration(milliseconds: wait), apply);
-              } else {
-                apply();
+              if (show != barShown && !focus.hasFocus) {
+                _lastBarToggle = now;
+                setState(() => barShown = show);
               }
               return null;
             });
@@ -924,7 +841,6 @@ class _BrowserPageState extends State<BrowserPage>
       },
       onLoadStop: (_, u) {
         x.loading.value = false;
-        x.dropShot();
         if (_meterOn) x.c?.evaluateJavascript(source: perfStartJs);
         x.url = normUrl(u?.toString(), x.url);
         s.addHistory(x.url, x.title);
@@ -939,7 +855,7 @@ class _BrowserPageState extends State<BrowserPage>
   Widget _banner(ColorScheme cs) {
     final i = _bannerInfo;
     return Material(
-      elevation: 0,
+      elevation: 6,
       color: cs.surfaceContainerHigh,
       borderRadius: BorderRadius.circular(16),
       child: Padding(
@@ -1033,37 +949,21 @@ class _BrowserPageState extends State<BrowserPage>
                               Positioned(
                                 left: 0,
                                 right: 0,
-                                top: _autoHideBar ? 0 : _barH,
+                                top: barShown ? _barH : 0,
                                 height: _autoHideBar ? h : h - _barH,
                                 child: IndexedStack(
                                   index: cur,
                                   children: [for (final x in tabs) _webView(x)],
                                 ),
                               ),
-                              // Bar yerinde sabit; yalnızca GPU katmanı kayar
-                              // (translate3d + will-change benzeri, yeniden yerleşim yok).
-                              Positioned(
+                              AnimatedPositioned(
+                                duration: const Duration(milliseconds: 180),
+                                curve: Curves.easeOutCubic,
                                 left: 0,
                                 right: 0,
-                                top: 0,
+                                top: barShown ? 0 : -_barH,
                                 height: _barH,
-                                child: IgnorePointer(
-                                  ignoring: !barShown,
-                                  // ClipRect şart: kayan bar kutusunun dışına,
-                                  // durum çubuğunun altına taşıp görünmesin.
-                                  child: ClipRect(
-                                    child: AnimatedSlide(
-                                      duration:
-                                          const Duration(milliseconds: 120),
-                                      curve: Curves.easeOut,
-                                      offset: barShown
-                                          ? Offset.zero
-                                          : const Offset(0, -1),
-                                      child:
-                                          RepaintBoundary(child: _topBar(cs)),
-                                    ),
-                                  ),
-                                ),
+                                child: _topBar(cs),
                               ),
                             ],
                           );
@@ -1182,12 +1082,12 @@ class _BrowserPageState extends State<BrowserPage>
                           valueListenable: t.found,
                           builder: (_, list, __) {
                             final on = list.isNotEmpty || isYoutubeWatch(t.url);
-                            return Align(
+                            return AnimatedSize(
+                              duration: const Duration(milliseconds: 150),
+                              curve: Curves.easeOutCubic,
                               alignment: Alignment.centerRight,
-                              widthFactor: 1,
-                              heightFactor: 1,
                               child: Material(
-                                elevation: 0,
+                                elevation: on ? 6 : 2,
                                 shape: const StadiumBorder(),
                                 color: on
                                     ? _green
