@@ -533,6 +533,8 @@ class _BrowserPageState extends State<BrowserPage>
         toggleDesktop();
       case 'full':
         _setFull(true);
+      case 'native':
+        _openNative();
       case 'meter':
         _toggleMeter();
       case 'shareapp':
@@ -542,6 +544,19 @@ class _BrowserPageState extends State<BrowserPage>
           section = 3;
           panelOpen = false;
         });
+    }
+  }
+
+  /// Yerel (Kotlin) tarayıcı ekranını açar: kaydırma akıcılığı denemesi.
+  Future<void> _openNative() async {
+    final u = (t.url == homeUrl || t.url.isEmpty)
+        ? 'https://www.google.com'
+        : t.url;
+    try {
+      await const MethodChannel('app/native')
+          .invokeMethod('openNative', {'url': u});
+    } catch (_) {
+      _toast('Yerel tarayıcı açılamadı');
     }
   }
 
