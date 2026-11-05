@@ -47,7 +47,7 @@ String buildHomeHtml(AppSettings s, bool dark) {
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <style>
 *{-webkit-tap-highlight-color:transparent}
-html,body{margin:0;background:$bg;color:$fg;font-family:sans-serif}
+html,body{margin:0;background:$bg;color:$fg;font-family:sans-serif;overscroll-behavior-y:none}
 body{padding:28px 16px 40px;min-height:100vh;box-sizing:border-box}
 h1{text-align:center;font-weight:700;font-size:28px;margin:26px 0 8px}
 p{text-align:center;margin:0 0 22px;color:$sub;font-size:13px}
@@ -55,11 +55,11 @@ form{max-width:520px;margin:0 auto 30px}
 input{width:100%;box-sizing:border-box;padding:14px 20px;border-radius:28px;border:0;
 background:$card;color:$fg;font-size:16px;outline:none}
 .g{display:grid;grid-template-columns:repeat(4,1fr);gap:20px 8px;max-width:520px;margin:auto}
-.t{text-decoration:none;color:$fg;text-align:center;font-size:12px;transition:transform .12s}
-.t:active{transform:scale(.92)}
+.t{text-decoration:none;color:$fg;text-align:center;font-size:12px;transform:translate3d(0,0,0);will-change:transform;transition:transform .15s ease-out}
+.t:active{transform:translate3d(0,0,0) scale(.92)}
 .i{width:56px;height:56px;border-radius:50%;margin:0 auto 6px;background:$card;overflow:hidden;
 display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:600}
-.i img{width:32px;height:32px;object-fit:contain;opacity:0;transition:opacity .18s}
+.i img{width:32px;height:32px;object-fit:contain;opacity:0;transition:opacity .2s}
 .i img.ok,.i img.show{opacity:1}
 .i img.ok{transition:none}
 .t span{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

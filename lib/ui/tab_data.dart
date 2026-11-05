@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -131,11 +132,26 @@ class TabData {
 
   bool disposed = false;
 
+  // Yenileme sırasında eski sayfanın görüntüsü (boş ekran görünmesin diye)
+  final shot = ValueNotifier<Uint8List?>(null);
+  final shotOn = ValueNotifier<bool>(false);
+  Timer? shotTimer;
+
+  void dropShot() {
+    shotTimer?.cancel();
+    if (!shotOn.value) return;
+    shotOn.value = false; // solarak kaybolur
+    shotTimer = Timer(const Duration(milliseconds: 300), () {
+      if (!shotOn.value) shot.value = null; // belleği bırak
+    });
+  }
+
   /// Notifier'lar bilerek dispose edilmez: kapanan sekmenin WebView'ı son
   /// olaylarını gönderebilir. Dinleyici kalmadığı için çöp toplayıcı temizler.
   void dispose() {
     disposed = true;
     probeTimer?.cancel();
+    shotTimer?.cancel();
     c = null;
   }
 }

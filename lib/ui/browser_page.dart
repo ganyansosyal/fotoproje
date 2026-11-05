@@ -51,7 +51,7 @@ class _BrowserPageState extends State<BrowserPage>
   // Üst bar kaydırınca gizlensin mi? Gizleme, sayfanın boyutunu/konumunu
   // kaydırma sırasında değiştirdiği için takılma yapar. false: bar sabit, sayfa
   // kaydırma sırasında hiç yeniden yerleşmez (en akıcı).
-  static const bool _autoHideBar = false;
+  static const bool _autoHideBar = true;
   static const double _barH = 62; // üst bar yüksekliği (60 + 2 ilerleme çizgisi)
   // Üst bar sayfanın üstüne biner; kaplamalar barın altından başlar
   double get _top => (section == 0 && barShown) ? _barH : 0;
@@ -205,6 +205,10 @@ class _BrowserPageState extends State<BrowserPage>
       return;
     }
     final old = t;
+    // Yeni sekmeyi görünmeden ÖNCE uyandır: ilk karede beyaz/boş görünmesin
+    try {
+      tabs[i].c?.resume();
+    } catch (_) {}
     setState(() {
       cur = i;
       panelOpen = false;
@@ -212,10 +216,12 @@ class _BrowserPageState extends State<BrowserPage>
       barShown = true;
       _bannerOn = false;
     });
-    try {
-      old.c?.pause();
-      t.c?.resume();
-    } catch (_) {}
+    // Eski sekmeyi geçiş çizildikten sonra durdur
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      try {
+        if (old != t) old.c?.pause();
+      } catch (_) {}
+    });
     tc.text = shownUrl(t.url);
   }
 
@@ -283,7 +289,7 @@ class _BrowserPageState extends State<BrowserPage>
           ? UserPreferredContentMode.DESKTOP
           : UserPreferredContentMode.MOBILE,
     ));
-    if (x.url != homeUrl) x.c?.reload();
+    if (x.url != homeUrl) _softReload(x);
     if (mounted) setState(() {});
   }
 
@@ -571,7 +577,7 @@ class _BrowserPageState extends State<BrowserPage>
                               visualDensity: VisualDensity.compact,
                               icon: Icon(l ? Icons.close : Icons.refresh),
                               onPressed: () =>
-                                  l ? t.c?.stopLoading() : t.c?.reload(),
+                                  l ? t.c?.stopLoading() : _softReload(t),
                             ),
                           ),
                       ],
@@ -647,16 +653,71 @@ class _BrowserPageState extends State<BrowserPage>
     );
   }
 
+  /// Yenileme: eski sayfanın görüntüsünü yenisi çizilene kadar ekranda tutar.
+  Future<void> _softReload(TabData x) async {
+    final c = x.c;
+    if (c == null) return;
+    try {
+      final img = await c.takeScreenshot(
+          screenshotConfiguration: ScreenshotConfiguration(
+              compressFormat: CompressFormat.JPEG, quality: 85));
+      if (img != null && !x.disposed) {
+        x.shotTimer?.cancel();
+        x.shot.value = img;
+        x.shotOn.value = true;
+        // Görüntü çizilsin, sonra yenile
+        await WidgetsBinding.instance.endOfFrame;
+        // Güvenlik: sayfa hiç çizim bildirmese de görüntü kalmasın
+        x.shotTimer = Timer(const Duration(seconds: 5), x.dropShot);
+      }
+    } catch (_) {}
+    c.reload();
+  }
+
   Widget _webView(TabData x) {
+    return Stack(
+      key: ObjectKey(x),
+      fit: StackFit.expand,
+      children: [
+        _webViewCore(x),
+        Positioned.fill(
+          child: ValueListenableBuilder<Uint8List?>(
+            valueListenable: x.shot,
+            builder: (_, bytes, __) => bytes == null
+                ? const SizedBox.shrink()
+                : ValueListenableBuilder<bool>(
+                    valueListenable: x.shotOn,
+                    builder: (_, on, __) => IgnorePointer(
+                      child: AnimatedOpacity(
+                        opacity: on ? 1 : 0,
+                        duration: on
+                            ? Duration.zero
+                            : const Duration(milliseconds: 220),
+                        child: Image.memory(bytes,
+                            fit: BoxFit.fill, gaplessPlayback: true),
+                      ),
+                    ),
+                  ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _webViewCore(TabData x) {
     final fresh = x.windowId == null;
     return InAppWebView(
-      key: ObjectKey(x),
+      key: ValueKey('wv${x.id}'),
       windowId: x.windowId,
       initialUserScripts: UnmodifiableListView<UserScript>([
         UserScript(
             source: hookJs,
             injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
             forMainFrameOnly: false),
+        UserScript(
+            source: paintJs,
+            injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+            forMainFrameOnly: true),
         UserScript(
             source: viewportJs,
             injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
@@ -724,6 +785,15 @@ class _BrowserPageState extends State<BrowserPage>
               return null;
             });
         c.addJavaScriptHandler(
+            handlerName: 'paint',
+            callback: (args) {
+              if (x.shotOn.value && !x.disposed) {
+                // İçerik çizildi; küçük bir gecikmeyle görüntüyü solarak kaldır
+                Future.delayed(const Duration(milliseconds: 120), x.dropShot);
+              }
+              return null;
+            });
+        c.addJavaScriptHandler(
             handlerName: 'player',
             callback: (args) {
               if (args.isEmpty || x.disposed) return null;
@@ -746,7 +816,7 @@ class _BrowserPageState extends State<BrowserPage>
               final show = args[0].toString() != 'down';
               final now = DateTime.now();
               // Çok sık açılıp kapanmasın
-              if (now.difference(_lastBarToggle).inMilliseconds < 500) {
+              if (now.difference(_lastBarToggle).inMilliseconds < 150) {
                 return null;
               }
               if (show != barShown && !focus.hasFocus) {
@@ -841,6 +911,7 @@ class _BrowserPageState extends State<BrowserPage>
       },
       onLoadStop: (_, u) {
         x.loading.value = false;
+        x.dropShot();
         if (_meterOn) x.c?.evaluateJavascript(source: perfStartJs);
         x.url = normUrl(u?.toString(), x.url);
         s.addHistory(x.url, x.title);
@@ -946,7 +1017,9 @@ class _BrowserPageState extends State<BrowserPage>
                               // Sayfa (platform görünümü) animasyonla kaydırılmaz:
                               // her karede yeniden konumlandırmak takılma ve
                               // bulanıklık yapar. Tek karede yer değiştirir.
-                              Positioned(
+                              AnimatedPositioned(
+                                duration: const Duration(milliseconds: 200),
+                                curve: Curves.easeOutCubic,
                                 left: 0,
                                 right: 0,
                                 top: barShown ? _barH : 0,
@@ -957,13 +1030,13 @@ class _BrowserPageState extends State<BrowserPage>
                                 ),
                               ),
                               AnimatedPositioned(
-                                duration: const Duration(milliseconds: 180),
+                                duration: const Duration(milliseconds: 200),
                                 curve: Curves.easeOutCubic,
                                 left: 0,
                                 right: 0,
                                 top: barShown ? 0 : -_barH,
                                 height: _barH,
-                                child: _topBar(cs),
+                                child: RepaintBoundary(child: _topBar(cs)),
                               ),
                             ],
                           );
@@ -1129,8 +1202,8 @@ class _BrowserPageState extends State<BrowserPage>
           ),
         ),
         // Alt çubuk klavyeyle birlikte yukarı kaymaz (takılma yapıyordu):
-        // adres düzenlerken klavyenin arkasında sabit kalır, sayfadaki bir
-        // alana yazarken ise klavye açıkken gizlenir.
+        // adres düzenlerken yerinde durur, klavye üstüne kayıp onu örter;
+        // sayfadaki bir alana yazarken ise klavye açıkken gizlenir.
         bottomNavigationBar: _KbHide(
             editing: editing || _hold,
             child: ListenableBuilder(
@@ -1185,8 +1258,8 @@ class _BrowserPageState extends State<BrowserPage>
 }
 
 /// Alt çubuk klavyeyle hiç kaymaz ve hiçbir şeyi yeniden boyutlandırmaz.
-/// - Adres düzenlerken: çubuk anında görünmez olur ama yeri korunur
-///   (sayfa/WebView boyutu değişmez; klavye üstüne kayarken çubuk görünmez).
+/// - Adres düzenlerken: çubuk yerinde görünür kalır, klavye açılırken/kapanırken
+///   üstüne kayıp onu örter (sayfa ve çubuk oynamaz).
 /// - Sayfadaki bir alana yazarken: klavye açıkken tek seferde gizlenir.
 class _KbHide extends StatelessWidget {
   final Widget child;
@@ -1195,15 +1268,7 @@ class _KbHide extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (editing) {
-      return Visibility(
-          visible: false,
-          maintainSize: true,
-          maintainState: true,
-          maintainAnimation: true,
-          child: child);
-    }
-    if (MediaQuery.viewInsetsOf(context).bottom > 0) {
+    if (!editing && MediaQuery.viewInsetsOf(context).bottom > 0) {
       return const SizedBox.shrink();
     }
     return child;
