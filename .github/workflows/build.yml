@@ -33,6 +33,95 @@ jobs:
           sed -i 's#<application#<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>\n    <application#' $M
           cat $M
 
+      - name: Ses ve goruntu birlestirici (Kotlin)
+        run: |
+          D=android/app/src/main/kotlin/com/ganyansosyal/fotoproje
+          mkdir -p $D
+          cat > $D/MainActivity.kt <<'KOTLIN_EOF'
+          package com.ganyansosyal.fotoproje
+
+          import android.media.MediaCodec
+          import android.media.MediaExtractor
+          import android.media.MediaFormat
+          import android.media.MediaMuxer
+          import io.flutter.embedding.android.FlutterActivity
+          import io.flutter.embedding.engine.FlutterEngine
+          import io.flutter.plugin.common.MethodChannel
+          import java.nio.ByteBuffer
+
+          class MainActivity : FlutterActivity() {
+              override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+                  super.configureFlutterEngine(flutterEngine)
+                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "app/mux")
+                      .setMethodCallHandler { call, result ->
+                          if (call.method == "mux") {
+                              val v = call.argument<String>("video")!!
+                              val a = call.argument<String>("audio")!!
+                              val o = call.argument<String>("out")!!
+                              Thread {
+                                  try {
+                                      mux(v, a, o)
+                                      runOnUiThread { result.success(true) }
+                                  } catch (e: Exception) {
+                                      runOnUiThread { result.error("mux", e.message, null) }
+                                  }
+                              }.start()
+                          } else {
+                              result.notImplemented()
+                          }
+                      }
+              }
+
+              private fun pick(ex: MediaExtractor, prefix: String): Int {
+                  for (i in 0 until ex.trackCount) {
+                      val m = ex.getTrackFormat(i).getString(MediaFormat.KEY_MIME) ?: continue
+                      if (m.startsWith(prefix)) return i
+                  }
+                  return -1
+              }
+
+              private fun mux(video: String, audio: String, out: String) {
+                  val ve = MediaExtractor()
+                  ve.setDataSource(video)
+                  val ae = MediaExtractor()
+                  ae.setDataSource(audio)
+                  val vt = pick(ve, "video")
+                  val at = pick(ae, "audio")
+                  if (vt < 0 || at < 0) throw Exception("track yok")
+                  ve.selectTrack(vt)
+                  ae.selectTrack(at)
+                  val muxer = MediaMuxer(out, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+                  val vi = muxer.addTrack(ve.getTrackFormat(vt))
+                  val ai = muxer.addTrack(ae.getTrackFormat(at))
+                  muxer.start()
+                  copy(ve, muxer, vi)
+                  copy(ae, muxer, ai)
+                  muxer.stop()
+                  muxer.release()
+                  ve.release()
+                  ae.release()
+              }
+
+              private fun copy(ex: MediaExtractor, muxer: MediaMuxer, track: Int) {
+                  val buf = ByteBuffer.allocate(8 * 1024 * 1024)
+                  val info = MediaCodec.BufferInfo()
+                  while (true) {
+                      buf.clear()
+                      val size = ex.readSampleData(buf, 0)
+                      if (size < 0) break
+                      info.offset = 0
+                      info.size = size
+                      info.presentationTimeUs = ex.sampleTime
+                      info.flags = if ((ex.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC) != 0)
+                          MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
+                      muxer.writeSampleData(track, buf, info)
+                      ex.advance()
+                  }
+              }
+          }
+          KOTLIN_EOF
+          cat $D/MainActivity.kt | head -5
+
       - name: Skia motoruna gec (Impeller kapali)
         run: |
           sed -i 's#</application>#    <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false"/>\n    </application>#' android/app/src/main/AndroidManifest.xml
