@@ -48,6 +48,18 @@ class _BrowserPageState extends State<BrowserPage>
   bool panelOpen = false;
   bool _dark = false;
   bool barShown = true; // üst bar (kaydırınca gizlenir)
+  bool fullScreen = false; // tarayıcı tam ekran: tüm çubuklar gizli, sayfa tüm ekran
+  void _setFull(bool v) {
+    if (fullScreen == v) return;
+    setState(() {
+      fullScreen = v;
+      panelOpen = false;
+      if (v) section = 0;
+    });
+    SystemChrome.setEnabledSystemUIMode(
+        v ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge);
+  }
+
   // Üst bar kaydırınca gizlensin mi? Sayfa (WebView) hiç taşınmaz/boyutlanmaz;
   // bar bağımsız olarak sayfanın üstünde kayar (GPU, sadece bar yeniden çizilir).
   // Sorun çıkarsa false yapmak eski sabit bara döndürür.
@@ -65,7 +77,7 @@ class _BrowserPageState extends State<BrowserPage>
   }
 
   // Üst bar sayfanın üstüne biner; kaplamalar barın altından başlar
-  double get _top => (section == 0 && barShown) ? _barH : 0;
+  double get _top => (section == 0 && barShown && !fullScreen) ? _barH : 0;
   final _meter = PerfMeter();
   bool _meterOn = false;
   DateTime _lastBarToggle = DateTime.fromMillisecondsSinceEpoch(0);
@@ -142,6 +154,9 @@ class _BrowserPageState extends State<BrowserPage>
     s.removeListener(_onSettings);
     _bannerTimer?.cancel();
     _meter.stop();
+    if (fullScreen) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    }
     _barAnim.dispose();
     tc.dispose();
     focus.dispose();
@@ -467,6 +482,8 @@ class _BrowserPageState extends State<BrowserPage>
         if (t.url != homeUrl) s.toggleBookmark(t.url);
       case 'desktop':
         toggleDesktop();
+      case 'full':
+        _setFull(true);
       case 'meter':
         _toggleMeter();
       case 'shareapp':
@@ -627,6 +644,7 @@ class _BrowserPageState extends State<BrowserPage>
                         'addbm',
                         bm ? Icons.bookmark_remove_outlined : Icons.bookmark_add_outlined,
                         bm ? S.t('removeBookmark') : S.t('addBookmark')),
+                    _mi('full', Icons.fullscreen_rounded, 'Tam ekran'),
                     _mi('desktop', Icons.desktop_windows_rounded, S.t('desktop'),
                         trailing: IgnorePointer(
                             child: Checkbox(
@@ -862,6 +880,16 @@ class _BrowserPageState extends State<BrowserPage>
           }
         }
       },
+      // Video tam ekran (YouTube vb.): sistem çubukları gizlenir (ekran dönmez);
+      // çıkınca eski haline döner.
+      onEnterFullscreen: (_) {
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      },
+      onExitFullscreen: (_) {
+        SystemChrome.setEnabledSystemUIMode(fullScreen
+            ? SystemUiMode.immersiveSticky
+            : SystemUiMode.edgeToEdge);
+      },
       onProgressChanged: (_, p) => x.progress.value = p / 100,
       onTitleChanged: (_, title) {
         x.title = title ?? '';
@@ -940,7 +968,9 @@ class _BrowserPageState extends State<BrowserPage>
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
         if (didPop) return;
-        if (panelOpen) {
+        if (fullScreen) {
+          _setFull(false);
+        } else if (panelOpen) {
           setState(() => panelOpen = false);
         } else if (section != 0) {
           setState(() => section = 0);
@@ -987,13 +1017,14 @@ class _BrowserPageState extends State<BrowserPage>
                               Positioned(
                                 left: 0,
                                 right: 0,
-                                top: _autoHideBar ? 0 : _barH,
-                                height: _autoHideBar ? h : h - _barH,
+                                top: (_autoHideBar || fullScreen) ? 0 : _barH,
+                                height: (_autoHideBar || fullScreen) ? h : h - _barH,
                                 child: IndexedStack(
                                   index: cur,
                                   children: [for (final x in tabs) _webView(x)],
                                 ),
                               ),
+                              if (!fullScreen)
                               Positioned(
                                 left: 0,
                                 right: 0,
@@ -1057,6 +1088,25 @@ class _BrowserPageState extends State<BrowserPage>
                         ),
                       ),
                     ),
+                    // Tam ekrandan çıkış: küçük, yarı saydam düğme (geri tuşu da çıkarır)
+                    if (fullScreen && section == 0)
+                      Positioned(
+                        top: 10,
+                        right: 10,
+                        child: Material(
+                          color: Colors.black.withValues(alpha: .45),
+                          shape: const CircleBorder(),
+                          child: InkWell(
+                            customBorder: const CircleBorder(),
+                            onTap: () => _setFull(false),
+                            child: const Padding(
+                              padding: EdgeInsets.all(7),
+                              child: Icon(Icons.fullscreen_exit_rounded,
+                                  size: 20, color: Colors.white),
+                            ),
+                          ),
+                        ),
+                      ),
                     if (_meterOn)
                       Positioned(
                         top: _top + 6,
@@ -1176,7 +1226,7 @@ class _BrowserPageState extends State<BrowserPage>
         // Alt çubuk klavyeyle birlikte yukarı kaymaz (takılma yapıyordu):
         // adres düzenlerken yerinde durur, klavye üstüne kayıp onu örter;
         // sayfadaki bir alana yazarken ise klavye açıkken gizlenir.
-        bottomNavigationBar: _KbHide(
+        bottomNavigationBar: fullScreen ? null : _KbHide(
             editing: editing || _hold,
             child: ListenableBuilder(
           listenable: dm,
