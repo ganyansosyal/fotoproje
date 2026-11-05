@@ -657,6 +657,10 @@ class _BrowserPageState extends State<BrowserPage>
             source: hookJs,
             injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
             forMainFrameOnly: false),
+        UserScript(
+            source: viewportJs,
+            injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+            forMainFrameOnly: true),
         // Kaydırma dinleyicisi yalnızca bar gizleme açıkken eklenir
         if (_autoHideBar)
           UserScript(
@@ -698,7 +702,9 @@ class _BrowserPageState extends State<BrowserPage>
         // Performans: sayfaları zorla koyulaştırma (kaydırmayı çok yavaşlatır)
         forceDark: ForceDark.OFF,
         algorithmicDarkeningAllowed: false,
-        overScrollMode: OverScrollMode.NEVER,
+        // Sayfa başı/sonunda sert durmasın: Android'in yumuşak esneme (stretch)
+        // / parlama efekti ile yumuşak iniş yapar.
+        overScrollMode: OverScrollMode.ALWAYS,
         verticalScrollBarEnabled: false,
         horizontalScrollBarEnabled: false,
         transparentBackground: false,
@@ -1126,7 +1132,7 @@ class _BrowserPageState extends State<BrowserPage>
         // adres düzenlerken klavyenin arkasında sabit kalır, sayfadaki bir
         // alana yazarken ise klavye açıkken gizlenir.
         bottomNavigationBar: _KbHide(
-            hideWhenKeyboard: !(editing || _hold),
+            editing: editing || _hold,
             child: ListenableBuilder(
           listenable: dm,
           builder: (_, __) {
@@ -1135,7 +1141,7 @@ class _BrowserPageState extends State<BrowserPage>
               WidgetsBinding.instance.addPostFrameCallback((_) => dm.markSeen());
             }
             return NavigationBar(
-            height: 68,
+            height: 58,
             selectedIndex: section,
             onDestinationSelected: (i) => setState(() {
               section = i;
@@ -1178,16 +1184,26 @@ class _BrowserPageState extends State<BrowserPage>
   }
 }
 
-/// Alt çubuk klavyeyle yukarı kaymaz. Klavye açıkken ya klavyenin arkasında
-/// sabit kalır ya da (hideWhenKeyboard) tek seferde gizlenir; animasyon yok.
+/// Alt çubuk klavyeyle hiç kaymaz ve hiçbir şeyi yeniden boyutlandırmaz.
+/// - Adres düzenlerken: çubuk anında görünmez olur ama yeri korunur
+///   (sayfa/WebView boyutu değişmez; klavye üstüne kayarken çubuk görünmez).
+/// - Sayfadaki bir alana yazarken: klavye açıkken tek seferde gizlenir.
 class _KbHide extends StatelessWidget {
   final Widget child;
-  final bool hideWhenKeyboard;
-  const _KbHide({required this.child, required this.hideWhenKeyboard});
+  final bool editing;
+  const _KbHide({required this.child, required this.editing});
 
   @override
   Widget build(BuildContext context) {
-    if (hideWhenKeyboard && MediaQuery.viewInsetsOf(context).bottom > 0) {
+    if (editing) {
+      return Visibility(
+          visible: false,
+          maintainSize: true,
+          maintainState: true,
+          maintainAnimation: true,
+          child: child);
+    }
+    if (MediaQuery.viewInsetsOf(context).bottom > 0) {
       return const SizedBox.shrink();
     }
     return child;
