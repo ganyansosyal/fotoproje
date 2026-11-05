@@ -76,6 +76,8 @@ class SettingsPage extends StatelessWidget {
               _Header(S.t('browser')),
               _Switch(S.t('blockAds'), s.blockAds ? S.t('on') : S.t('off'),
                   s.blockAds, (v) => s.setBool('blockAds', v)),
+              _Switch(S.t('fastMode'), null, s.fastMode,
+                  (v) => s.setBool('fastMode', v)),
               _Switch(S.t('recentSites'), null, s.recentSites,
                   (v) => s.setBool('recentSites', v)),
               ListTile(
