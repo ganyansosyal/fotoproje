@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,7 +12,9 @@ import '../core/media.dart';
 import '../core/settings.dart';
 import '../core/strings.dart';
 import '../services/download_manager.dart';
+import '../services/net_filter.dart';
 import '../services/probe.dart';
+import 'perf_meter.dart';
 import 'downloads_pages.dart';
 import 'home_html.dart';
 import 'lists.dart';
@@ -45,11 +48,13 @@ class _BrowserPageState extends State<BrowserPage>
   bool panelOpen = false;
   bool _dark = false;
   bool barShown = true; // üst bar (kaydırınca gizlenir)
+  final _meter = PerfMeter();
+  bool _meterOn = false;
   DateTime _lastBarToggle = DateTime.fromMillisecondsSinceEpoch(0);
   MediaInfo? _bannerInfo;
   bool _bannerOn = false;
   Timer? _bannerTimer;
-  bool _lastAds = false;
+  String _lastAds = '';
   String _lastKey = '';
 
   final tc = TextEditingController();
@@ -65,7 +70,16 @@ class _BrowserPageState extends State<BrowserPage>
   @override
   void initState() {
     super.initState();
-    _lastAds = s.blockAds;
+    _lastAds = '${s.blockAds}|${s.fastMode}';
+    NetClassifier.instance.onMedia = (id, url, kind) {
+      for (final x in tabs) {
+        if (x.id == id) {
+          x.addNet(url, kind);
+          if (x.playerId != null) _scheduleProbe(x);
+          break;
+        }
+      }
+    };
     s.addListener(_onSettings);
     WidgetsBinding.instance.addObserver(this);
     focus.addListener(() {
@@ -118,6 +132,8 @@ class _BrowserPageState extends State<BrowserPage>
     WidgetsBinding.instance.removeObserver(this);
     s.removeListener(_onSettings);
     _bannerTimer?.cancel();
+    _meter.stop();
+    NetClassifier.instance.onMedia = null;
     tc.dispose();
     focus.dispose();
     for (final x in tabs) {
@@ -128,13 +144,19 @@ class _BrowserPageState extends State<BrowserPage>
 
   // ---------------------------------------------------------------- ayarlar
 
+  List<ContentBlocker> _blockers() => (s.blockAds || s.fastMode)
+      ? buildContentBlockers(ads: s.blockAds, fast: s.fastMode)
+      : <ContentBlocker>[];
+
   void _onSettings() {
-    if (s.blockAds != _lastAds) {
-      _lastAds = s.blockAds;
+    final adKey = '${s.blockAds}|${s.fastMode}';
+    if (adKey != _lastAds) {
+      _lastAds = adKey;
       for (final x in tabs) {
         x.c?.setSettings(
             settings: InAppWebViewSettings(
-                contentBlockers: s.blockAds ? buildContentBlockers() : []));
+                contentBlockers: _blockers(),
+                useShouldInterceptRequest: s.fastMode));
       }
     }
     final key = '${s.lang}|${s.recentSites}|${s.engine}|${s.bookmarks.length}';
@@ -370,10 +392,17 @@ class _BrowserPageState extends State<BrowserPage>
   }
 
   Future<List<MediaInfo>> _probePlayer(TabData x) {
-    final urls = x.media
-        .where((u) => u.startsWith('http') || u.startsWith('blob:'))
-        .toList();
-    return probeAll(urls, x.hints, x.playerRef ?? x.url,
+    final now = DateTime.now();
+    final net = [
+      for (final c in x.netCands)
+        if (now.difference(c.t).inSeconds < 90) c
+    ];
+    final urls = <String>{
+      ...x.media,
+      for (final c in net) c.url,
+    }.where((u) => u.startsWith('http') || u.startsWith('blob:')).toList();
+    final hints = {...x.hints, for (final c in net) c.url: c.kind};
+    return probeAll(urls, hints, x.playerRef ?? x.url,
         expectDur: x.playerLive ? 0 : x.playerDur,
         exactSrc: x.playerSrc,
         height: x.playerH);
@@ -431,6 +460,8 @@ class _BrowserPageState extends State<BrowserPage>
         if (t.url != homeUrl) s.toggleBookmark(t.url);
       case 'desktop':
         toggleDesktop();
+      case 'meter':
+        _toggleMeter();
       case 'shareapp':
         Share.share(S.t('shareAppText'));
       case 'settings':
@@ -438,6 +469,21 @@ class _BrowserPageState extends State<BrowserPage>
           section = 3;
           panelOpen = false;
         });
+    }
+  }
+
+  void _toggleMeter() {
+    setState(() => _meterOn = !_meterOn);
+    if (_meterOn) {
+      _meter.start();
+      for (final x in tabs) {
+        x.c?.evaluateJavascript(source: perfStartJs);
+      }
+    } else {
+      _meter.stop();
+      for (final x in tabs) {
+        x.c?.evaluateJavascript(source: perfStopJs);
+      }
     }
   }
 
@@ -574,6 +620,12 @@ class _BrowserPageState extends State<BrowserPage>
                                 value: t.desktop,
                                 onChanged: (_) {},
                                 visualDensity: VisualDensity.compact))),
+                    _mi('meter', Icons.speed, S.t('perfMeter'),
+                        trailing: IgnorePointer(
+                            child: Checkbox(
+                                value: _meterOn,
+                                onChanged: (_) {},
+                                visualDensity: VisualDensity.compact))),
                     _mi('shareapp', Icons.group, S.t('shareApp')),
                     _mi('settings', Icons.settings, S.t('settings')),
                   ],
@@ -652,10 +704,21 @@ class _BrowserPageState extends State<BrowserPage>
         horizontalScrollBarEnabled: false,
         transparentBackground: false,
         userAgent: _mobileUa,
-        contentBlockers: s.blockAds ? buildContentBlockers() : [],
+        contentBlockers: _blockers(),
+        useShouldInterceptRequest: s.fastMode,
       ),
       onWebViewCreated: (c) {
         x.c = c;
+        c.addJavaScriptHandler(
+            handlerName: 'perf',
+            callback: (args) {
+              if (x == t && args.length >= 3) {
+                _meter.page.value = [
+                  for (final a in args.take(3)) (a as num).toInt()
+                ];
+              }
+              return null;
+            });
         c.addJavaScriptHandler(
             handlerName: 'player',
             callback: (args) {
@@ -763,8 +826,18 @@ class _BrowserPageState extends State<BrowserPage>
           if (changed && mounted) setState(() {});
         }
       },
+      shouldInterceptRequest: (_, req) async {
+        if (!s.fastMode) return null;
+        if (req.isForMainFrame ?? false) return null;
+        final u = req.url.toString();
+        if (!u.startsWith('http')) return null;
+        if (shouldBlockUrl(u)) return blockedResponse;
+        NetClassifier.instance.submit(x.id, u); // sınıflandırma isolate'ta
+        return null;
+      },
       onLoadStop: (_, u) {
         x.loading.value = false;
+        if (_meterOn) x.c?.evaluateJavascript(source: perfStartJs);
         x.url = normUrl(u?.toString(), x.url);
         s.addHistory(x.url, x.title);
         if (x == t) {
@@ -904,6 +977,12 @@ class _BrowserPageState extends State<BrowserPage>
                         ),
                       ),
                     ),
+                    if (_meterOn)
+                      Positioned(
+                        top: 6,
+                        right: 6,
+                        child: IgnorePointer(child: PerfPanel(m: _meter)),
+                      ),
                     // Sekme paneli
                     Positioned(
                       left: 0,
