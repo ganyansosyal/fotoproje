@@ -814,13 +814,11 @@ class _BrowserPageState extends State<BrowserPage>
                 return null;
               }
               final show = args[0].toString() != 'down';
-              final now = DateTime.now();
-              // Çok sık açılıp kapanmasın
-              if (now.difference(_lastBarToggle).inMilliseconds < 150) {
-                return null;
-              }
+              // Not: JS yalnızca yön değişince bildirir (kendi sönümlemesi var).
+              // Burada mesaj düşürülürse aynı yön tekrar gönderilmez ve bar
+              // yanlış durumda kalır; bu yüzden zaman sınırı yok.
               if (show != barShown && !focus.hasFocus) {
-                _lastBarToggle = now;
+                _lastBarToggle = DateTime.now();
                 setState(() => barShown = show);
               }
               return null;
@@ -1016,27 +1014,31 @@ class _BrowserPageState extends State<BrowserPage>
                             children: [
                               // Sayfa (platform görünümü) animasyonla kaydırılmaz:
                               // her karede yeniden konumlandırmak takılma ve
-                              // bulanıklık yapar. Tek karede yer değiştirir.
-                              AnimatedPositioned(
-                                duration: const Duration(milliseconds: 200),
-                                curve: Curves.easeOutCubic,
+                              // bulanıklık yapar. Tek karede yer değiştirir;
+                              // bar ise GPU üzerinde (Transform) akıcı kayar.
+                              Positioned(
                                 left: 0,
                                 right: 0,
                                 top: barShown ? _barH : 0,
-                                height: _autoHideBar ? h : h - _barH,
+                                height: barShown ? h - _barH : h,
                                 child: IndexedStack(
                                   index: cur,
                                   children: [for (final x in tabs) _webView(x)],
                                 ),
                               ),
-                              AnimatedPositioned(
-                                duration: const Duration(milliseconds: 200),
-                                curve: Curves.easeOutCubic,
+                              Positioned(
                                 left: 0,
                                 right: 0,
-                                top: barShown ? 0 : -_barH,
+                                top: 0,
                                 height: _barH,
-                                child: RepaintBoundary(child: _topBar(cs)),
+                                child: AnimatedSlide(
+                                  duration: const Duration(milliseconds: 180),
+                                  curve: Curves.easeOutCubic,
+                                  offset: barShown
+                                      ? Offset.zero
+                                      : const Offset(0, -1),
+                                  child: RepaintBoundary(child: _topBar(cs)),
+                                ),
                               ),
                             ],
                           );
