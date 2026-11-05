@@ -677,7 +677,7 @@ class _BrowserPageState extends State<BrowserPage>
         cacheMode: CacheMode.LOAD_DEFAULT,
         safeBrowsingEnabled: false,
         hardwareAcceleration: true,
-        mediaPlaybackRequiresUserGesture: false,
+        mediaPlaybackRequiresUserGesture: true, // videolar kendiliğinden oynamasın
         thirdPartyCookiesEnabled: true,
         useWideViewPort: true,
         loadWithOverviewMode: true,
