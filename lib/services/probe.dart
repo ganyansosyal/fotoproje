@@ -77,12 +77,7 @@ double _extinfTotal(List<String> lines) {
 }
 
 Future<String> _text(String url, String referer) async =>
-    (await _dio.get<String>(url,
-            options: Options(
-                headers: await dlHeaders(url, referer),
-                responseType: ResponseType.plain)))
-        .data ??
-    '';
+    (await fetchTextSmart(url, referer)).body;
 
 /// Uzantısı/ipucu olmayan adreste ilk baytlara bakarak biçimi bulur.
 Future<String?> _sniffKind(String url, String referer) async {

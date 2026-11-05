@@ -14,10 +14,24 @@ const dlUserAgent =
     'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) '
     'Chrome/124.0.0.0 Mobile Safari/537.36';
 
-/// Tarayıcıdaki gibi istek başlıkları: Referer, User-Agent ve sitenin çerezleri.
+String _origin(String u) {
+  final p = Uri.tryParse(u);
+  if (p == null || !p.hasAuthority || !p.scheme.startsWith('http')) return '';
+  return '${p.scheme}://${p.host}${p.hasPort ? ':${p.port}' : ''}';
+}
+
+/// Tarayıcıdaki gibi istek başlıkları: Referer, Origin, User-Agent ve sitenin çerezleri.
 Future<Map<String, String>> dlHeaders(String url, String referer) async {
-  final h = <String, String>{'User-Agent': dlUserAgent};
-  if (referer.isNotEmpty) h['Referer'] = referer;
+  final h = <String, String>{
+    'User-Agent': dlUserAgent,
+    'Accept': '*/*',
+    'Accept-Language': 'tr-TR,tr;q=0.9,en;q=0.8',
+  };
+  if (referer.isNotEmpty) {
+    h['Referer'] = referer;
+    final o = _origin(referer);
+    if (o.isNotEmpty) h['Origin'] = o;
+  }
   try {
     final u = Uri.tryParse(url);
     if (u != null && u.scheme.startsWith('http')) {
@@ -28,6 +42,91 @@ Future<Map<String, String>> dlHeaders(String url, String referer) async {
     }
   } catch (_) {}
   return h;
+}
+
+/// Bazı CDN'ler yalnızca belirli Referer/Origin kabul eder. Sırayla denenecek
+/// başlık takımları: oynatıcı sayfası, onun kökü, adresin kendi sitesi, hiçbiri.
+Future<List<Map<String, String>>> dlHeaderVariants(
+    String url, String referer) async {
+  final refs = <String>[];
+  void add(String r) {
+    if (!refs.contains(r)) refs.add(r);
+  }
+
+  if (referer.isNotEmpty) {
+    add(referer);
+    final o = _origin(referer);
+    if (o.isNotEmpty) add('$o/');
+  }
+  final self = _origin(url);
+  if (self.isNotEmpty) add('$self/');
+  add('');
+  return [for (final r in refs) await dlHeaders(url, r)];
+}
+
+/// Çalışan başlık takımını siteye göre hatırlar.
+final _hdrIdx = <String, int>{};
+
+class TextGot {
+  final Map<String, String> headers;
+  final String body;
+  TextGot(this.headers, this.body);
+}
+
+bool _retryOther(Object e) {
+  if (e is! DioException || CancelToken.isCancel(e)) return false;
+  final c = e.response?.statusCode;
+  return c == 400 || c == 401 || c == 403 || c == 406 || c == 429;
+}
+
+/// Metin (liste) getirir; erişim reddedilirse başka başlık takımlarını dener.
+Future<TextGot> fetchTextSmart(String url, String referer,
+    {CancelToken? cancel}) async {
+  final vars = await dlHeaderVariants(url, referer);
+  final key = '${Uri.tryParse(url)?.host}|$referer';
+  final start = (_hdrIdx[key] ?? 0).clamp(0, vars.length - 1);
+  final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 30)));
+  Object? last;
+  for (var k = 0; k < vars.length; k++) {
+    final i = (start + k) % vars.length;
+    try {
+      final r = await dio.get<String>(url,
+          cancelToken: cancel,
+          options: Options(headers: vars[i], responseType: ResponseType.plain));
+      _hdrIdx[key] = i;
+      return TextGot(vars[i], r.data ?? '');
+    } catch (e) {
+      last = e;
+      if (!_retryOther(e)) rethrow;
+    }
+  }
+  throw last!;
+}
+
+/// Doğrudan dosya için çalışan başlık takımını bulur (1 baytlık aralık isteğiyle).
+Future<Map<String, String>> smartHeaders(String url, String referer,
+    {CancelToken? cancel}) async {
+  final vars = await dlHeaderVariants(url, referer);
+  final key = '${Uri.tryParse(url)?.host}|$referer';
+  final start = (_hdrIdx[key] ?? 0).clamp(0, vars.length - 1);
+  final dio = Dio(BaseOptions(connectTimeout: const Duration(seconds: 15)));
+  for (var k = 0; k < vars.length; k++) {
+    final i = (start + k) % vars.length;
+    try {
+      final h = Map<String, String>.of(vars[i])..['Range'] = 'bytes=0-0';
+      final r = await dio.get<ResponseBody>(url,
+          cancelToken: cancel,
+          options: Options(headers: h, responseType: ResponseType.stream));
+      await r.data?.stream.listen((_) {}).cancel();
+      _hdrIdx[key] = i;
+      return vars[i];
+    } catch (e) {
+      if (!_retryOther(e)) return vars[start];
+    }
+  }
+  return vars.first;
 }
 
 /// (0..1 arası ilerleme, etiket)
@@ -122,15 +221,11 @@ Future<void> saveSegments({
 /// Dönüş: ayrı ses dosyası yazıldı mı
 Future<bool> downloadHls(String url, String path, String audioPath,
     String referer, Report report, CancelToken cancel) async {
-  final dio = Dio();
-  final h = await dlHeaders(url, referer);
-  Future<String> text(String u) async => (await dio.get<String>(u,
-          cancelToken: cancel,
-          options: Options(headers: h, responseType: ResponseType.plain)))
-      .data!;
+  final got = await fetchTextSmart(url, referer, cancel: cancel);
+  final h = got.headers;
 
   var pl = url;
-  final lines = (await text(pl)).split('\n').map((e) => e.trim()).toList();
+  final lines = got.body.split('\n').map((e) => e.trim()).toList();
   String? audioUrl;
   if (lines.any((l) => l.startsWith('#EXT-X-STREAM-INF'))) {
     String? best;
@@ -182,10 +277,9 @@ Future<bool> downloadHls(String url, String path, String audioPath,
 Future<void> _hlsMedia(String pl, String path, Report report, String label,
     Map<String, String> h, CancelToken cancel, double start, double span) async {
   final dio = Dio();
-  final body = (await dio.get<String>(pl,
-          cancelToken: cancel,
-          options: Options(headers: h, responseType: ResponseType.plain)))
-      .data!;
+  final got = await fetchTextSmart(pl, h['Referer'] ?? '', cancel: cancel);
+  h = got.headers;
+  final body = got.body;
   final lines = body.split('\n').map((e) => e.trim()).toList();
   final base = Uri.parse(pl);
   var seq = 0;
@@ -264,11 +358,9 @@ Future<void> _hlsMedia(String pl, String path, Report report, String label,
 
 Future<bool> downloadDash(String url, String path, String audioPath,
     String referer, Report report, CancelToken cancel) async {
-  final h = await dlHeaders(url, referer);
-  final txt = (await Dio().get<String>(url,
-          cancelToken: cancel,
-          options: Options(headers: h, responseType: ResponseType.plain)))
-      .data!;
+  final got = await fetchTextSmart(url, referer, cancel: cancel);
+  final h = got.headers;
+  final txt = got.body;
   final mpd = XmlDocument.parse(txt).rootElement;
   final period = mpd.findElements('Period').first;
   final pdur = isoSeconds(period.getAttribute('duration')) ??
