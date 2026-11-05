@@ -175,6 +175,7 @@ Future<void> saveSegments({
   Future<void> Function(int)? prepare,
 }) async {
   final dio = Dio();
+  var limit = 14; // aynı anda en çok bu kadar işçi; sunucu kısarsa düşer
   Future<List<int>> bytes(Uri u) async {
     for (var k = 0;; k++) {
       try {
@@ -187,7 +188,14 @@ Future<void> saveSegments({
         if (e is CanceledException || (e is DioException && CancelToken.isCancel(e))) {
           throw CanceledException();
         }
-        if (k >= 2) rethrow;
+        if (e is DioException) {
+          final sc = e.response?.statusCode;
+          if ((sc == 403 || sc == 429 || sc == 503) && limit > 4) {
+            limit -= 2; // fazla bağlantı: azalt, biraz bekle
+            await Future.delayed(const Duration(milliseconds: 400));
+          }
+        }
+        if (k >= 3) rethrow;
       }
     }
   }
@@ -196,7 +204,7 @@ Future<void> saveSegments({
   final sink = File(path).openWrite();
   try {
     if (init != null) sink.add(await bytes(init));
-    // 8 paralel işçi; parçalar sırayla dosyaya yazılır (yavaş parça diğerlerini bekletmez).
+    // 14 paralel işçi (sunucu kısarsa otomatik azalır); parçalar sırayla dosyaya yazılır (yavaş parça diğerlerini bekletmez).
     final results = List<List<int>?>.filled(urls.length, null);
     var next = 0;
     var written = 0;
@@ -212,8 +220,9 @@ Future<void> saveSegments({
           '$label: $written/${urls.length}');
     }
 
-    Future<void> worker() async {
+    Future<void> worker(int id) async {
       while (err == null) {
+        if (id >= limit) return; // kısıtlandı: bu işçi çekilir
         final i = next++;
         if (i >= urls.length) return;
         // Bellek şişmesin: çok ilerideki parçalar bekler
@@ -232,7 +241,7 @@ Future<void> saveSegments({
       }
     }
 
-    await Future.wait([for (var c = 0; c < 8; c++) worker()]);
+    await Future.wait([for (var c = 0; c < 14; c++) worker(c)]);
     if (err != null) throw err!;
     flush();
   } finally {
@@ -244,7 +253,7 @@ Future<void> saveSegments({
 /// desteklemiyorsa tek bağlantıyla indirir.
 Future<void> downloadParallel(String url, String path,
     Map<String, String> headers, CancelToken cancel, Report report,
-    {int connections = 6}) async {
+    {int connections = 10, bool strict = false}) async {
   final dio = Dio(BaseOptions(connectTimeout: const Duration(seconds: 20)));
   var total = 0;
   try {
@@ -260,6 +269,7 @@ Future<void> downloadParallel(String url, String path,
   } catch (e) {
     if (e is DioException && CancelToken.isCancel(e)) throw CanceledException();
   }
+  if (strict && total <= 0) throw 'Parçalı indirme desteklenmiyor';
   if (total < 4 * 1024 * 1024) {
     await Dio().download(url, path,
         cancelToken: cancel,
@@ -269,17 +279,20 @@ Future<void> downloadParallel(String url, String path,
     });
     return;
   }
-  const chunk = 2 * 1024 * 1024;
+  const chunk = 3 * 1024 * 1024;
   final n = (total + chunk - 1) ~/ chunk;
   final raf = await File(path).open(mode: FileMode.write);
   var lock = Future<void>.value(); // yazmalar sırayla (konum yarışı olmasın)
   var next = 0;
   var got = 0;
+  var limit = connections; // sunucu kısarsa düşer
+  final retry = <int>[];
   Object? err;
 
-  Future<void> worker() async {
+  Future<void> worker(int id) async {
     while (err == null) {
-      final i = next++;
+      if (id >= limit && retry.isEmpty) return;
+      final i = retry.isNotEmpty ? retry.removeLast() : next++;
       if (i >= n) return;
       final from = i * chunk;
       final to = math.min(total, from + chunk) - 1;
@@ -309,7 +322,18 @@ Future<void> downloadParallel(String url, String path,
             err ??= CanceledException();
             return;
           }
-          if (k >= 2) {
+          if (e is DioException) {
+            final sc = e.response?.statusCode;
+            if ((sc == 403 || sc == 429 || sc == 503) && limit > 2) {
+              limit -= 2; // fazla bağlantı: azalt
+              if (id >= limit) {
+                retry.add(i); // parçayı kalan işçiler alsın
+                return;
+              }
+              await Future.delayed(const Duration(milliseconds: 400));
+            }
+          }
+          if (k >= 3) {
             err ??= e;
             return;
           }
@@ -321,7 +345,7 @@ Future<void> downloadParallel(String url, String path,
   }
 
   try {
-    await Future.wait([for (var c = 0; c < connections && c < n; c++) worker()]);
+    await Future.wait([for (var c = 0; c < connections && c < n; c++) worker(c)]);
   } finally {
     await raf.close();
   }

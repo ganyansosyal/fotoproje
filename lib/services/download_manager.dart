@@ -162,21 +162,45 @@ class DownloadManager extends ChangeNotifier {
         final s = manifest.muxed.withHighestBitrate();
         final tmp = await getTemporaryDirectory();
         final path = '${tmp.path}/yt_${task.createdAt}.mp4';
-        final sink = File(path).openWrite();
-        final total = s.size.totalBytes;
-        var got = 0;
+        // Önce hızlı yol: çok parçalı (paralel) indirme. Olmazsa eski tek akış.
+        var fast = false;
         try {
-          await for (final c in yt.videos.streamsClient.get(s)) {
-            if (task.cancel.isCancelled) throw CanceledException();
-            got += c.length;
-            sink.add(c);
-            task.progress.value = total > 0 ? got / total : -1;
-            task.label.value = total > 0
-                ? '%${got * 100 ~/ total}'
-                : '${(got / 1048576).toStringAsFixed(1)} MB';
+          await downloadParallel(
+              s.url.toString(),
+              path,
+              const {'User-Agent': 'Mozilla/5.0 (Linux; Android 13) Chrome/124.0 Mobile Safari/537.36'},
+              task.cancel,
+              (p, l) {
+                task.progress.value = p;
+                task.label.value = l;
+              },
+              connections: 8,
+              strict: true);
+          fast = File(path).existsSync() &&
+              File(path).lengthSync() >= s.size.totalBytes;
+        } catch (e) {
+          if (e is CanceledException ||
+              (e is DioException && CancelToken.isCancel(e))) {
+            rethrow;
           }
-        } finally {
-          await sink.close();
+        }
+        if (!fast) {
+          final sink = File(path).openWrite();
+          final total = s.size.totalBytes;
+          var got = 0;
+          try {
+            await for (final c in yt.videos.streamsClient.get(s)) {
+              if (task.cancel.isCancelled) throw CanceledException();
+              got += c.length;
+              sink.add(c);
+              task.progress.value = total > 0 ? got / total : -1;
+              task.label.value = total > 0
+                  ? '%${got * 100 ~/ total}'
+                  : '${(got / 1048576).toStringAsFixed(1)} MB';
+            }
+          } finally {
+            await sink.close();
+          }
         }
         await _finish(task, path, null);
       } finally {
