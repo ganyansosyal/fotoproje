@@ -12,6 +12,7 @@ import '../core/media.dart';
 import '../core/settings.dart';
 import '../core/strings.dart';
 import '../services/download_manager.dart';
+import '../services/engine.dart' show writeBlobChunk;
 import '../services/fav_icons.dart';
 import '../services/probe.dart';
 import 'perf_meter.dart';
@@ -328,18 +329,38 @@ class _BrowserPageState extends State<BrowserPage>
 
   // ---------------------------------------------------------------- indirme
 
-  Future<String?> _readBlob(String url) async {
-    final r = await t.c?.callAsyncJavaScript(functionBody: '''
-      const b = await (await fetch(url)).blob();
-      return await new Promise((res, rej) => {
-        const f = new FileReader();
-        f.onload = () => res(f.result.split(',')[1]);
-        f.onerror = rej;
-        f.readAsDataURL(b);
-      });
+  Future<void> _readBlob(String url, String path) async {
+    final c = t.c;
+    const fail =
+        'Blob okunamadı (parçalı yayın olabilir, listedeki diğer bağlantıyı dene)';
+    if (c == null) throw fail;
+    // Blob bir kez alınır, sonra 4 MB'lık parçalar halinde dosyaya yazılır.
+    final r = await c.callAsyncJavaScript(functionBody: '''
+      window.__dlBlob = await (await fetch(url)).blob();
+      return window.__dlBlob.size;
     ''', arguments: {'url': url});
-    final v = r?.value;
-    return v is String ? v : null;
+    final sz = r?.value;
+    if (sz is! num || sz <= 0) throw fail;
+    final size = sz.toInt();
+    try {
+      const ch = 4 * 1024 * 1024;
+      for (var o = 0; o < size; o += ch) {
+        final p = await c.callAsyncJavaScript(functionBody: '''
+          const b = window.__dlBlob.slice(o, o + n);
+          return await new Promise((res, rej) => {
+            const f = new FileReader();
+            f.onload = () => res(f.result.split(',')[1]);
+            f.onerror = rej;
+            f.readAsDataURL(b);
+          });
+        ''', arguments: {'o': o, 'n': ch});
+        final v = p?.value;
+        if (v is! String) throw fail;
+        await writeBlobChunk(v, path, o == 0);
+      }
+    } finally {
+      c.evaluateJavascript(source: 'delete window.__dlBlob;').catchError((_) {});
+    }
   }
 
   Future<void> _startDownload(String url, {TabData? from, String? hint}) async {
