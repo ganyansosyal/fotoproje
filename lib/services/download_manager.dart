@@ -46,7 +46,8 @@ class DownloadTask {
       {'id': id, 'u': url, 't': title, 'p': path, 's': size, 'c': createdAt};
 }
 
-typedef BlobReader = Future<String?> Function(String url);
+/// blob: içeriğini WebView'den parça parça okuyup [path] dosyasına yazar.
+typedef BlobReader = Future<void> Function(String url, String path);
 
 class DownloadManager extends ChangeNotifier {
   final AppSettings settings;
@@ -137,7 +138,7 @@ class DownloadManager extends ChangeNotifier {
         sepAudio = await downloadDash(url, path, apath, referer, report, task.cancel);
       } else if (kind == 'blob') {
         if (blobReader == null) throw 'Blob okunamadı';
-        await writeBase64(await blobReader(url), path);
+        await blobReader(url, path);
       } else {
         await downloadParallel(url, path,
             await smartHeaders(url, referer, cancel: task.cancel),
