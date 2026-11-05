@@ -24,8 +24,32 @@ bool isYoutubeWatch(String url) {
       u.contains('youtu.be/');
 }
 
+class NetCand {
+  final String url;
+  final String kind;
+  DateTime t;
+  NetCand(this.url, this.kind) : t = DateTime.now();
+}
+
 class TabData {
+  static int _seq = 0;
+  final int id = ++_seq;
   InAppWebViewController? c;
+
+  /// Ağ seviyesinde (isolate'ta sınıflandırılmış) yakalanan medya adayları
+  final List<NetCand> netCands = [];
+
+  void addNet(String url, String kind) {
+    for (final c in netCands) {
+      if (c.url == url) {
+        c.t = DateTime.now();
+        return;
+      }
+    }
+    netCands.add(NetCand(url, kind));
+    if (netCands.length > 40) netCands.removeAt(0);
+  }
+
   String url;
   String title = '';
   bool desktop = false;
@@ -87,6 +111,7 @@ class TabData {
   }
 
   void clearMedia() {
+    netCands.clear();
     media.clear();
     hints.clear();
     mediaCount.value = 0;
