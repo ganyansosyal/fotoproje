@@ -179,3 +179,21 @@ const perfStartJs = r'''
 ''';
 
 const perfStopJs = 'window.__pg=(window.__pg||0)+1;';
+
+
+/// Sayfaların alt güvenli alan (safe-area) boşluğunu kaldırır: `viewport-fit=cover`
+/// varsa site (ör. YouTube) kendi alt çubuğunun altına sistem çubuğu kadar boş
+/// padding ekler. Meta etiketinden çıkarılınca env(safe-area-inset-*) 0 olur.
+const viewportJs = r'''
+(function(){ if(window.__vf) return; window.__vf=1;
+ function fix(m){ var c=m.getAttribute('content');
+  if(c&&/viewport-fit/i.test(c)) m.setAttribute('content',
+   c.replace(/\s*,?\s*viewport-fit\s*=\s*[a-z]+/ig,'').replace(/^\s*,\s*/,'')); }
+ function scan(){ var m=document.querySelectorAll('meta[name=viewport]');
+  for(var i=0;i<m.length;i++) fix(m[i]); }
+ scan();
+ var mo=new MutationObserver(scan);
+ mo.observe(document,{subtree:true,childList:true,attributes:true,attributeFilter:['content']});
+ window.addEventListener('load',function(){ scan(); mo.disconnect(); },{once:true});
+})();
+''';
