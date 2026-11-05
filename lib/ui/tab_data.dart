@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+
+import '../services/probe.dart';
 
 const homeUrl = 'about:home';
 const homeBase = 'https://home.local/';
@@ -30,6 +34,9 @@ class TabData {
   final mediaCount = ValueNotifier<int>(0);
   final Set<String> media = <String>{};
   final Map<String, String> hints = {};
+  final found = ValueNotifier<List<MediaInfo>>(const []);
+  Timer? probeTimer;
+  bool bannerDone = false;
 
   TabData(this.url, {this.windowId});
 
@@ -41,6 +48,9 @@ class TabData {
   void clearMedia() {
     media.clear();
     mediaCount.value = 0;
+    probeTimer?.cancel();
+    found.value = const [];
+    bannerDone = false;
   }
 
   bool disposed = false;
@@ -49,6 +59,7 @@ class TabData {
   /// olaylarını gönderebilir. Dinleyici kalmadığı için çöp toplayıcı temizler.
   void dispose() {
     disposed = true;
+    probeTimer?.cancel();
     c = null;
   }
 }

@@ -25,6 +25,9 @@ String buildHomeHtml(AppSettings s, bool dark) {
         '<div class="i" style="background:$col">${esc.convert(letter)}</div>'
         '<span>${esc.convert(name)}</span></a>');
   }
+  tiles.write('<a class="t" href="#" id="addfav">'
+      '<div class="i" style="background:#5f6368">+</div>'
+      '<span>${esc.convert(S.t('add'))}</span></a>');
   final base = jsonEncode(searchEngines[s.engine] ?? searchEngines['Google']);
   return '''<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
@@ -49,6 +52,18 @@ display:flex;align-items:center;justify-content:center;font-size:22px;font-weigh
 <div class="g">$tiles</div>
 <script>
 var base=$base;
+function H(n,a,b){try{window.flutter_inappwebview.callHandler(n,a,b)}catch(e){}}
+document.getElementById('addfav').addEventListener('click',function(e){e.preventDefault();H('addFav','','')});
+document.querySelectorAll('.t').forEach(function(a){
+ if(a.id==='addfav') return;
+ var tm=0, lp=false;
+ a.addEventListener('touchstart',function(){ lp=false; tm=setTimeout(function(){ lp=true;
+   H('favMenu',a.getAttribute('href'),a.querySelector('span').textContent)},500)},{passive:true});
+ a.addEventListener('touchend',function(){clearTimeout(tm)},{passive:true});
+ a.addEventListener('touchmove',function(){clearTimeout(tm)},{passive:true});
+ a.addEventListener('click',function(e){ if(lp){e.preventDefault(); lp=false;} });
+ a.addEventListener('contextmenu',function(e){e.preventDefault()});
+});
 document.getElementById('f').addEventListener('submit',function(e){
  e.preventDefault(); var v=document.getElementById('q').value.trim(); if(!v) return;
  if(/^[^\\s]+\\.[^\\s]+\$/.test(v)){ location.href=/^https?:\\/\\//i.test(v)?v:'https://'+v; }

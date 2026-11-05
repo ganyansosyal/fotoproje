@@ -144,7 +144,7 @@ class DonePage extends StatelessWidget {
                         color: cs.onPrimaryContainer),
                   ),
                   title: Text(t.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-                  subtitle: Text(fmtSize(t.size)),
+                  subtitle: Text(t.note == null ? fmtSize(t.size) : '${fmtSize(t.size)} · ${t.note}'),
                   onTap: () {
                     if (t.path != null) OpenFilex.open(t.path!);
                   },

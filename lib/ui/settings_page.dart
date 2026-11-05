@@ -12,11 +12,13 @@ class SettingsPage extends StatelessWidget {
   final AppSettings s;
   final DownloadManager dm;
   final VoidCallback onHistoryCleared;
+  final bool embedded; // alt çubuktaki sekme olarak (başlık çubuğu yok)
   const SettingsPage(
       {super.key,
       required this.s,
       required this.dm,
-      required this.onHistoryCleared});
+      required this.onHistoryCleared,
+      this.embedded = false});
 
   void _toast(BuildContext c, String m) {
     ScaffoldMessenger.of(c)
@@ -51,9 +53,8 @@ class SettingsPage extends StatelessWidget {
       listenable: s,
       builder: (context, _) {
         return Scaffold(
-          appBar: AppBar(title: Text(S.t('settings'))),
+          appBar: embedded ? null : AppBar(title: Text(S.t('settings'))),
           body: ListView(
-            physics: const BouncingScrollPhysics(),
             children: [
               _Header(S.t('download')),
               ListTile(
@@ -145,6 +146,12 @@ class SettingsPage extends StatelessWidget {
                   },
                 ),
               ),
+              ListTile(
+                title: Text(S.t('themeColor')),
+                trailing: CircleAvatar(
+                    radius: 12, backgroundColor: Color(s.accent)),
+                onTap: () => _pickColor(context),
+              ),
               _Switch(S.t('syncGallery'), s.syncGallery ? S.t('on') : S.t('off'),
                   s.syncGallery, (v) => s.setBool('syncGallery', v)),
               _Header(S.t('help')),
@@ -166,6 +173,40 @@ class SettingsPage extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+
+  static const _colors = <int>[
+    0xFF1A73E8, 0xFF0F9D58, 0xFFE8453C, 0xFFF29900, 0xFF9334E6,
+    0xFF00897B, 0xFFD81B60, 0xFF5C6BC0, 0xFF6D4C41, 0xFF546E7A,
+  ];
+
+  void _pickColor(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(S.t('themeColor')),
+        content: Wrap(
+          spacing: 14,
+          runSpacing: 14,
+          children: [
+            for (final c in _colors)
+              GestureDetector(
+                onTap: () {
+                  s.setAccent(c);
+                  Navigator.pop(ctx);
+                },
+                child: CircleAvatar(
+                  radius: 22,
+                  backgroundColor: Color(c),
+                  child: s.accent == c
+                      ? const Icon(Icons.check, color: Colors.white)
+                      : null,
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 

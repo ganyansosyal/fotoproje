@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:collection';
 
 import 'package:flutter/material.dart';
@@ -10,12 +11,15 @@ import '../core/media.dart';
 import '../core/settings.dart';
 import '../core/strings.dart';
 import '../services/download_manager.dart';
+import '../services/probe.dart';
 import 'downloads_pages.dart';
 import 'home_html.dart';
 import 'lists.dart';
 import 'settings_page.dart';
 import 'tab_data.dart';
 import 'tabs_panel.dart';
+
+const _green = Color(0xFF1E9E4A);
 
 const _mobileUa =
     'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -39,6 +43,10 @@ class _BrowserPageState extends State<BrowserPage> {
   int section = 0; // 0 sekme, 1 ilerleme, 2 bitti
   bool panelOpen = false;
   bool _dark = false;
+  bool barShown = true; // üst bar (kaydırınca gizlenir)
+  MediaInfo? _bannerInfo;
+  bool _bannerOn = false;
+  Timer? _bannerTimer;
   bool _lastAds = false;
   String _lastKey = '';
 
@@ -56,6 +64,7 @@ class _BrowserPageState extends State<BrowserPage> {
     s.addListener(_onSettings);
     focus.addListener(() {
       if (focus.hasFocus) {
+        if (!barShown) setState(() => barShown = true);
         tc.selection = TextSelection(baseOffset: 0, extentOffset: tc.text.length);
       } else {
         tc.text = shownUrl(t.url);
@@ -76,6 +85,7 @@ class _BrowserPageState extends State<BrowserPage> {
   @override
   void dispose() {
     s.removeListener(_onSettings);
+    _bannerTimer?.cancel();
     tc.dispose();
     focus.dispose();
     for (final x in tabs) {
@@ -150,6 +160,8 @@ class _BrowserPageState extends State<BrowserPage> {
       cur = i;
       panelOpen = false;
       section = 0;
+      barShown = true;
+      _bannerOn = false;
     });
     try {
       old.c?.pause();
@@ -226,7 +238,7 @@ class _BrowserPageState extends State<BrowserPage> {
     if (mounted) setState(() {});
   }
 
-  void _toast(String m, {SnackBarAction? action}) {
+  void _toast(String m, {SnackBarAction? action, int ms = 2500}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -234,7 +246,7 @@ class _BrowserPageState extends State<BrowserPage> {
         content: Text(m),
         behavior: SnackBarBehavior.floating,
         action: action,
-        duration: const Duration(seconds: 3),
+        duration: Duration(milliseconds: ms),
       ));
   }
 
@@ -254,41 +266,103 @@ class _BrowserPageState extends State<BrowserPage> {
     return v is String ? v : null;
   }
 
-  Future<void> _startDownload(String url, {TabData? from}) async {
+  Future<void> _startDownload(String url, {TabData? from, String? hint}) async {
     final x = from ?? t;
     final err = await dm.start(url,
         referer: x.url,
-        hint: x.hints[url],
+        hint: hint ?? x.hints[url],
         title: x.title.isEmpty ? null : x.title,
         blobReader: _readBlob);
     _afterStart(err);
   }
+
+  void _startInfo(MediaInfo i) => _startDownload(i.url, hint: i.kind);
 
   void _afterStart(String? err) {
     if (err != null) {
       _toast(err);
       return;
     }
-    _toast('${S.t('download')}…',
-        action: SnackBarAction(
-            label: S.t('progress'), onPressed: () => setState(() => section = 1)));
+    _toast(S.t('downloadStarted'), ms: 1200);
   }
 
+  /// Yeşil düğme: en iyi videoyu hemen indirir.
   Future<void> downloadPressed() async {
     if (isYoutubeWatch(t.url)) {
       _afterStart(await dm.startYoutube(t.url, title: t.title));
       return;
     }
-    final urls = await _collectMedia();
+    final items = await _findNow();
     if (!mounted) return;
-    if (urls.isEmpty) {
+    if (items.isEmpty) {
       _toast(S.t('noVideo'));
-    } else if (urls.length == 1) {
-      _startDownload(urls.first);
-    } else {
-      final x = t;
-      showMediaSheet(context, x, urls, (u) => _startDownload(u, from: x));
+      return;
     }
+    _hideBanner();
+    _startInfo(items.first);
+  }
+
+  /// "!" düğmesi: bulunan tüm videoları açıklamalı listeler.
+  Future<void> showFound() async {
+    final x = t;
+    final items = await _findNow();
+    if (!mounted) return;
+    if (items.isEmpty) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(S.t('videosFound')),
+          content: Text('${S.t('detectInfo')}\n\n${S.t('noVideo')}'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx), child: Text(S.t('ok')))
+          ],
+        ),
+      );
+      return;
+    }
+    showMediaSheet(context, items, (i) => _startDownload(i.url, from: x, hint: i.kind));
+  }
+
+  Future<List<MediaInfo>> _findNow() async {
+    var items = t.found.value;
+    if (items.isNotEmpty) return items;
+    _toast(S.t('checking'));
+    final urls = await _collectMedia();
+    items = await probeAll(urls, t.hints, t.url);
+    t.found.value = items;
+    return items;
+  }
+
+  void _scheduleProbe(TabData x) {
+    x.probeTimer?.cancel();
+    x.probeTimer = Timer(const Duration(milliseconds: 1500), () async {
+      if (x.disposed) return;
+      final urls = x.media
+          .where((u) => u.startsWith('http') || u.startsWith('blob:'))
+          .toList();
+      final res = await probeAll(urls, x.hints, x.url);
+      if (x.disposed) return;
+      x.found.value = res;
+      if (res.isNotEmpty && x == t && mounted && !x.bannerDone) {
+        x.bannerDone = true;
+        _showBanner(res.first);
+      }
+    });
+  }
+
+  void _showBanner(MediaInfo i) {
+    _bannerTimer?.cancel();
+    setState(() {
+      _bannerInfo = i;
+      _bannerOn = true;
+    });
+    _bannerTimer = Timer(const Duration(seconds: 9), _hideBanner);
+  }
+
+  void _hideBanner() {
+    _bannerTimer?.cancel();
+    if (_bannerOn && mounted) setState(() => _bannerOn = false);
   }
 
   Future<List<String>> _collectMedia() async {
@@ -308,9 +382,7 @@ class _BrowserPageState extends State<BrowserPage> {
         for (final u in r)
           if (u is String) u
     };
-    return all.where((u) => u.startsWith('http') || u.startsWith('blob:')).toList()
-      ..sort((a, b) =>
-          (a.startsWith('blob:') ? 1 : 0) - (b.startsWith('blob:') ? 1 : 0));
+    return all.where((u) => u.startsWith('http') || u.startsWith('blob:')).toList();
   }
 
   // ---------------------------------------------------------------- menü
@@ -322,10 +394,7 @@ class _BrowserPageState extends State<BrowserPage> {
       case 'share':
         if (t.url != homeUrl) Share.share(t.url);
       case 'history':
-        Navigator.push(
-            context,
-            MaterialPageRoute(
-                builder: (_) => HistoryPage(s: s, open: openUrl)));
+        Navigator.push(context, fastRoute(HistoryPage(s: s, open: openUrl)));
       case 'copy':
         await Clipboard.setData(ClipboardData(text: t.url));
         _toast(S.t('linkCopied'));
@@ -338,17 +407,10 @@ class _BrowserPageState extends State<BrowserPage> {
       case 'shareapp':
         Share.share(S.t('shareAppText'));
       case 'settings':
-        Navigator.push(
-            context,
-            MaterialPageRoute(
-                builder: (_) => SettingsPage(
-                    s: s,
-                    dm: dm,
-                    onHistoryCleared: () {
-                      for (final x in tabs) {
-                        x.c?.clearHistory();
-                      }
-                    })));
+        setState(() {
+          section = 3;
+          panelOpen = false;
+        });
     }
   }
 
@@ -439,19 +501,21 @@ class _BrowserPageState extends State<BrowserPage> {
                     ),
                   ),
                 ),
-                ValueListenableBuilder<int>(
+                ValueListenableBuilder<List<MediaInfo>>(
                   key: ObjectKey(t),
-                  valueListenable: t.mediaCount,
-                  builder: (_, n, __) {
-                    final on = n > 0 || isYoutubeWatch(t.url);
+                  valueListenable: t.found,
+                  builder: (_, list, __) {
+                    final n = list.length;
                     return IconButton(
+                      tooltip: S.t('videosFound'),
                       icon: Badge(
                         isLabelVisible: n > 0,
                         label: Text('$n'),
+                        backgroundColor: _green,
                         child: Icon(Icons.error_rounded,
-                            size: 28, color: on ? cs.primary : cs.onSurface),
+                            size: 28, color: n > 0 ? _green : cs.onSurface),
                       ),
-                      onPressed: downloadPressed,
+                      onPressed: showFound,
                     );
                   },
                 ),
@@ -510,6 +574,10 @@ class _BrowserPageState extends State<BrowserPage> {
             source: hookJs,
             injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
             forMainFrameOnly: false),
+        UserScript(
+            source: scrollJs,
+            injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+            forMainFrameOnly: true),
       ]),
       initialUrlRequest: fresh && x.url != homeUrl
           ? URLRequest(url: WebUri(x.url))
@@ -555,6 +623,33 @@ class _BrowserPageState extends State<BrowserPage> {
               if (args.isEmpty) return null;
               x.addMedia(args[0].toString(),
                   args.length > 1 && args[1] != null ? args[1].toString() : null);
+              _scheduleProbe(x);
+              return null;
+            });
+        c.addJavaScriptHandler(
+            handlerName: 'scrollDir',
+            callback: (args) {
+              if (x != t || section != 0 || args.isEmpty || !mounted) return null;
+              final show = args[0].toString() != 'down';
+              if (show != barShown && !focus.hasFocus) {
+                setState(() => barShown = show);
+              }
+              return null;
+            });
+        c.addJavaScriptHandler(
+            handlerName: 'addFav',
+            callback: (args) {
+              if (mounted) showAddFavDialog(context, s);
+              return null;
+            });
+        c.addJavaScriptHandler(
+            handlerName: 'favMenu',
+            callback: (args) {
+              if (args.length < 2 || !mounted) return null;
+              final u = args[0].toString();
+              if (s.isFavorite(u)) {
+                confirmRemoveFav(context, s, u, args[1].toString());
+              }
               return null;
             });
       },
@@ -592,6 +687,14 @@ class _BrowserPageState extends State<BrowserPage> {
       onLoadStart: (_, u) {
         x.clearMedia();
         x.loading.value = true;
+        if (x == t && mounted) {
+          if (!barShown || _bannerOn) {
+            setState(() {
+              barShown = true;
+              _bannerOn = false;
+            });
+          }
+        }
       },
       onProgressChanged: (_, p) => x.progress.value = p / 100,
       onTitleChanged: (_, title) {
@@ -617,6 +720,41 @@ class _BrowserPageState extends State<BrowserPage> {
           if (mounted) setState(() {});
         }
       },
+    );
+  }
+
+  Widget _banner(ColorScheme cs) {
+    final i = _bannerInfo;
+    return Material(
+      elevation: 6,
+      color: cs.surfaceContainerHigh,
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+        child: Row(
+          children: [
+            const Icon(Icons.play_circle_fill_rounded, color: _green, size: 30),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(S.t('videoFound'),
+                      style: const TextStyle(fontWeight: FontWeight.w700)),
+                  if (i != null)
+                    Text(i.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall),
+                ],
+              ),
+            ),
+            IconButton(
+                icon: const Icon(Icons.close, size: 20), onPressed: _hideBanner),
+          ],
+        ),
+      ),
     );
   }
 
@@ -653,9 +791,20 @@ class _BrowserPageState extends State<BrowserPage> {
           child: Column(
             children: [
               if (section == 0)
-                _topBar(cs)
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 150),
+                  curve: Curves.easeOutCubic,
+                  alignment: Alignment.bottomCenter,
+                  child: barShown
+                      ? _topBar(cs)
+                      : const SizedBox(width: double.infinity),
+                )
               else
-                _sectionTitle(section == 1 ? S.t('progress') : S.t('done')),
+                _sectionTitle(section == 1
+                    ? S.t('progress')
+                    : section == 2
+                        ? S.t('done')
+                        : S.t('settings')),
               Expanded(
                 child: Stack(
                   children: [
@@ -668,6 +817,15 @@ class _BrowserPageState extends State<BrowserPage> {
                         ),
                         ProgressPage(dm),
                         DonePage(dm),
+                        SettingsPage(
+                            s: s,
+                            dm: dm,
+                            embedded: true,
+                            onHistoryCleared: () {
+                              for (final x in tabs) {
+                                x.c?.clearHistory();
+                              }
+                            }),
                       ],
                     ),
                     // Karartma
@@ -677,7 +835,7 @@ class _BrowserPageState extends State<BrowserPage> {
                         child: GestureDetector(
                           onTap: () => setState(() => panelOpen = false),
                           child: AnimatedOpacity(
-                            duration: const Duration(milliseconds: 220),
+                            duration: const Duration(milliseconds: 150),
                             opacity: panelOpen ? 1 : 0,
                             child: const ColoredBox(color: Color(0x73000000)),
                           ),
@@ -693,7 +851,7 @@ class _BrowserPageState extends State<BrowserPage> {
                       child: IgnorePointer(
                         ignoring: !panelOpen,
                         child: AnimatedSlide(
-                          duration: const Duration(milliseconds: 260),
+                          duration: const Duration(milliseconds: 190),
                           curve: Curves.easeOutCubic,
                           offset: panelOpen ? Offset.zero : const Offset(-1.05, 0),
                           child: RepaintBoundary(
@@ -706,7 +864,8 @@ class _BrowserPageState extends State<BrowserPage> {
                               onCloseAll: closeAll,
                               onFavorites: () {
                                 setState(() => panelOpen = false);
-                                showFavoritesSheet(context, s, openUrl);
+                                showFavoritesSheet(context, s, openUrl,
+                                    currentUrl: t.url, currentTitle: t.title);
                               },
                               onBack: () => t.c?.goBack(),
                               onHome: () => openUrl(homeUrl),
@@ -716,34 +875,70 @@ class _BrowserPageState extends State<BrowserPage> {
                         ),
                       ),
                     ),
-                    // İndirme düğmesi
+                    // "Video bulundu" kartı
+                    Positioned(
+                      left: 12,
+                      right: 110,
+                      bottom: 18,
+                      child: IgnorePointer(
+                        ignoring: !_bannerOn || section != 0,
+                        child: AnimatedSlide(
+                          duration: const Duration(milliseconds: 170),
+                          curve: Curves.easeOutCubic,
+                          offset: _bannerOn && section == 0
+                              ? Offset.zero
+                              : const Offset(0, 1.6),
+                          child: AnimatedOpacity(
+                            duration: const Duration(milliseconds: 120),
+                            opacity: _bannerOn && section == 0 ? 1 : 0,
+                            child: _banner(cs),
+                          ),
+                        ),
+                      ),
+                    ),
+                    // İndirme düğmesi (video bulununca yeşil)
                     if (section == 0)
                       Positioned(
                         right: 16,
                         bottom: 16,
-                        child: ValueListenableBuilder<int>(
+                        child: ValueListenableBuilder<List<MediaInfo>>(
                           key: ObjectKey(t),
-                          valueListenable: t.mediaCount,
-                          builder: (_, n, __) {
-                            final on = n > 0 || isYoutubeWatch(t.url);
-                            return AnimatedScale(
-                              scale: on ? 1 : .92,
-                              duration: const Duration(milliseconds: 200),
+                          valueListenable: t.found,
+                          builder: (_, list, __) {
+                            final on = list.isNotEmpty || isYoutubeWatch(t.url);
+                            return AnimatedSize(
+                              duration: const Duration(milliseconds: 150),
+                              curve: Curves.easeOutCubic,
+                              alignment: Alignment.centerRight,
                               child: Material(
                                 elevation: on ? 6 : 2,
-                                shape: const CircleBorder(),
+                                shape: const StadiumBorder(),
                                 color: on
-                                    ? cs.primary
+                                    ? _green
                                     : cs.onSurface.withValues(alpha: .38),
                                 child: InkWell(
-                                  customBorder: const CircleBorder(),
+                                  customBorder: const StadiumBorder(),
                                   onTap: downloadPressed,
-                                  child: SizedBox(
-                                    width: 62,
-                                    height: 62,
-                                    child: Icon(Icons.download_rounded,
-                                        size: 34,
-                                        color: on ? cs.onPrimary : cs.surface),
+                                  child: Container(
+                                    height: 60,
+                                    padding: EdgeInsets.symmetric(
+                                        horizontal: on ? 20 : 15),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.download_rounded,
+                                            size: 32,
+                                            color: on ? Colors.white : cs.surface),
+                                        if (on) ...[
+                                          const SizedBox(width: 8),
+                                          Text(S.t('getVideo'),
+                                              style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.w700,
+                                                  fontSize: 16)),
+                                        ],
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ),
@@ -782,6 +977,10 @@ class _BrowserPageState extends State<BrowserPage> {
                   icon: const Icon(Icons.folder_outlined),
                   selectedIcon: const Icon(Icons.folder_rounded),
                   label: S.t('done')),
+              NavigationDestination(
+                  icon: const Icon(Icons.settings_outlined),
+                  selectedIcon: const Icon(Icons.settings_rounded),
+                  label: S.t('settings')),
             ],
           ),
         ),
