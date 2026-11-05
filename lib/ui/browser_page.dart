@@ -51,7 +51,7 @@ class _BrowserPageState extends State<BrowserPage>
   // Üst bar kaydırınca gizlensin mi? Gizleme, sayfanın boyutunu/konumunu
   // kaydırma sırasında değiştirdiği için takılma yapar. false: bar sabit, sayfa
   // kaydırma sırasında hiç yeniden yerleşmez (en akıcı).
-  static const bool _autoHideBar = true;
+  static const bool _autoHideBar = false;
   static const double _barH = 62; // üst bar yüksekliği (60 + 2 ilerleme çizgisi)
   // Üst bar sayfanın üstüne biner; kaplamalar barın altından başlar
   double get _top => (section == 0 && barShown) ? _barH : 0;
@@ -68,7 +68,6 @@ class _BrowserPageState extends State<BrowserPage>
   final focus = FocusNode();
   bool editing = false; // adres çubuğu tam ekran düzenleme modu
   bool _kbWas = false;
-  Timer? _kbTimer;
   bool _hold = false; // klavye tam kapanana kadar WebView boyutlanmasın
 
   AppSettings get s => widget.settings;
@@ -88,12 +87,6 @@ class _BrowserPageState extends State<BrowserPage>
           editing = true;
           _hold = true;
         });
-        // WebView içindeki alan (ana sayfa kutusu) odakta kalmasın: yerel
-        // imleç / seçim menüsü (⋮ ✕) adres düzenlerken ekranda parlamasın.
-        t.c?.evaluateJavascript(
-            source:
-                "try{document.activeElement&&document.activeElement.blur();"
-                "window.getSelection().removeAllRanges();}catch(e){}");
         // Dokunuşun imleci yerleştirmesinden sonra tümünü seç
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (focus.hasFocus) {
@@ -120,29 +113,6 @@ class _BrowserPageState extends State<BrowserPage>
     if (_kbWas && b == 0 && editing) focus.unfocus();
     if (b == 0 && _hold && !editing && mounted) setState(() => _hold = false);
     _kbWas = b > 0;
-    _kbTimer?.cancel();
-    if (b > 0 && !editing && section == 0) {
-      _kbTimer = Timer(const Duration(milliseconds: 200), _revealFocused);
-    }
-  }
-
-  // Klavye sayfanın üstüne bindiği için, altta kalan alanı görünür yere kaydırır.
-  void _revealFocused() {
-    if (!mounted || editing || section != 0) return;
-    final v = View.of(context);
-    final kb = v.viewInsets.bottom / v.devicePixelRatio;
-    if (kb <= 0) return;
-    final navH = 58 + v.padding.bottom / v.devicePixelRatio;
-    final cover = (kb - navH).clamp(0.0, 4000.0) + (barShown ? _barH : 0) + 16;
-    t.c?.evaluateJavascript(source: '''
-(function(c){var el=document.activeElement;if(!el||el===document.body)return;
-if(!(/^(INPUT|TEXTAREA|SELECT)\$/.test(el.tagName)||el.isContentEditable))return;
-var r=el.getBoundingClientRect(),lim=window.innerHeight-c;if(r.bottom<=lim)return;
-var dy=Math.min(r.bottom-lim+40,r.top-80);if(dy<=0)return;
-for(var p=el.parentElement;p&&p!==document.body;p=p.parentElement){
-var o=getComputedStyle(p).overflowY;
-if(/(auto|scroll)/.test(o)&&p.scrollHeight>p.clientHeight+4){p.scrollBy(0,dy);return;}}
-window.scrollBy(0,dy);})($cover)''');
   }
 
   @override
@@ -160,7 +130,6 @@ window.scrollBy(0,dy);})($cover)''');
     WidgetsBinding.instance.removeObserver(this);
     s.removeListener(_onSettings);
     _bannerTimer?.cancel();
-    _kbTimer?.cancel();
     _meter.stop();
     tc.dispose();
     focus.dispose();
@@ -948,13 +917,9 @@ window.scrollBy(0,dy);})($cover)''');
       // Klavye animasyonu sürerken WebView her karede yeniden boyutlanmasın;
       // klavye yerleşince bir kez boyutlanır.
       child: SettledInsets(
-          zero: section == 0,
           child: Scaffold(
         // Adres düzenlerken WebView klavyeyle yeniden boyutlanmasın (hızlı klavye)
-        // KURAL: klavye açılırken/kapanırken sayfa (WebView) hiçbir sitede
-        // yeniden boyutlanmaz ve yeniden yerleşmez; klavye sayfanın üstüne biner.
-        // Odaktaki alan klavyenin altında kalırsa _revealFocused kaydırır.
-        resizeToAvoidBottomInset: section != 0,
+        resizeToAvoidBottomInset: !(editing || _hold),
         body: SafeArea(
           bottom: false,
           child: Column(
@@ -1108,7 +1073,7 @@ window.scrollBy(0,dy);})($cover)''');
                       ),
                     ),
                     // İndirme düğmesi (video bulununca yeşil)
-                    if (section == 0 && !editing)
+                    if (section == 0)
                       Positioned(
                         right: 16,
                         bottom: 16,
@@ -1230,25 +1195,67 @@ class _KbHide extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return child; // klavyede gizlenmez: gövde boyutu hiç değişmez
+    if (!editing && MediaQuery.viewInsetsOf(context).bottom > 0) {
+      return const SizedBox.shrink();
+    }
+    return child;
   }
 }
 
-/// Sayfa sekmesindeyken klavye yüksekliğini alt widget'lara iletmez (0 gösterir);
-/// böylece klavye animasyonu sırasında hiçbir şey yeniden boyutlanmaz/çizilmez.
-class SettledInsets extends StatelessWidget {
+/// Klavye yüksekliğini animasyon bitince tek seferde uygular. Böylece klavye
+/// açılıp kapanırken WebView (platform görünümü) her karede yeniden boyutlanmaz.
+class SettledInsets extends StatefulWidget {
   final Widget child;
-  final bool zero;
-  const SettledInsets({super.key, required this.child, this.zero = true});
+  const SettledInsets({super.key, required this.child});
+  @override
+  State<SettledInsets> createState() => _SettledInsetsState();
+}
+
+class _SettledInsetsState extends State<SettledInsets> {
+  double _settled = 0; // sayfaya uygulanan klavye yüksekliği
+  double _prev = 0; // önceki karedeki gerçek klavye yüksekliği
+  double _full = 0; // en son görülen tam klavye yüksekliği
+  Timer? _timer;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final cur = MediaQuery.viewInsetsOf(context).bottom;
+    final opening = cur > _prev;
+    final closing = cur < _prev;
+    _prev = cur;
+    _timer?.cancel();
+    if (cur == _settled) return;
+    // Düzen klavyeyi beklemez, önden gider: sayfa tek seferde, animasyonun
+    // başında yerleşir. Böylece klavye "geç/yavaş" hissettirmez.
+    if (cur == 0 || closing) {
+      _settled = 0; // kapanırken hemen tam boyuta dön
+    } else if (opening && _full > 0) {
+      _settled = _full; // açılırken bilinen klavye yüksekliğini hemen uygula
+    }
+    // Yükseklik farklı çıkarsa (başka klavye/öneri çubuğu) durulunca düzelt
+    if (cur != 0) {
+      _timer = Timer(const Duration(milliseconds: 60), () {
+        if (!mounted) return;
+        final now = MediaQuery.viewInsetsOf(context).bottom;
+        if (now > 0) _full = now;
+        if (now != _settled) setState(() => _settled = now);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (!zero) return child;
     final mq = MediaQuery.of(context);
-    if (mq.viewInsets.bottom == 0) return child;
     return MediaQuery(
-      data: mq.copyWith(viewInsets: mq.viewInsets.copyWith(bottom: 0)),
-      child: child,
+      data: mq.copyWith(viewInsets: mq.viewInsets.copyWith(bottom: _settled)),
+      child: widget.child,
     );
   }
 }
