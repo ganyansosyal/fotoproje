@@ -47,7 +47,7 @@ String buildHomeHtml(AppSettings s, bool dark) {
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <style>
 *{-webkit-tap-highlight-color:transparent}
-html,body{margin:0;background:$bg;color:$fg;font-family:sans-serif;overscroll-behavior-y:none}
+html,body{margin:0;background:$bg;color:$fg;font-family:sans-serif;overscroll-behavior-y:auto;touch-action:pan-y pinch-zoom}
 body{padding:28px 16px 40px;min-height:100vh;box-sizing:border-box}
 h1{text-align:center;font-weight:700;font-size:28px;margin:26px 0 8px}
 p{text-align:center;margin:0 0 22px;color:$sub;font-size:13px}

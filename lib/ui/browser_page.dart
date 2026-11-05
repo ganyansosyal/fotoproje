@@ -724,6 +724,10 @@ class _BrowserPageState extends State<BrowserPage>
             source: viewportJs,
             injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
             forMainFrameOnly: true),
+        UserScript(
+            source: touchJs,
+            injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+            forMainFrameOnly: true),
         // Kaydırma dinleyicisi yalnızca bar gizleme açıkken eklenir
         if (_autoHideBar)
           UserScript(
@@ -935,7 +939,7 @@ class _BrowserPageState extends State<BrowserPage>
   Widget _banner(ColorScheme cs) {
     final i = _bannerInfo;
     return Material(
-      elevation: 6,
+      elevation: 0,
       color: cs.surfaceContainerHigh,
       borderRadius: BorderRadius.circular(16),
       child: Padding(
@@ -1026,26 +1030,34 @@ class _BrowserPageState extends State<BrowserPage>
                               // Sayfa (platform görünümü) animasyonla kaydırılmaz:
                               // her karede yeniden konumlandırmak takılma ve
                               // bulanıklık yapar. Tek karede yer değiştirir.
-                              AnimatedPositioned(
-                                duration: const Duration(milliseconds: 200),
-                                curve: Curves.easeOutCubic,
+                              Positioned(
                                 left: 0,
                                 right: 0,
-                                top: barShown ? _barH : 0,
+                                top: _autoHideBar ? 0 : _barH,
                                 height: _autoHideBar ? h : h - _barH,
                                 child: IndexedStack(
                                   index: cur,
                                   children: [for (final x in tabs) _webView(x)],
                                 ),
                               ),
-                              AnimatedPositioned(
-                                duration: const Duration(milliseconds: 200),
-                                curve: Curves.easeOutCubic,
+                              // Bar yerinde sabit; yalnızca GPU katmanı kayar
+                              // (translate3d + will-change benzeri, yeniden yerleşim yok).
+                              Positioned(
                                 left: 0,
                                 right: 0,
-                                top: barShown ? 0 : -_barH,
+                                top: 0,
                                 height: _barH,
-                                child: RepaintBoundary(child: _topBar(cs)),
+                                child: IgnorePointer(
+                                  ignoring: !barShown,
+                                  child: AnimatedSlide(
+                                    duration: const Duration(milliseconds: 120),
+                                    curve: Curves.easeOut,
+                                    offset: barShown
+                                        ? Offset.zero
+                                        : const Offset(0, -1),
+                                    child: RepaintBoundary(child: _topBar(cs)),
+                                  ),
+                                ),
                               ),
                             ],
                           );
@@ -1164,12 +1176,12 @@ class _BrowserPageState extends State<BrowserPage>
                           valueListenable: t.found,
                           builder: (_, list, __) {
                             final on = list.isNotEmpty || isYoutubeWatch(t.url);
-                            return AnimatedSize(
-                              duration: const Duration(milliseconds: 150),
-                              curve: Curves.easeOutCubic,
+                            return Align(
                               alignment: Alignment.centerRight,
+                              widthFactor: 1,
+                              heightFactor: 1,
                               child: Material(
-                                elevation: on ? 6 : 2,
+                                elevation: 0,
                                 shape: const StadiumBorder(),
                                 color: on
                                     ? _green
