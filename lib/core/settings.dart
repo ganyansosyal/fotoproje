@@ -44,17 +44,13 @@ class AppSettings extends ChangeNotifier {
   bool publicFolder = false; // false: uygulama klasörü
   String engine = 'Google';
   String lang = 'system';
-  String theme = 'system'; // system | light | dark
+  String theme = 'light'; // light | dark
   List<String> bookmarks = [];
   List<HistoryEntry> history = [];
   List<List<String>> favorites = []; // [ad, adres]
-  int accent = 0xFF1A73E8;
 
-  ThemeMode get themeMode => theme == 'light'
-      ? ThemeMode.light
-      : theme == 'dark'
-          ? ThemeMode.dark
-          : ThemeMode.system;
+  ThemeMode get themeMode =>
+      theme == 'dark' ? ThemeMode.dark : ThemeMode.light;
 
   Future<void> load() async {
     _p = await SharedPreferences.getInstance();
@@ -65,9 +61,8 @@ class AppSettings extends ChangeNotifier {
     publicFolder = _p.getBool('publicFolder') ?? false;
     engine = _p.getString('engine') ?? 'Google';
     lang = _p.getString('lang') ?? 'system';
-    theme = _p.getString('theme') ?? 'system';
+    theme = _p.getString('theme') == 'dark' ? 'dark' : 'light';
     bookmarks = _p.getStringList('bm') ?? [];
-    accent = _p.getInt('accent') ?? 0xFF1A73E8;
     try {
       final f = _p.getString('favs');
       if (f != null) {
@@ -162,12 +157,6 @@ class AppSettings extends ChangeNotifier {
   void _persistHistory({bool notify = true}) {
     _p.setString('history', jsonEncode(history.map((e) => e.toJson()).toList()));
     if (notify) notifyListeners();
-  }
-
-  void setAccent(int c) {
-    accent = c;
-    _p.setInt('accent', c);
-    _save();
   }
 
   void _saveFavs() {
