@@ -139,16 +139,9 @@ class DownloadManager extends ChangeNotifier {
         if (blobReader == null) throw 'Blob okunamadı';
         await writeBase64(await blobReader(url), path);
       } else {
-        await Dio().download(url, path,
-            cancelToken: task.cancel,
-            options: Options(
-                headers: await smartHeaders(url, referer, cancel: task.cancel)),
-            onReceiveProgress: (r, tot) {
-          task.progress.value = tot > 0 ? r / tot : -1;
-          task.label.value = tot > 0
-              ? '%${r * 100 ~/ tot}'
-              : '${(r / 1048576).toStringAsFixed(1)} MB';
-        });
+        await downloadParallel(url, path,
+            await smartHeaders(url, referer, cancel: task.cancel),
+            task.cancel, report);
       }
       await _finish(task, path, sepAudio ? apath : null);
     });
