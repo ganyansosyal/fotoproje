@@ -110,7 +110,7 @@ const hookJs = r'''
 const scrollJs = r'''
 (function(){ if(window.__sc) return; window.__sc=1;
  var last=new WeakMap(), dir='', mute=0, acc=0;
- function send(d){ if(d===dir) return; dir=d; mute=Date.now()+250; acc=0;
+ function send(d){ if(d===dir) return; dir=d; mute=Date.now()+450; acc=0;
   try{window.flutter_inappwebview.callHandler('scrollDir',d);}catch(e){} }
  document.addEventListener('scroll',function(e){
   var now=Date.now();
