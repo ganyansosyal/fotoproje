@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:dio/dio.dart';
 import 'package:xml/xml.dart';
 
@@ -13,6 +15,7 @@ class MediaInfo {
   int height = 0;
   int size = 0;
   bool usable = true;
+  bool verified = false; // oynayan videonun süresi/adresiyle doğrulandı
 
   MediaInfo(this.url, this.kind);
 
@@ -40,7 +43,7 @@ class MediaInfo {
   double get rank {
     if (!usable) return -1;
     if (kind == 'blob') return 0;
-    return 1000 + duration * 10 + height + size / 1e6;
+    return (verified ? 1e6 : 0) + 1000 + duration * 10 + height + size / 1e6;
   }
 }
 
@@ -81,7 +84,8 @@ Future<String> _text(String url, String referer) async =>
         .data ??
     '';
 
-Future<MediaInfo> _probeOne(String url, String hint, String referer) async {
+Future<MediaInfo> _probeOne(
+    String url, String hint, String referer, Set<String> children) async {
   final kind = mediaKind(url) ?? (hint.isNotEmpty ? hint : 'mp4');
   final info = MediaInfo(url, kind);
   try {
@@ -91,6 +95,23 @@ Future<MediaInfo> _probeOne(String url, String hint, String referer) async {
       var lines = (await _text(url, referer)).split('\n').map((e) => e.trim()).toList();
       var base = Uri.parse(url);
       if (lines.any((l) => l.startsWith('#EXT-X-STREAM-INF'))) {
+        // Ana listenin alt listeleri ayrı video değildir; sonuçtan elenir.
+        for (var i = 0; i < lines.length; i++) {
+          final l = lines[i];
+          if (l.startsWith('#EXT-X-STREAM-INF')) {
+            var j = i + 1;
+            while (j < lines.length &&
+                (lines[j].isEmpty || lines[j].startsWith('#'))) {
+              j++;
+            }
+            if (j < lines.length) children.add(base.resolve(lines[j]).toString());
+          } else if (l.startsWith('#EXT-X-MEDIA')) {
+            final uri = hlsAttr(l, 'URI');
+            if (uri != null && uri.isNotEmpty) {
+              children.add(base.resolve(uri).toString());
+            }
+          }
+        }
         var bw = -1;
         String? best;
         for (var i = 0; i < lines.length; i++) {
@@ -174,15 +195,35 @@ Future<MediaInfo> _probeOne(String url, String hint, String referer) async {
   return info;
 }
 
-/// Adayları paralel inceler; kullanılabilir olanları iyiden kötüye sıralar,
-/// aynı süre/kaliteye sahip kopyaları eler.
+/// Adayları paralel inceler. Oynayan videonun süresiyle (ve doğrudan adresiyle)
+/// eşleşenleri doğrulanmış sayar; süresi uyuşmayanları (reklam, önizleme,
+/// başka video) eler. Doğrulanmış varsa yalnızca onları döndürür.
 Future<List<MediaInfo>> probeAll(
-    List<String> urls, Map<String, String> hints, String referer) async {
+    List<String> urls, Map<String, String> hints, String referer,
+    {double expectDur = 0, String exactSrc = '', int height = 0}) async {
+  final children = <String>{};
   final list = await Future.wait([
-    for (final u in urls.take(14)) _probeOne(u, hints[u] ?? '', referer),
+    for (final u in urls.take(14))
+      _probeOne(u, hints[u] ?? '', referer, children),
   ]);
-  final ok = list.where((e) => e.usable).toList()
-    ..sort((a, b) => b.rank.compareTo(a.rank));
+  var ok = list.where((e) => e.usable && !children.contains(e.url)).toList();
+  for (final e in ok) {
+    if (exactSrc.isNotEmpty && e.url == exactSrc) {
+      e.verified = true;
+      if (e.duration <= 0) e.duration = expectDur;
+      if (e.height <= 0) e.height = height;
+    } else if (expectDur > 0 && e.duration > 0) {
+      final tol = math.max(4.0, expectDur * 0.04);
+      if ((e.duration - expectDur).abs() <= tol) {
+        e.verified = true;
+      } else {
+        e.usable = false;
+      }
+    }
+  }
+  ok = ok.where((e) => e.usable).toList();
+  if (ok.any((e) => e.verified)) ok = ok.where((e) => e.verified).toList();
+  ok.sort((a, b) => b.rank.compareTo(a.rank));
   final seen = <String>{};
   final out = <MediaInfo>[];
   for (final e in ok) {
