@@ -55,6 +55,7 @@ class _BrowserPageState extends State<BrowserPage>
   final focus = FocusNode();
   bool editing = false; // adres çubuğu tam ekran düzenleme modu
   bool _kbWas = false;
+  bool _hold = false; // klavye tam kapanana kadar WebView boyutlanmasın
 
   AppSettings get s => widget.settings;
   DownloadManager get dm => widget.downloads;
@@ -71,6 +72,7 @@ class _BrowserPageState extends State<BrowserPage>
         setState(() {
           barShown = true;
           editing = true;
+          _hold = true;
         });
         // Dokunuşun imleci yerleştirmesinden sonra tümünü seç
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -82,6 +84,11 @@ class _BrowserPageState extends State<BrowserPage>
       } else {
         tc.text = shownUrl(t.url);
         if (editing) setState(() => editing = false);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && View.of(context).viewInsets.bottom == 0 && _hold) {
+            setState(() => _hold = false);
+          }
+        });
       }
     });
   }
@@ -91,6 +98,7 @@ class _BrowserPageState extends State<BrowserPage>
   void didChangeMetrics() {
     final b = View.of(context).viewInsets.bottom;
     if (_kbWas && b == 0 && editing) focus.unfocus();
+    if (b == 0 && _hold && !editing && mounted) setState(() => _hold = false);
     _kbWas = b > 0;
   }
 
@@ -638,8 +646,11 @@ class _BrowserPageState extends State<BrowserPage>
         useOnDownloadStart: true,
         useShouldOverrideUrlLoading: true,
         mixedContentMode: MixedContentMode.MIXED_CONTENT_COMPATIBILITY_MODE,
-        // Akıcılık: hybrid composition kapalı (kaydırmada Flutter-WebView beklemesi azalır)
-        useHybridComposition: false,
+        // Akıcılık: hybrid composition = yerel WebView (dokunma/kaydırma doğrudan sisteme gider)
+        useHybridComposition: true,
+        // Açık temada siteler koyu çizilmesin (sayfa beyaz kalsın)
+        forceDark: _dark ? ForceDark.AUTO : ForceDark.OFF,
+        algorithmicDarkeningAllowed: _dark,
         overScrollMode: OverScrollMode.NEVER,
         verticalScrollBarEnabled: false,
         horizontalScrollBarEnabled: false,
@@ -668,6 +679,12 @@ class _BrowserPageState extends State<BrowserPage>
               }
               return null;
             });
+        c.addJavaScriptHandler(
+            handlerName: 'focusBar',
+            callback: (args) {
+              if (mounted && x == t) focus.requestFocus();
+              return null;
+            }),
         c.addJavaScriptHandler(
             handlerName: 'addFav',
             callback: (args) {
@@ -819,20 +836,16 @@ class _BrowserPageState extends State<BrowserPage>
       },
       child: Scaffold(
         // Adres düzenlerken WebView klavyeyle yeniden boyutlanmasın (hızlı klavye)
-        resizeToAvoidBottomInset: !editing,
+        resizeToAvoidBottomInset: !(editing || _hold),
         body: SafeArea(
           bottom: false,
           child: Column(
             children: [
               if (section == 0)
-                AnimatedSize(
-                  duration: const Duration(milliseconds: 150),
-                  curve: Curves.easeOutCubic,
-                  alignment: Alignment.bottomCenter,
-                  child: barShown
-                      ? _topBar(cs)
-                      : const SizedBox(width: double.infinity),
-                )
+                // Animasyonsuz: WebView her karede yeniden boyutlanmasın
+                barShown
+                    ? _topBar(cs)
+                    : const SizedBox(width: double.infinity)
               else
                 _sectionTitle(section == 1
                     ? S.t('progress')
