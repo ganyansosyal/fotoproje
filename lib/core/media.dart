@@ -105,6 +105,41 @@ const hookJs = r'''
 ''';
 
 
+/// Videolar kendiliğinden oynamasın: yalnızca kullanıcının dokunuşundan (tıklama,
+/// tuş, Shorts'ta kaydırma) sonraki 8 sn içinde başlayan oynatmaya izin verilir.
+/// Sayfa bir kez dokunulunca "kullanıcı etkinleşti" sayıldığı için WebView'ın kendi
+/// ayarı tek başına yetmiyor; bu script sonraki otomatik oynatmaları da keser.
+const noAutoplayJs = r'''
+(function(){ if(window.__noap) return; window.__noap=1;
+ var last=0, OK=8000;
+ function mark(e){ if(e.isTrusted) last=Date.now(); }
+ function allowed(){ return Date.now()-last<OK; }
+ window.addEventListener('click',mark,true);
+ window.addEventListener('keydown',mark,true);
+ window.addEventListener('touchend',function(e){
+  if(e.isTrusted && location.pathname.indexOf('/shorts')===0) last=Date.now();
+ },true);
+ var P=window.HTMLMediaElement&&HTMLMediaElement.prototype;
+ if(!P) return;
+ var op=P.play;
+ P.play=function(){
+  if(this.__ap||allowed()){ this.__ap=1; return op.apply(this,arguments); }
+  return Promise.reject(new DOMException('Autoplay engellendi','NotAllowedError'));
+ };
+ // autoplay özniteliğiyle başlayanlar play() çağırmaz; olaydan yakalayıp durdur
+ document.addEventListener('play',function(e){
+  var v=e.target;
+  if(!v||!v.pause) return;
+  if(v.__ap||allowed()){ v.__ap=1; return; }
+  try{ v.pause(); }catch(x){}
+ },true);
+ // Video bitince / kaynak değişince izin sıfırlanır (sıradaki video kendiliğinden başlamasın)
+ function reset(e){ if(e.target) e.target.__ap=0; }
+ document.addEventListener('ended',reset,true);
+ document.addEventListener('emptied',reset,true);
+})();
+''';
+
 /// Kaydırma yönünü bildirir (üst barı gizlemek/göstermek için).
 /// Yalnızca yön değişince Flutter'a haber verir; kare başına mesaj yok.
 const scrollJs = r'''
