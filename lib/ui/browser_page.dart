@@ -1122,7 +1122,9 @@ class _BrowserPageState extends State<BrowserPage>
             ],
           ),
         ),
-        bottomNavigationBar: ListenableBuilder(
+        // Klavye açılınca alt çubuk klavyenin üstüne çıkar, sayfa kalan alana sığar
+        bottomNavigationBar: _KbLift(
+            child: ListenableBuilder(
           listenable: dm,
           builder: (_, __) {
             // Bitti sekmesi açıkken kırmızı sayıyı sıfırla
@@ -1167,10 +1169,21 @@ class _BrowserPageState extends State<BrowserPage>
             ],
           );
           },
-        ),
+        )),
       )),
     );
   }
+}
+
+/// Alt çubuğu klavye yüksekliği kadar yukarı alır (klavyenin üstünde durur).
+class _KbLift extends StatelessWidget {
+  final Widget child;
+  const _KbLift({required this.child});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+      child: child);
 }
 
 /// Klavye yüksekliğini animasyon bitince tek seferde uygular. Böylece klavye
@@ -1183,25 +1196,36 @@ class SettledInsets extends StatefulWidget {
 }
 
 class _SettledInsetsState extends State<SettledInsets> {
-  double _settled = 0;
+  double _settled = 0; // sayfaya uygulanan klavye yüksekliği
+  double _prev = 0; // önceki karedeki gerçek klavye yüksekliği
+  double _full = 0; // en son görülen tam klavye yüksekliği
   Timer? _timer;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final cur = MediaQuery.viewInsetsOf(context).bottom;
+    final opening = cur > _prev;
+    final closing = cur < _prev;
+    _prev = cur;
     _timer?.cancel();
     if (cur == _settled) return;
-    // Klavye tamamen kapandıysa hemen uygula. Gecikmeli uygulanırsa, klavye
-    // yüksekliği 110 ms daha geçerli sayılır, sayfa (WebView) ezilip tekrar
-    // büyür ve yeniden çizilir: "klavye kapanırken sayfa oynuyor" sorunu.
-    if (cur == 0) {
-      _settled = 0;
-      return;
+    // Düzen klavyeyi beklemez, önden gider: sayfa tek seferde, animasyonun
+    // başında yerleşir. Böylece klavye "geç/yavaş" hissettirmez.
+    if (cur == 0 || closing) {
+      _settled = 0; // kapanırken hemen tam boyuta dön
+    } else if (opening && _full > 0) {
+      _settled = _full; // açılırken bilinen klavye yüksekliğini hemen uygula
     }
-    _timer = Timer(const Duration(milliseconds: 110), () {
-      if (mounted) setState(() => _settled = MediaQuery.viewInsetsOf(context).bottom);
-    });
+    // Yükseklik farklı çıkarsa (başka klavye/öneri çubuğu) durulunca düzelt
+    if (cur != 0) {
+      _timer = Timer(const Duration(milliseconds: 60), () {
+        if (!mounted) return;
+        final now = MediaQuery.viewInsetsOf(context).bottom;
+        if (now > 0) _full = now;
+        if (now != _settled) setState(() => _settled = now);
+      });
+    }
   }
 
   @override
