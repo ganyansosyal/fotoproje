@@ -53,7 +53,7 @@ class TabsPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final bar = Color.alphaBlend(cs.primary.withValues(alpha: .08), cs.surface);
+    final bar = cs.surfaceContainerHighest;
     return Material(
       color: cs.surface,
       elevation: 8,

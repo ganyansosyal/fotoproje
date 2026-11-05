@@ -37,7 +37,8 @@ class BrowserPage extends StatefulWidget {
   State<BrowserPage> createState() => _BrowserPageState();
 }
 
-class _BrowserPageState extends State<BrowserPage> {
+class _BrowserPageState extends State<BrowserPage>
+    with WidgetsBindingObserver {
   final List<TabData> tabs = [TabData(homeUrl)];
   int cur = 0;
   int section = 0; // 0 sekme, 1 ilerleme, 2 bitti
@@ -52,6 +53,8 @@ class _BrowserPageState extends State<BrowserPage> {
 
   final tc = TextEditingController();
   final focus = FocusNode();
+  bool editing = false; // adres çubuğu tam ekran düzenleme modu
+  bool _kbWas = false;
 
   AppSettings get s => widget.settings;
   DownloadManager get dm => widget.downloads;
@@ -62,14 +65,33 @@ class _BrowserPageState extends State<BrowserPage> {
     super.initState();
     _lastAds = s.blockAds;
     s.addListener(_onSettings);
+    WidgetsBinding.instance.addObserver(this);
     focus.addListener(() {
       if (focus.hasFocus) {
-        if (!barShown) setState(() => barShown = true);
-        tc.selection = TextSelection(baseOffset: 0, extentOffset: tc.text.length);
+        setState(() {
+          barShown = true;
+          editing = true;
+        });
+        // Dokunuşun imleci yerleştirmesinden sonra tümünü seç
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (focus.hasFocus) {
+            tc.selection =
+                TextSelection(baseOffset: 0, extentOffset: tc.text.length);
+          }
+        });
       } else {
         tc.text = shownUrl(t.url);
+        if (editing) setState(() => editing = false);
       }
     });
+  }
+
+  // Klavye kapanınca (geri tuşu) düzenleme modundan çık
+  @override
+  void didChangeMetrics() {
+    final b = View.of(context).viewInsets.bottom;
+    if (_kbWas && b == 0 && editing) focus.unfocus();
+    _kbWas = b > 0;
   }
 
   @override
@@ -84,6 +106,7 @@ class _BrowserPageState extends State<BrowserPage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     s.removeListener(_onSettings);
     _bannerTimer?.cancel();
     tc.dispose();
@@ -435,7 +458,7 @@ class _BrowserPageState extends State<BrowserPage> {
   // ---------------------------------------------------------------- arayüz
 
   Widget _topBar(ColorScheme cs) {
-    final bar = Color.alphaBlend(cs.primary.withValues(alpha: .08), cs.surface);
+    final bar = cs.surfaceContainerHighest;
     final bm = s.isBookmarked(t.url);
     return Material(
       color: cs.surface,
@@ -467,10 +490,10 @@ class _BrowserPageState extends State<BrowserPage> {
                     onPressed: () => openUrl(homeUrl)),
                 Expanded(
                   child: Container(
-                    height: 44,
-                    padding: const EdgeInsets.only(left: 16),
+                    height: 48,
+                    padding: const EdgeInsets.only(left: 18),
                     decoration: BoxDecoration(
-                        color: bar, borderRadius: BorderRadius.circular(22)),
+                        color: bar, borderRadius: BorderRadius.circular(24)),
                     child: Row(
                       children: [
                         Expanded(
@@ -481,22 +504,31 @@ class _BrowserPageState extends State<BrowserPage> {
                             keyboardType: TextInputType.url,
                             textInputAction: TextInputAction.go,
                             maxLines: 1,
+                            style: const TextStyle(
+                                fontSize: 16.5, fontWeight: FontWeight.w600),
                             decoration: InputDecoration(
                                 isCollapsed: true,
                                 border: InputBorder.none,
                                 hintText: S.t('search')),
                           ),
                         ),
-                        ValueListenableBuilder<bool>(
-                          key: ObjectKey(t),
-                          valueListenable: t.loading,
-                          builder: (_, l, __) => IconButton(
+                        if (editing)
+                          IconButton(
                             visualDensity: VisualDensity.compact,
-                            icon: Icon(l ? Icons.close : Icons.refresh),
-                            onPressed: () =>
-                                l ? t.c?.stopLoading() : t.c?.reload(),
+                            icon: const Icon(Icons.keyboard_return_rounded),
+                            onPressed: () => go(tc.text),
+                          )
+                        else
+                          ValueListenableBuilder<bool>(
+                            key: ObjectKey(t),
+                            valueListenable: t.loading,
+                            builder: (_, l, __) => IconButton(
+                              visualDensity: VisualDensity.compact,
+                              icon: Icon(l ? Icons.close : Icons.refresh),
+                              onPressed: () =>
+                                  l ? t.c?.stopLoading() : t.c?.reload(),
+                            ),
                           ),
-                        ),
                       ],
                     ),
                   ),
@@ -606,8 +638,8 @@ class _BrowserPageState extends State<BrowserPage> {
         useOnDownloadStart: true,
         useShouldOverrideUrlLoading: true,
         mixedContentMode: MixedContentMode.MIXED_CONTENT_COMPATIBILITY_MODE,
-        // Akıcılık: hybrid composition = yerel WebView çizimi (bulanıklık/titreme yok)
-        useHybridComposition: true,
+        // Akıcılık: hybrid composition kapalı (kaydırmada Flutter-WebView beklemesi azalır)
+        useHybridComposition: false,
         overScrollMode: OverScrollMode.NEVER,
         verticalScrollBarEnabled: false,
         horizontalScrollBarEnabled: false,
@@ -786,6 +818,8 @@ class _BrowserPageState extends State<BrowserPage> {
         }
       },
       child: Scaffold(
+        // Adres düzenlerken WebView klavyeyle yeniden boyutlanmasın (hızlı klavye)
+        resizeToAvoidBottomInset: !editing,
         body: SafeArea(
           bottom: false,
           child: Column(
@@ -828,6 +862,15 @@ class _BrowserPageState extends State<BrowserPage> {
                             }),
                       ],
                     ),
+                    // Adres düzenleme: tam ekran beyaz alan
+                    if (editing)
+                      Positioned.fill(
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => focus.unfocus(),
+                          child: ColoredBox(color: cs.surface),
+                        ),
+                      ),
                     // Karartma
                     Positioned.fill(
                       child: IgnorePointer(

@@ -7,26 +7,22 @@ import '../core/strings.dart';
 /// için tema rengiyle birebir aynı zeminle çizilir.
 String buildHomeHtml(AppSettings s, bool dark) {
   const esc = HtmlEscape(HtmlEscapeMode.attribute);
-  final bg = dark ? '#121212' : '#ffffff';
-  final fg = dark ? '#eeeeee' : '#1b1b1f';
-  final card = dark ? '#2a2c33' : '#eef0fb';
+  final bg = dark ? '#202124' : '#ffffff';
+  final fg = dark ? '#e8eaed' : '#202124';
+  final card = dark ? '#303134' : '#f1f3f4';
   final sub = dark ? '#9aa0a6' : '#5f6368';
-  const palette = [
-    '#1a73e8', '#e8453c', '#0f9d58', '#f29900', '#9334e6', '#00897b', '#d81b60',
-    '#5c6bc0'
-  ];
   final tiles = StringBuffer();
-  var k = 0;
   for (final e in s.homeSites()) {
     final name = e[0];
-    final letter = name.isEmpty ? '?' : name.characters0;
-    final col = palette[k++ % palette.length];
-    tiles.write('<a class="t" href="${esc.convert(e[1])}">'
-        '<div class="i" style="background:$col">${esc.convert(letter)}</div>'
+    var u = e[1].trim();
+    if (!u.contains('://')) u = 'https://$u';
+    final host = Uri.tryParse(u)?.host ?? '';
+    tiles.write('<a class="t" href="${esc.convert(u)}">'
+        '<div class="i"><img class="lg" alt="" data-h="${esc.convert(host)}"></div>'
         '<span>${esc.convert(name)}</span></a>');
   }
   tiles.write('<a class="t" href="#" id="addfav">'
-      '<div class="i" style="background:#5f6368">+</div>'
+      '<div class="i" style="background:#5f6368;color:#fff">+</div>'
       '<span>${esc.convert(S.t('add'))}</span></a>');
   final base = jsonEncode(searchEngines[s.engine] ?? searchEngines['Google']);
   return '''<!doctype html><html><head><meta charset="utf-8">
@@ -35,7 +31,7 @@ String buildHomeHtml(AppSettings s, bool dark) {
 *{-webkit-tap-highlight-color:transparent}
 html,body{margin:0;background:$bg;color:$fg;font-family:sans-serif}
 body{padding:28px 16px 40px;min-height:100vh;box-sizing:border-box}
-h1{text-align:center;font-weight:300;font-size:28px;margin:26px 0 8px}
+h1{text-align:center;font-weight:700;font-size:28px;margin:26px 0 8px}
 p{text-align:center;margin:0 0 22px;color:$sub;font-size:13px}
 form{max-width:520px;margin:0 auto 30px}
 input{width:100%;box-sizing:border-box;padding:14px 20px;border-radius:28px;border:0;
@@ -43,15 +39,25 @@ background:$card;color:$fg;font-size:16px;outline:none}
 .g{display:grid;grid-template-columns:repeat(4,1fr);gap:20px 8px;max-width:520px;margin:auto}
 .t{text-decoration:none;color:$fg;text-align:center;font-size:12px;transition:transform .12s}
 .t:active{transform:scale(.92)}
-.i{width:56px;height:56px;border-radius:50%;margin:0 auto 6px;color:#fff;
-display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:600}
-.t span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.i{width:56px;height:56px;border-radius:50%;margin:0 auto 6px;background:$card;overflow:hidden;
+display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:600}
+.i img{width:32px;height:32px;object-fit:contain}
+.t span{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style></head><body>
 <h1>${esc.convert(S.t('home'))}</h1><p>${esc.convert(S.t('favHint'))}</p>
 <form id="f"><input id="q" placeholder="${esc.convert(S.t('search'))}" autocomplete="off"></form>
 <div class="g">$tiles</div>
 <script>
 var base=$base;
+var globe='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#9aa0a6" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></svg>');
+document.querySelectorAll('img.lg').forEach(function(im){
+ var h=im.getAttribute('data-h'), k=0;
+ var src=['https://www.google.com/s2/favicons?domain='+h+'&sz=128','https://icons.duckduckgo.com/ip3/'+h+'.ico','https://'+h+'/favicon.ico'];
+ function next(){ im.src = k<src.length ? src[k++] : globe; }
+ im.onerror=function(){ if(im.src!==globe) next(); };
+ im.onload=function(){ if(im.src.indexOf('s2/favicons')>0 && im.naturalWidth<=16) next(); };
+ if(!h){ im.src=globe; } else { next(); }
+});
 function H(n,a,b){try{window.flutter_inappwebview.callHandler(n,a,b)}catch(e){}}
 document.getElementById('addfav').addEventListener('click',function(e){e.preventDefault();H('addFav','','')});
 document.querySelectorAll('.t').forEach(function(a){

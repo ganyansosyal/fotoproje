@@ -135,8 +135,6 @@ class SettingsPage extends StatelessWidget {
                   underline: const SizedBox.shrink(),
                   items: [
                     DropdownMenuItem(
-                        value: 'system', child: Text(S.t('themeSystem'))),
-                    DropdownMenuItem(
                         value: 'light', child: Text(S.t('themeLight'))),
                     DropdownMenuItem(
                         value: 'dark', child: Text(S.t('themeDark'))),
@@ -145,12 +143,6 @@ class SettingsPage extends StatelessWidget {
                     if (v != null) s.setString('theme', v);
                   },
                 ),
-              ),
-              ListTile(
-                title: Text(S.t('themeColor')),
-                trailing: CircleAvatar(
-                    radius: 12, backgroundColor: Color(s.accent)),
-                onTap: () => _pickColor(context),
               ),
               _Switch(S.t('syncGallery'), s.syncGallery ? S.t('on') : S.t('off'),
                   s.syncGallery, (v) => s.setBool('syncGallery', v)),
@@ -173,40 +165,6 @@ class SettingsPage extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-
-  static const _colors = <int>[
-    0xFF1A73E8, 0xFF0F9D58, 0xFFE8453C, 0xFFF29900, 0xFF9334E6,
-    0xFF00897B, 0xFFD81B60, 0xFF5C6BC0, 0xFF6D4C41, 0xFF546E7A,
-  ];
-
-  void _pickColor(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(S.t('themeColor')),
-        content: Wrap(
-          spacing: 14,
-          runSpacing: 14,
-          children: [
-            for (final c in _colors)
-              GestureDetector(
-                onTap: () {
-                  s.setAccent(c);
-                  Navigator.pop(ctx);
-                },
-                child: CircleAvatar(
-                  radius: 22,
-                  backgroundColor: Color(c),
-                  child: s.accent == c
-                      ? const Icon(Icons.check, color: Colors.white)
-                      : null,
-                ),
-              ),
-          ],
-        ),
-      ),
     );
   }
 

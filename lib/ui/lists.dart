@@ -111,22 +111,36 @@ Future<void> showAddFavDialog(BuildContext context, AppSettings s,
 
 Future<void> confirmRemoveFav(
     BuildContext context, AppSettings s, String url, String name) async {
-  final ok = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: Text(name),
-      content: Text(S.t('removeFavQ')),
-      actions: [
-        TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text(S.t('cancel'))),
-        FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(S.t('delete'))),
-      ],
+  await showSnapSheet<void>(
+    context,
+    (ctx) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(22, 0, 22, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: 18, fontWeight: FontWeight.w800)),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete_outline_rounded),
+            title: Text(S.t('removeFav')),
+            onTap: () {
+              Navigator.pop(ctx);
+              s.removeFavorite(url);
+            },
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
     ),
   );
-  if (ok == true) s.removeFavorite(url);
 }
 
 /// Favori siteler: açma, silme ve ekleme
