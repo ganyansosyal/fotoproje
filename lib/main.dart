@@ -21,16 +21,16 @@ class App extends StatelessWidget {
 
   ThemeData _theme(Brightness b) {
     final cs = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF1A73E8),
+      seedColor: Color(settings.accent),
       brightness: b,
     );
     return ThemeData(
       useMaterial3: true,
       colorScheme: cs,
       scaffoldBackgroundColor: cs.surface,
-      // Sayfa geçişleri: sade ve akıcı
+      // Zıplama/yaylanma yok: kısa ve düz geçişler
       pageTransitionsTheme: const PageTransitionsTheme(builders: {
-        TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
+        TargetPlatform.android: FadeUpwardsPageTransitionsBuilder(),
       }),
       splashFactory: InkSparkle.splashFactory,
       navigationBarTheme: NavigationBarThemeData(
@@ -52,6 +52,7 @@ class App extends StatelessWidget {
         theme: _theme(Brightness.light),
         darkTheme: _theme(Brightness.dark),
         themeMode: settings.themeMode,
+        scrollBehavior: const _FlatScroll(),
         builder: (context, child) {
           final dark = Theme.of(context).brightness == Brightness.dark;
           return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -71,4 +72,16 @@ class App extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Kenarda yaylanma / uzama efekti olmayan, düz kaydırma.
+class _FlatScroll extends MaterialScrollBehavior {
+  const _FlatScroll();
+  @override
+  Widget buildOverscrollIndicator(
+          BuildContext context, Widget child, ScrollableDetails details) =>
+      child;
+  @override
+  ScrollPhysics getScrollPhysics(BuildContext context) =>
+      const ClampingScrollPhysics();
 }
