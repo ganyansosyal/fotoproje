@@ -110,7 +110,7 @@ const hookJs = r'''
 const scrollJs = r'''
 (function(){ if(window.__sc) return; window.__sc=1;
  var last=new WeakMap(), dir='', mute=0, acc=0;
- function send(d){ if(d===dir) return; dir=d; mute=Date.now()+450; acc=0;
+ function send(d){ if(d===dir) return; dir=d; mute=Date.now()+180; acc=0;
   try{window.flutter_inappwebview.callHandler('scrollDir',d);}catch(e){} }
  document.addEventListener('scroll',function(e){
   var now=Date.now();
@@ -127,7 +127,7 @@ const scrollJs = r'''
   if(Math.abs(d)>350){ acc=0; return; }
   if((d>0)!==(acc>0)) acc=0;
   acc+=d;
-  if(acc>90){ send('down'); } else if(acc<-50){ send('up'); }
+  if(acc>40){ send('down'); } else if(acc<-12){ send('up'); }
  },{capture:true,passive:true});
 })();
 ''';
@@ -195,5 +195,18 @@ const viewportJs = r'''
  var mo=new MutationObserver(scan);
  mo.observe(document,{subtree:true,childList:true,attributes:true,attributeFilter:['content']});
  window.addEventListener('load',function(){ scan(); mo.disconnect(); },{once:true});
+})();
+''';
+
+/// İlk içerik çizildiğinde Flutter'a haber verir (yenilemede eski görüntüyü kaldırmak için).
+const paintJs = r'''
+(function(){ if(window.__pt) return; window.__pt=1;
+ try{ var o=new PerformanceObserver(function(l,ob){
+   var es=l.getEntries(); for(var i=0;i<es.length;i++){
+    if(es[i].name==='first-contentful-paint'){
+     ob.disconnect();
+     try{window.flutter_inappwebview.callHandler('paint');}catch(e){}
+     return; } } });
+  o.observe({type:'paint',buffered:true}); }catch(e){}
 })();
 ''';
