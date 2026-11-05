@@ -23,8 +23,28 @@ class MainActivity : FlutterActivity() {
     private lateinit var nat: MethodChannel
     private val ui = Handler(Looper.getMainLooper())
 
+    // Ekranın aynı çözünürlükteki en yüksek yenileme hızını (90/120 Hz) ister.
+    @Suppress("DEPRECATION")
+    private fun requestHighRefreshRate() {
+        try {
+            if (Build.VERSION.SDK_INT < 23) return
+            val d = if (Build.VERSION.SDK_INT >= 30) display
+            else windowManager.defaultDisplay
+            if (d == null) return
+            val cur = d.mode
+            val best = d.supportedModes
+                .filter { it.physicalWidth == cur.physicalWidth && it.physicalHeight == cur.physicalHeight }
+                .maxByOrNull { it.refreshRate } ?: return
+            val lp = window.attributes
+            lp.preferredDisplayModeId = best.modeId
+            window.attributes = lp
+        } catch (_: Throwable) {
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        requestHighRefreshRate()
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
