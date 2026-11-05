@@ -684,7 +684,7 @@ class _BrowserPageState extends State<BrowserPage>
             callback: (args) {
               if (mounted && x == t) focus.requestFocus();
               return null;
-            }),
+            });
         c.addJavaScriptHandler(
             handlerName: 'addFav',
             callback: (args) {
