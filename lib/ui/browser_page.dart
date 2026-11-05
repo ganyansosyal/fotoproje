@@ -51,7 +51,7 @@ class _BrowserPageState extends State<BrowserPage>
   // Üst bar kaydırınca gizlensin mi? Gizleme, sayfanın boyutunu/konumunu
   // kaydırma sırasında değiştirdiği için takılma yapar. false: bar sabit, sayfa
   // kaydırma sırasında hiç yeniden yerleşmez (en akıcı).
-  static const bool _autoHideBar = false;
+  static const bool _autoHideBar = true;
   static const double _barH = 62; // üst bar yüksekliği (60 + 2 ilerleme çizgisi)
   // Üst bar sayfanın üstüne biner; kaplamalar barın altından başlar
   double get _top => (section == 0 && barShown) ? _barH : 0;
@@ -746,7 +746,7 @@ class _BrowserPageState extends State<BrowserPage>
               final show = args[0].toString() != 'down';
               final now = DateTime.now();
               // Çok sık açılıp kapanmasın
-              if (now.difference(_lastBarToggle).inMilliseconds < 500) {
+              if (now.difference(_lastBarToggle).inMilliseconds < 700) {
                 return null;
               }
               if (show != barShown && !focus.hasFocus) {
@@ -946,7 +946,9 @@ class _BrowserPageState extends State<BrowserPage>
                               // Sayfa (platform görünümü) animasyonla kaydırılmaz:
                               // her karede yeniden konumlandırmak takılma ve
                               // bulanıklık yapar. Tek karede yer değiştirir.
-                              Positioned(
+                              AnimatedPositioned(
+                                duration: const Duration(milliseconds: 380),
+                                curve: Curves.easeInOutCubic,
                                 left: 0,
                                 right: 0,
                                 top: barShown ? _barH : 0,
@@ -957,8 +959,8 @@ class _BrowserPageState extends State<BrowserPage>
                                 ),
                               ),
                               AnimatedPositioned(
-                                duration: const Duration(milliseconds: 180),
-                                curve: Curves.easeOutCubic,
+                                duration: const Duration(milliseconds: 380),
+                                curve: Curves.easeInOutCubic,
                                 left: 0,
                                 right: 0,
                                 top: barShown ? 0 : -_barH,
