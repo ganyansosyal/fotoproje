@@ -110,13 +110,13 @@ const hookJs = r'''
 const scrollJs = r'''
 (function(){ if(window.__sc) return; window.__sc=1;
  var last=new WeakMap(), dir='', mute=0, acc=0;
- function send(d){ if(d===dir) return; dir=d; mute=Date.now()+350; acc=0;
+ function send(d){ if(d===dir) return; dir=d; mute=Date.now()+250; acc=0;
   try{window.flutter_inappwebview.callHandler('scrollDir',d);}catch(e){} }
  document.addEventListener('scroll',function(e){
   var now=Date.now();
   var el=e.target;
   if(el===document||el===document.documentElement||el===document.body) el=document.scrollingElement||document.documentElement;
-  if(!el||el.clientHeight<window.innerHeight*0.5) return;
+  if(!el||el.clientHeight<window.innerHeight*0.4) return;
   var y=el.scrollTop, p=last.get(el); last.set(el,y);
   // Bar gizlenip gösterilirken WebView boyutu değişir; o sırada oluşan kaymalar sayılmaz.
   if(now<mute) return;
@@ -127,7 +127,7 @@ const scrollJs = r'''
   if(Math.abs(d)>350){ acc=0; return; }
   if((d>0)!==(acc>0)) acc=0;
   acc+=d;
-  if(acc>160){ send('down'); } else if(acc<-160){ send('up'); }
+  if(acc>90){ send('down'); } else if(acc<-50){ send('up'); }
  },{capture:true,passive:true});
 })();
 ''';
