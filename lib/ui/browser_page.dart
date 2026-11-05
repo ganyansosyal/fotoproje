@@ -301,7 +301,7 @@ class _BrowserPageState extends State<BrowserPage>
   Future<void> _startDownload(String url, {TabData? from, String? hint}) async {
     final x = from ?? t;
     final err = await dm.start(url,
-        referer: x.url,
+        referer: x.playerRef ?? x.url,
         hint: hint ?? x.hints[url],
         title: x.title.isEmpty ? null : x.title,
         blobReader: _readBlob);
@@ -357,24 +357,39 @@ class _BrowserPageState extends State<BrowserPage>
   }
 
   Future<List<MediaInfo>> _findNow() async {
-    var items = t.found.value;
+    final x = t;
+    // Oynayan/açık video yoksa arama yapılmaz.
+    if (x.playerId == null) return const [];
+    var items = x.found.value;
     if (items.isNotEmpty) return items;
     _toast(S.t('checking'));
-    final urls = await _collectMedia();
-    items = await probeAll(urls, t.hints, t.url);
-    t.found.value = items;
+    final gen = ++x.probeGen;
+    items = await _probePlayer(x);
+    if (gen == x.probeGen && x.playerId != null) x.found.value = items;
     return items;
+  }
+
+  Future<List<MediaInfo>> _probePlayer(TabData x) {
+    final urls = x.media
+        .where((u) => u.startsWith('http') || u.startsWith('blob:'))
+        .toList();
+    return probeAll(urls, x.hints, x.playerRef ?? x.url,
+        expectDur: x.playerLive ? 0 : x.playerDur,
+        exactSrc: x.playerSrc,
+        height: x.playerH);
   }
 
   void _scheduleProbe(TabData x) {
     x.probeTimer?.cancel();
-    x.probeTimer = Timer(const Duration(milliseconds: 1500), () async {
+    if (x.playerId == null) {
+      x.found.value = const [];
+      return;
+    }
+    x.probeTimer = Timer(const Duration(milliseconds: 600), () async {
       if (x.disposed) return;
-      final urls = x.media
-          .where((u) => u.startsWith('http') || u.startsWith('blob:'))
-          .toList();
-      final res = await probeAll(urls, x.hints, x.url);
-      if (x.disposed) return;
+      final gen = ++x.probeGen;
+      final res = await _probePlayer(x);
+      if (x.disposed || gen != x.probeGen || x.playerId == null) return;
       x.found.value = res;
       if (res.isNotEmpty && x == t && mounted && !x.bannerDone) {
         x.bannerDone = true;
@@ -395,26 +410,6 @@ class _BrowserPageState extends State<BrowserPage>
   void _hideBanner() {
     _bannerTimer?.cancel();
     if (_bannerOn && mounted) setState(() => _bannerOn = false);
-  }
-
-  Future<List<String>> _collectMedia() async {
-    dynamic r;
-    try {
-      r = await t.c?.evaluateJavascript(source: """
-        (function(){var r=[];
-          document.querySelectorAll('video,audio,source').forEach(function(e){
-            var u=e.currentSrc||e.src; if(u) r.push(u)});
-          (window.__media||[]).forEach(function(u){r.push(u)});
-          return r;})()
-      """);
-    } catch (_) {}
-    final all = <String>{
-      ...t.media,
-      if (r is List)
-        for (final u in r)
-          if (u is String) u
-    };
-    return all.where((u) => u.startsWith('http') || u.startsWith('blob:')).toList();
   }
 
   // ---------------------------------------------------------------- menü
@@ -662,12 +657,13 @@ class _BrowserPageState extends State<BrowserPage>
       onWebViewCreated: (c) {
         x.c = c;
         c.addJavaScriptHandler(
-            handlerName: 'media',
+            handlerName: 'player',
             callback: (args) {
-              if (args.isEmpty) return null;
-              x.addMedia(args[0].toString(),
-                  args.length > 1 && args[1] != null ? args[1].toString() : null);
-              _scheduleProbe(x);
+              if (args.isEmpty || x.disposed) return null;
+              if (x.onPlayer(args[0].toString())) {
+                if (x.playerId == null && x == t) _hideBanner();
+                _scheduleProbe(x);
+              }
               return null;
             });
         c.addJavaScriptHandler(
