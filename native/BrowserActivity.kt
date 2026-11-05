@@ -26,6 +26,16 @@ import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.ProgressBar
 import android.widget.TextView
+import android.widget.Toast
+import android.app.AlertDialog
+import android.os.Handler
+import android.os.Looper
+import android.webkit.JavascriptInterface
+import android.webkit.WebResourceResponse
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
+import io.flutter.plugin.common.MethodChannel
+import org.json.JSONObject
 
 /**
  * Yerel (Flutter'sız) tarayıcı ekranı. Amaç: kaydırma akıcılığı.
@@ -49,6 +59,30 @@ class BrowserActivity : Activity() {
     private var mobileUa = ""
     private var customView: View? = null
     private var customCb: WebChromeClient.CustomViewCallback? = null
+
+    // ---- video yakalama
+    private val ui = Handler(Looper.getMainLooper())
+    private var hookJs = ""
+    private var noAutoJs = ""
+    private var docStart = false
+    private lateinit var fab: LinearLayout
+    private lateinit var fabText: TextView
+    private var playerId: String? = null
+    private var pDur = 0.0
+    private var pLive = false
+    private var pH = 0
+    private var pSrc = ""
+    private var pRef: String? = null
+    private val pUrls = ArrayList<String>()
+    private val pHints = HashMap<String, String>()
+    private var found: List<Found> = emptyList()
+    private var probeGen = 0
+    private var bannerDone = false
+    private val netCands = ArrayList<NetCand>()
+    private val probeRun = Runnable { runProbe(null) }
+
+    private class Found(val url: String, val kind: String, val title: String, val subtitle: String)
+    private class NetCand(val url: String, val kind: String, var t: Long)
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
     private fun dpf(v: Int): Float = v * resources.displayMetrics.density
@@ -151,6 +185,39 @@ class BrowserActivity : Activity() {
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, barH)
         )
 
+        // ---- video indirme düğmesi (video bulununca yeşil)
+        fab = LinearLayout(this)
+        fab.orientation = LinearLayout.HORIZONTAL
+        fab.gravity = Gravity.CENTER_VERTICAL
+        fab.setPadding(dp(11), 0, dp(11), 0)
+        fab.elevation = dpf(4)
+        fab.background = GradientDrawable().apply {
+            cornerRadius = dpf(20)
+            setColor(FAB_OFF)
+        }
+        val fabIcon = TextView(this)
+        fabIcon.text = "⬇"
+        fabIcon.textSize = 16f
+        fabIcon.setTextColor(Color.WHITE)
+        fab.addView(fabIcon)
+        fabText = TextView(this)
+        fabText.text = "Videoyu al"
+        fabText.textSize = 13f
+        fabText.setTextColor(Color.WHITE)
+        fabText.setTypeface(fabText.typeface, android.graphics.Typeface.BOLD)
+        fabText.setPadding(dp(8), 0, 0, 0)
+        fabText.visibility = View.GONE
+        fab.addView(fabText)
+        fab.setOnClickListener { onFabTap() }
+        content.addView(
+            fab,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(40)).apply {
+                gravity = Gravity.END or Gravity.BOTTOM
+                rightMargin = dp(16)
+                bottomMargin = dp(16)
+            }
+        )
+
         // ---- alt çubuk: geri / ileri / yenile / uygulamaya dön
         val line = View(this)
         line.setBackgroundColor(0xFFDADCE0.toInt())
@@ -179,6 +246,7 @@ class BrowserActivity : Activity() {
 
         setContentView(root)
         setupWeb()
+        setupVideo()
 
         val u = intent.getStringExtra("url") ?: "https://www.google.com"
         web.loadUrl(u)
@@ -230,6 +298,27 @@ class BrowserActivity : Activity() {
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 if (!urlBox.hasFocus()) urlBox.setText(shown(url))
                 setBar(true)
+                clearMedia()
+                if (!docStart) injectNow()
+            }
+
+            override fun onPageFinished(view: WebView?, url: String?) {
+                if (!docStart) injectNow()
+            }
+
+            override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+                if (!urlBox.hasFocus()) urlBox.setText(shown(url))
+                updateFab()
+            }
+
+            // Engellemez; yalnızca video adreslerini not eder (ayrı iş parçacığında).
+            override fun shouldInterceptRequest(
+                view: WebView?,
+                request: WebResourceRequest?
+            ): WebResourceResponse? {
+                val u = request?.url?.toString()
+                if (u != null) noteNet(u)
+                return null
             }
         }
 
@@ -316,12 +405,14 @@ class BrowserActivity : Activity() {
         val m = PopupMenu(this, anchor)
         m.menu.add(0, 1, 0, if (desktop) "✓ Masaüstü sitesi" else "Masaüstü sitesi")
         m.menu.add(0, 2, 1, "Yenile")
-        m.menu.add(0, 3, 2, "Uygulamaya dön")
+        m.menu.add(0, 4, 2, "Bulunan videolar")
+        m.menu.add(0, 3, 3, "Uygulamaya dön")
         m.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> toggleDesktop()
                 2 -> web.reload()
                 3 -> finish()
+                4 -> showFound()
             }
             true
         }
@@ -392,12 +483,302 @@ class BrowserActivity : Activity() {
     }
 
     override fun onDestroy() {
+        ui.removeCallbacks(probeRun)
         content.removeView(web)
         web.destroy()
         super.onDestroy()
     }
 
+
+    // =====================================================================
+    //  Video yakalama. Algılama betiği (hookJs) Dart'tan gelir; inceleme ve
+    //  indirme Flutter tarafındaki (Dart) yöneticiye "app/browser" kanalıyla sorulur.
+    // =====================================================================
+    private inner class Bridge {
+        @JavascriptInterface
+        fun h(name: String, arg: String) {
+            if (name != "player") return
+            ui.post { onPlayer(arg) }
+        }
+    }
+
+    @SuppressLint("JavascriptInterface")
+    private fun setupVideo() {
+        hookJs = intent.getStringExtra("hook") ?: ""
+        noAutoJs = intent.getStringExtra("noAutoplay") ?: ""
+        web.addJavascriptInterface(Bridge(), "__fp")
+        if (hookJs.isEmpty()) return
+        try {
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                // Tüm çerçevelerde (iframe dahil) sayfa başlamadan çalışır
+                WebViewCompat.addDocumentStartJavaScript(web, SHIM + "\n" + hookJs, setOf("*"))
+                if (noAutoJs.isNotEmpty()) {
+                    WebViewCompat.addDocumentStartJavaScript(web, noAutoJs, setOf("*"))
+                }
+                docStart = true
+            }
+        } catch (_: Throwable) {
+            docStart = false
+        }
+    }
+
+    // Belge-başı betik desteklenmiyorsa: yalnızca ana çerçeveye sonradan enjekte
+    private fun injectNow() {
+        if (hookJs.isEmpty()) return
+        web.evaluateJavascript(SHIM + "\n" + hookJs, null)
+        if (noAutoJs.isNotEmpty()) web.evaluateJavascript(noAutoJs, null)
+    }
+
+    private fun isYoutube(u: String): Boolean {
+        val x = u.lowercase()
+        return x.contains("youtube.com/watch") || x.contains("youtube.com/shorts") ||
+            x.contains("youtu.be/")
+    }
+
+    private fun toast(m: String) {
+        Toast.makeText(this, m, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun res(onOk: (Any?) -> Unit, onFail: () -> Unit = {}): MethodChannel.Result =
+        object : MethodChannel.Result {
+            override fun success(result: Any?) {
+                onOk(result)
+            }
+
+            override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+                onFail()
+            }
+
+            override fun notImplemented() {
+                onFail()
+            }
+        }
+
+    // ---- ağ seviyesinde aday adresler
+    private val mediaRe = Regex(
+        "\\.(m3u8|mpd|mp4|webm|m4v|mov|mkv|flv)(?:\$|[?#/])", RegexOption.IGNORE_CASE
+    )
+    private val badRe = Regex(
+        "(imasdk|adservice|adsystem|preroll|midroll|vpaid|tracking|beacon|analytics|thumb|sprite|storyboard|preview|[/_.-]ads?[/_.-]|[/_.-]advert|[/_.-]vast[/_.?-])",
+        RegexOption.IGNORE_CASE
+    )
+    private val segRe = Regex(
+        "((seg|segment|chunk|frag|fragment)[-_.]?\\d|/init[-_.][^/]*\$|[?&](bytestart|byterange|range|sq|seg|segment|chunk)=)",
+        RegexOption.IGNORE_CASE
+    )
+
+    private fun noteNet(u: String) {
+        if (u.length > 2500) return
+        val k = mediaRe.find(u) ?: return
+        if (badRe.containsMatchIn(u) || segRe.containsMatchIn(u)) return
+        val now = System.currentTimeMillis()
+        var isNew = true
+        synchronized(netCands) {
+            for (c in netCands) {
+                if (c.url == u) {
+                    c.t = now
+                    isNew = false
+                    break
+                }
+            }
+            if (isNew) {
+                netCands.add(NetCand(u, k.groupValues[1].lowercase(), now))
+                if (netCands.size > 40) netCands.removeAt(0)
+            }
+        }
+        if (isNew) ui.post { if (playerId != null) scheduleProbe() }
+    }
+
+    // ---- oynatıcı bildirimi (hookJs'ten)
+    private fun onPlayer(raw: String) {
+        val m = try {
+            JSONObject(raw)
+        } catch (_: Exception) {
+            return
+        }
+        val id = m.optString("id")
+        if (m.optBoolean("stop", false)) {
+            if (id != playerId) return
+            clearMedia()
+            return
+        }
+        val dur = m.optDouble("d", 0.0)
+        if (id != playerId || Math.abs(dur - pDur) > 1) bannerDone = false
+        playerId = id
+        pDur = dur
+        pLive = m.optBoolean("live", false)
+        pH = m.optInt("h", 0)
+        pSrc = m.optString("src", "")
+        val ref = m.optString("ref", "")
+        pRef = if (ref.startsWith("http")) ref else null
+        pUrls.clear()
+        m.optJSONArray("urls")?.let { a ->
+            for (i in 0 until a.length()) pUrls.add(a.getString(i))
+        }
+        pHints.clear()
+        m.optJSONObject("hints")?.let { h ->
+            val keys = h.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                pHints[k] = h.optString(k)
+            }
+        }
+        scheduleProbe()
+    }
+
+    private fun clearMedia() {
+        ui.removeCallbacks(probeRun)
+        probeGen++
+        synchronized(netCands) { netCands.clear() }
+        pUrls.clear()
+        pHints.clear()
+        playerId = null
+        pDur = 0.0
+        pLive = false
+        pH = 0
+        pSrc = ""
+        pRef = null
+        found = emptyList()
+        bannerDone = false
+        updateFab()
+    }
+
+    private fun scheduleProbe() {
+        ui.removeCallbacks(probeRun)
+        if (playerId == null) {
+            found = emptyList()
+            updateFab()
+            return
+        }
+        ui.postDelayed(probeRun, 600)
+    }
+
+    private fun probeArgs(): Map<String, Any?> {
+        val now = System.currentTimeMillis()
+        val net = synchronized(netCands) { netCands.filter { now - it.t < 90_000 } }
+        val urls = LinkedHashSet<String>()
+        urls.addAll(pUrls)
+        for (c in net) urls.add(c.url)
+        val hints = HashMap<String, String>(pHints)
+        for (c in net) hints[c.url] = c.kind
+        return mapOf(
+            "urls" to urls.filter { it.startsWith("http") || it.startsWith("blob:") },
+            "hints" to hints,
+            "ref" to (pRef ?: web.url ?: ""),
+            "dur" to (if (pLive) 0.0 else pDur),
+            "src" to pSrc,
+            "h" to pH
+        )
+    }
+
+    private fun runProbe(onDone: ((List<Found>) -> Unit)?) {
+        val ch = MainActivity.browser
+        if (playerId == null || ch == null) {
+            onDone?.invoke(emptyList())
+            return
+        }
+        val gen = ++probeGen
+        ch.invokeMethod("probe", probeArgs(), res({ r ->
+            if (gen != probeGen || playerId == null) {
+                onDone?.invoke(found)
+            } else {
+                val list = (r as? List<*>)?.mapNotNull { e ->
+                    (e as? Map<*, *>)?.let {
+                        Found(
+                            it["url"].toString(), it["kind"].toString(),
+                            it["title"].toString(), it["subtitle"].toString()
+                        )
+                    }
+                } ?: emptyList()
+                found = list
+                updateFab()
+                if (list.isNotEmpty() && !bannerDone) {
+                    bannerDone = true
+                    toast("Video bulundu")
+                }
+                onDone?.invoke(list)
+            }
+        }, { onDone?.invoke(emptyList()) }))
+    }
+
+    private fun updateFab() {
+        val on = found.isNotEmpty() || isYoutube(web.url ?: "")
+        fabText.visibility = if (on) View.VISIBLE else View.GONE
+        (fab.background as GradientDrawable).setColor(if (on) FAB_ON else FAB_OFF)
+    }
+
+    // ---- indirme
+    private fun download(f: Found) {
+        val ch = MainActivity.browser
+        if (ch == null) {
+            toast("Uygulama motoru hazır değil, uygulamayı yeniden açın")
+            return
+        }
+        ch.invokeMethod(
+            "download",
+            mapOf(
+                "url" to f.url,
+                "kind" to f.kind,
+                "ref" to (pRef ?: web.url ?: ""),
+                "title" to (web.title ?: "")
+            ),
+            res({ r -> toast(if (r is String) r else "İndirme başladı") },
+                { toast("İndirme başlatılamadı") })
+        )
+    }
+
+    private fun downloadYoutube(u: String) {
+        val ch = MainActivity.browser
+        if (ch == null) {
+            toast("Uygulama motoru hazır değil, uygulamayı yeniden açın")
+            return
+        }
+        ch.invokeMethod(
+            "youtube", mapOf("url" to u, "title" to (web.title ?: "")),
+            res({ r -> toast(if (r is String) r else "İndirme başladı") },
+                { toast("İndirme başlatılamadı") })
+        )
+    }
+
+    private fun onFabTap() {
+        val u = web.url ?: ""
+        if (isYoutube(u)) {
+            downloadYoutube(u)
+            return
+        }
+        if (playerId == null) {
+            toast("Video bulunamadı")
+            return
+        }
+        if (found.isNotEmpty()) {
+            download(found[0])
+            return
+        }
+        toast("Kontrol ediliyor…")
+        runProbe { list -> if (list.isEmpty()) toast("Video bulunamadı") else download(list[0]) }
+    }
+
+    private fun showFound() {
+        if (found.isEmpty()) {
+            if (playerId == null) {
+                toast("Video bulunamadı")
+                return
+            }
+            runProbe { list -> if (list.isEmpty()) toast("Video bulunamadı") else showFound() }
+            return
+        }
+        val items = found.map { it.title + "\n" + it.subtitle }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Bulunan videolar")
+            .setItems(items) { _, i -> download(found[i]) }
+            .show()
+    }
+
     companion object {
+        private const val FAB_ON = 0xFF1E9E4A.toInt()
+        private const val FAB_OFF = 0x99757575.toInt()
+        private const val SHIM =
+            "(function(){if(window.flutter_inappwebview)return;window.flutter_inappwebview={callHandler:function(n,a){try{__fp.h(String(n),String(a));}catch(e){}return Promise.resolve();}};})();"
         private const val DESKTOP_UA =
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) " +
                 "Chrome/124.0.0.0 Safari/537.36"

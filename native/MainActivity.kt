@@ -22,6 +22,12 @@ import java.nio.ByteBuffer
 
 class MainActivity : FlutterActivity() {
     private lateinit var nat: MethodChannel
+
+    companion object {
+        /** Yerel tarayıcı ekranı (BrowserActivity) Dart tarafıyla bu kanaldan konuşur. */
+        @JvmStatic
+        var browser: MethodChannel? = null
+    }
     private val ui = Handler(Looper.getMainLooper())
 
     // Ekranın aynı çözünürlükteki en yüksek yenileme hızını (90/120 Hz) ister.
@@ -75,6 +81,7 @@ class MainActivity : FlutterActivity() {
             }
         }
 
+        browser = MethodChannel(msg, "app/browser")
         nat = MethodChannel(msg, "app/native")
         nat.setMethodCallHandler { call, result ->
             when (call.method) {
@@ -87,7 +94,10 @@ class MainActivity : FlutterActivity() {
                 "openNative" -> {
                     val u = call.argument<String>("url") ?: "https://www.google.com"
                     startActivity(
-                        Intent(this, BrowserActivity::class.java).putExtra("url", u)
+                        Intent(this, BrowserActivity::class.java)
+                            .putExtra("url", u)
+                            .putExtra("hook", call.argument<String>("hook") ?: "")
+                            .putExtra("noAutoplay", call.argument<String>("noAutoplay") ?: "")
                     )
                     result.success(true)
                 }
