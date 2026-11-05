@@ -1129,8 +1129,8 @@ class _BrowserPageState extends State<BrowserPage>
           ),
         ),
         // Alt çubuk klavyeyle birlikte yukarı kaymaz (takılma yapıyordu):
-        // adres düzenlerken klavyenin arkasında sabit kalır, sayfadaki bir
-        // alana yazarken ise klavye açıkken gizlenir.
+        // adres düzenlerken yerinde durur, klavye üstüne kayıp onu örter;
+        // sayfadaki bir alana yazarken ise klavye açıkken gizlenir.
         bottomNavigationBar: _KbHide(
             editing: editing || _hold,
             child: ListenableBuilder(
@@ -1185,8 +1185,8 @@ class _BrowserPageState extends State<BrowserPage>
 }
 
 /// Alt çubuk klavyeyle hiç kaymaz ve hiçbir şeyi yeniden boyutlandırmaz.
-/// - Adres düzenlerken: çubuk anında görünmez olur ama yeri korunur
-///   (sayfa/WebView boyutu değişmez; klavye üstüne kayarken çubuk görünmez).
+/// - Adres düzenlerken: çubuk yerinde görünür kalır, klavye açılırken/kapanırken
+///   üstüne kayıp onu örter (sayfa ve çubuk oynamaz).
 /// - Sayfadaki bir alana yazarken: klavye açıkken tek seferde gizlenir.
 class _KbHide extends StatelessWidget {
   final Widget child;
@@ -1195,15 +1195,7 @@ class _KbHide extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (editing) {
-      return Visibility(
-          visible: false,
-          maintainSize: true,
-          maintainState: true,
-          maintainAnimation: true,
-          child: child);
-    }
-    if (MediaQuery.viewInsetsOf(context).bottom > 0) {
+    if (!editing && MediaQuery.viewInsetsOf(context).bottom > 0) {
       return const SizedBox.shrink();
     }
     return child;
