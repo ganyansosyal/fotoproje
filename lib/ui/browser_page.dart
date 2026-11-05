@@ -48,6 +48,10 @@ class _BrowserPageState extends State<BrowserPage>
   bool panelOpen = false;
   bool _dark = false;
   bool barShown = true; // üst bar (kaydırınca gizlenir)
+  // Üst bar kaydırınca gizlensin mi? Gizleme, sayfanın boyutunu/konumunu
+  // kaydırma sırasında değiştirdiği için takılma yapar. false: bar sabit, sayfa
+  // kaydırma sırasında hiç yeniden yerleşmez (en akıcı).
+  static const bool _autoHideBar = false;
   static const double _barH = 62; // üst bar yüksekliği (60 + 2 ilerleme çizgisi)
   // Üst bar sayfanın üstüne biner; kaplamalar barın altından başlar
   double get _top => (section == 0 && barShown) ? _barH : 0;
@@ -653,10 +657,12 @@ class _BrowserPageState extends State<BrowserPage>
             source: hookJs,
             injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
             forMainFrameOnly: false),
-        UserScript(
-            source: scrollJs,
-            injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-            forMainFrameOnly: true),
+        // Kaydırma dinleyicisi yalnızca bar gizleme açıkken eklenir
+        if (_autoHideBar)
+          UserScript(
+              source: scrollJs,
+              injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+              forMainFrameOnly: true),
       ]),
       initialUrlRequest: fresh && x.url != homeUrl
           ? URLRequest(url: WebUri(x.url))
@@ -724,11 +730,17 @@ class _BrowserPageState extends State<BrowserPage>
         c.addJavaScriptHandler(
             handlerName: 'scrollDir',
             callback: (args) {
-              if (x != t || section != 0 || args.isEmpty || !mounted) return null;
+              if (!_autoHideBar ||
+                  x != t ||
+                  section != 0 ||
+                  args.isEmpty ||
+                  !mounted) {
+                return null;
+              }
               final show = args[0].toString() != 'down';
               final now = DateTime.now();
               // Çok sık açılıp kapanmasın
-              if (now.difference(_lastBarToggle).inMilliseconds < 250) {
+              if (now.difference(_lastBarToggle).inMilliseconds < 500) {
                 return null;
               }
               if (show != barShown && !focus.hasFocus) {
@@ -925,13 +937,14 @@ class _BrowserPageState extends State<BrowserPage>
                           return Stack(
                             clipBehavior: Clip.hardEdge,
                             children: [
-                              AnimatedPositioned(
-                                duration: const Duration(milliseconds: 180),
-                                curve: Curves.easeOutCubic,
+                              // Sayfa (platform görünümü) animasyonla kaydırılmaz:
+                              // her karede yeniden konumlandırmak takılma ve
+                              // bulanıklık yapar. Tek karede yer değiştirir.
+                              Positioned(
                                 left: 0,
                                 right: 0,
                                 top: barShown ? _barH : 0,
-                                height: h,
+                                height: _autoHideBar ? h : h - _barH,
                                 child: IndexedStack(
                                   index: cur,
                                   children: [for (final x in tabs) _webView(x)],
