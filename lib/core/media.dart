@@ -105,14 +105,79 @@ const hookJs = r'''
 ''';
 
 
-/// Dikey kaydırmayı öncelikli yapar (pinch-zoom açık kalır); dokunma gecikmesini azaltır.
+/// Kaydırmayı kendimiz yönetir: Android'in aşırı hızlı fling'i yerine
+/// hız sınırlı, yumuşak sönümlenen bir süzülme uygular.
+/// Ayar: GAIN (bırakma hızı çarpanı), MAXV (en yüksek hız px/ms), TAU (sönüm ms; büyük = uzun süzülür).
 const touchJs = r'''
 (function(){ if(window.__ta) return; window.__ta=1;
+ var GAIN=0.75, MAXV=2.2, TAU=380, MINV=0.015;
+ var root=document.documentElement, vv=window.visualViewport;
  try{ var st=document.createElement('style');
-  st.textContent='html{touch-action:pan-y pinch-zoom}html::before{content:"";display:block;height:62px}';
-  (document.head||document.documentElement).appendChild(st); }catch(e){}
+  st.textContent='html{touch-action:pinch-zoom;scroll-behavior:auto!important}html.__z{touch-action:auto}html::before{content:"";display:block;height:62px}';
+  (document.head||root).appendChild(st); }catch(e){}
+ function zoomed(){ return vv && vv.scale>1.02; }
+ function upd(){ try{ root.classList.toggle('__z',zoomed()); }catch(e){} }
+ if(vv){ vv.addEventListener('resize',upd); }
+ var el=null, mode=-1, sx=0, sy=0, lx=0, ly=0, lt=0, vx=0, vy=0, raf=0;
+ function findEl(n){
+  while(n && n!==document.body && n!==root){
+   if(n.nodeType===1){
+    var cs=getComputedStyle(n), oy=cs.overflowY;
+    if((oy==='auto'||oy==='scroll') && n.scrollHeight>n.clientHeight+1) return n;
+   }
+   n=n.parentElement;
+  }
+  return document.scrollingElement||root;
+ }
+ function stop(){ if(raf){ cancelAnimationFrame(raf); raf=0; } }
+ document.addEventListener('touchstart',function(e){
+  stop();
+  if(e.touches.length!==1 || zoomed()){ mode=-1; return; }
+  var t=e.touches[0];
+  el=findEl(e.target); mode=0; sx=lx=t.clientX; sy=ly=t.clientY; lt=e.timeStamp; vx=vy=0;
+ },{capture:true,passive:true});
+ document.addEventListener('touchmove',function(e){
+  if(mode<0) return;
+  if(e.touches.length!==1 || zoomed()){ mode=-1; return; }
+  var t=e.touches[0];
+  if(mode===0){
+   if(Math.abs(t.clientX-sx)<6 && Math.abs(t.clientY-sy)<6) return;
+   mode=1;
+  }
+  if(!e.cancelable){ mode=-1; return; }
+  e.preventDefault();
+  var dx=lx-t.clientX, dy=ly-t.clientY, dt=e.timeStamp-lt;
+  el.scrollTop+=dy; el.scrollLeft+=dx;
+  if(dt>0){ vy=0.7*(dy/dt)+0.3*vy; vx=0.7*(dx/dt)+0.3*vx; }
+  lx=t.clientX; ly=t.clientY; lt=e.timeStamp;
+ },{capture:true,passive:false});
+ function end(e,fling){
+  if(mode!==1){ mode=-1; return; }
+  mode=-1;
+  if(!fling || e.timeStamp-lt>80) return;
+  function cap(v){ v*=GAIN; return v>MAXV?MAXV:(v<-MAXV?-MAXV:v); }
+  vy=cap(vy); vx=cap(vx);
+  var fy=el.scrollTop, fx=el.scrollLeft, last=0, target=el;
+  function step(ts){
+   if(!last){ last=ts; raf=requestAnimationFrame(step); return; }
+   var dt=ts-last; if(dt>50) dt=50; last=ts;
+   var py=target.scrollTop, px=target.scrollLeft;
+   fy+=vy*dt; fx+=vx*dt;
+   target.scrollTop=fy; target.scrollLeft=fx;
+   // Sayfa başına/sonuna ulaşınca dur
+   if(vy!==0 && target.scrollTop===py && Math.abs(fy-py)>1) vy=0;
+   if(vx!==0 && target.scrollLeft===px && Math.abs(fx-px)>1) vx=0;
+   var k=Math.exp(-dt/TAU); vy*=k; vx*=k;
+   if(Math.abs(vy)<MINV && Math.abs(vx)<MINV){ raf=0; return; }
+   raf=requestAnimationFrame(step);
+  }
+  raf=requestAnimationFrame(step);
+ }
+ document.addEventListener('touchend',function(e){ end(e,true); },{capture:true,passive:true});
+ document.addEventListener('touchcancel',function(e){ end(e,false); },{capture:true,passive:true});
 })();
 ''';
+
 
 /// Kaydırma yönünü bildirir (üst barı gizlemek/göstermek için).
 /// Yalnızca yön değişince Flutter'a haber verir; kare başına mesaj yok.
