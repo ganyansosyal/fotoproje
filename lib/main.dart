@@ -26,13 +26,21 @@ class App extends StatelessWidget {
   ThemeData _theme(Brightness b) {
     final light = b == Brightness.light;
     final white = light ? Colors.white : const Color(0xFF202124);
+    // Sayfa zemini: kartlar (beyaz) zeminden net ayrılsın
+    final bg = light ? const Color(0xFFEEF1F6) : const Color(0xFF121314);
     final grey = light ? const Color(0xFFF1F3F4) : const Color(0xFF303134);
     final base = ColorScheme.fromSeed(
       seedColor: const Color(0xFF1A73E8),
       brightness: b,
     );
     final cs = base.copyWith(
-      primary: light ? const Color(0xFF1A73E8) : const Color(0xFF8AB4F8),
+      primary: light ? const Color(0xFF0B63E5) : const Color(0xFF8AB4F8),
+      primaryContainer:
+          light ? const Color(0xFFD6E4FF) : const Color(0xFF2F4A7A),
+      onPrimaryContainer:
+          light ? const Color(0xFF062E6F) : const Color(0xFFD6E4FF),
+      outlineVariant:
+          light ? const Color(0xFFD5DAE3) : const Color(0xFF3C4043),
       surface: white,
       surfaceTint: Colors.transparent,
       surfaceContainerLowest: white,
@@ -43,11 +51,11 @@ class App extends StatelessWidget {
       onSurface: light ? const Color(0xFF202124) : const Color(0xFFE8EAED),
     );
     final bold = TextStyle(
-        fontWeight: FontWeight.w600, fontSize: 16.5, color: cs.onSurface);
+        fontWeight: FontWeight.w700, fontSize: 17, color: cs.onSurface);
     return ThemeData(
       useMaterial3: true,
       colorScheme: cs,
-      scaffoldBackgroundColor: white,
+      scaffoldBackgroundColor: bg,
       canvasColor: white,
       // Zıplama/yaylanma yok: kısa ve düz geçişler
       pageTransitionsTheme: const PageTransitionsTheme(builders: {
@@ -58,8 +66,29 @@ class App extends StatelessWidget {
             titleLarge: TextStyle(
                 fontWeight: FontWeight.w800, fontSize: 26, color: cs.onSurface),
           ),
+      cardTheme: CardThemeData(
+        color: white,
+        elevation: 0,
+        margin: EdgeInsets.zero,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+            side: BorderSide(color: cs.outlineVariant)),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+            textStyle:
+                const TextStyle(fontWeight: FontWeight.w800, fontSize: 15.5),
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24))),
+      ),
       listTileTheme: ListTileThemeData(
         titleTextStyle: bold,
+        subtitleTextStyle: TextStyle(
+            fontWeight: FontWeight.w500,
+            fontSize: 14,
+            color: cs.onSurface.withValues(alpha: .68)),
         contentPadding: const EdgeInsets.symmetric(horizontal: 22),
         minVerticalPadding: 14,
       ),
@@ -88,12 +117,19 @@ class App extends StatelessWidget {
         surfaceTintColor: Colors.transparent,
         shadowColor: Colors.black,
         elevation: 6,
-        indicatorColor:
-            light ? const Color(0xFFE8F0FE) : const Color(0xFF394457),
-        labelTextStyle: WidgetStatePropertyAll(TextStyle(
-            fontWeight: FontWeight.w700, fontSize: 12.5, color: cs.onSurface)),
-        iconTheme: WidgetStatePropertyAll(
-            IconThemeData(size: 26, color: cs.onSurface)),
+        indicatorColor: cs.primaryContainer,
+        labelTextStyle: WidgetStateProperty.resolveWith((st) => TextStyle(
+            fontWeight:
+                st.contains(WidgetState.selected) ? FontWeight.w800 : FontWeight.w700,
+            fontSize: 12.5,
+            color: st.contains(WidgetState.selected)
+                ? cs.primary
+                : cs.onSurface.withValues(alpha: .72))),
+        iconTheme: WidgetStateProperty.resolveWith((st) => IconThemeData(
+            size: 25,
+            color: st.contains(WidgetState.selected)
+                ? cs.primary
+                : cs.onSurface.withValues(alpha: .72))),
       ),
     );
   }
@@ -131,13 +167,10 @@ class App extends StatelessWidget {
   }
 }
 
-/// Kenarda yaylanma / uzama efekti olmayan, düz kaydırma.
+/// Listelerde kenara gelince sert durmak yerine yumuşak esneme (stretch)
+/// efekti kalır; Android'in standart kaydırma fiziği kullanılır.
 class _FlatScroll extends MaterialScrollBehavior {
   const _FlatScroll();
-  @override
-  Widget buildOverscrollIndicator(
-          BuildContext context, Widget child, ScrollableDetails details) =>
-      child;
   @override
   ScrollPhysics getScrollPhysics(BuildContext context) =>
       const ClampingScrollPhysics();
