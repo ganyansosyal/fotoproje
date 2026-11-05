@@ -47,6 +47,12 @@ jobs:
           sed -i 's#</application>#    <service android:name="com.ganyansosyal.fotoproje.DlService" android:exported="false" android:foregroundServiceType="dataSync"/>\n    </application>#' $M
           cat $M
 
+      - name: Yerel tarayici ekrani (BrowserActivity) manifeste ekle
+        run: |
+          M=android/app/src/main/AndroidManifest.xml
+          sed -i 's#</application>#    <activity android:name="com.ganyansosyal.fotoproje.BrowserActivity" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout|uiMode|density" android:hardwareAccelerated="true" android:enableOnBackInvokedCallback="false" android:windowSoftInputMode="adjustResize" android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar"/>\n    </application>#' $M
+          grep -n "BrowserActivity" $M
+
       - name: Skia motoruna gec (Impeller kapali)
         run: |
           sed -i 's#</application>#    <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false"/>\n    </application>#' android/app/src/main/AndroidManifest.xml
