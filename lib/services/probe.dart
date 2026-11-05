@@ -3,6 +3,7 @@ import 'package:xml/xml.dart';
 
 import '../core/media.dart';
 import '../core/strings.dart';
+import 'engine.dart';
 
 /// Bulunan bir video bağlantısının incelenmiş hâli.
 class MediaInfo {
@@ -75,7 +76,7 @@ double _extinfTotal(List<String> lines) {
 Future<String> _text(String url, String referer) async =>
     (await _dio.get<String>(url,
             options: Options(
-                headers: {'Referer': referer},
+                headers: await dlHeaders(url, referer),
                 responseType: ResponseType.plain)))
         .data ??
     '';
@@ -157,7 +158,8 @@ Future<MediaInfo> _probeOne(String url, String hint, String referer) async {
     }
 
     // Doğrudan dosya: başlığa bak
-    final r = await _dio.head(url, options: Options(headers: {'Referer': referer}));
+    final r = await _dio.head(url,
+        options: Options(headers: await dlHeaders(url, referer)));
     final ct = (r.headers.value('content-type') ?? '').toLowerCase();
     final len = int.tryParse(r.headers.value('content-length') ?? '') ?? 0;
     if (ct.startsWith('image/') || ct.startsWith('text/') || ct.contains('json')) {

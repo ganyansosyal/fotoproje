@@ -4,9 +4,30 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:encrypt/encrypt.dart' as enc;
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:xml/xml.dart';
 
 import '../core/media.dart';
+
+const dlUserAgent =
+    'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) '
+    'Chrome/124.0.0.0 Mobile Safari/537.36';
+
+/// Tarayıcıdaki gibi istek başlıkları: Referer, User-Agent ve sitenin çerezleri.
+Future<Map<String, String>> dlHeaders(String url, String referer) async {
+  final h = <String, String>{'User-Agent': dlUserAgent};
+  if (referer.isNotEmpty) h['Referer'] = referer;
+  try {
+    final u = Uri.tryParse(url);
+    if (u != null && u.scheme.startsWith('http')) {
+      final cs = await CookieManager.instance().getCookies(url: WebUri(url));
+      if (cs.isNotEmpty) {
+        h['Cookie'] = cs.map((c) => '${c.name}=${c.value}').join('; ');
+      }
+    }
+  } catch (_) {}
+  return h;
+}
 
 /// (0..1 arası ilerleme, etiket)
 typedef Report = void Function(double progress, String label);
@@ -82,7 +103,7 @@ Future<void> saveSegments({
 Future<bool> downloadHls(String url, String path, String audioPath,
     String referer, Report report, CancelToken cancel) async {
   final dio = Dio();
-  final h = {'Referer': referer};
+  final h = await dlHeaders(url, referer);
   Future<String> text(String u) async => (await dio.get<String>(u,
           cancelToken: cancel,
           options: Options(headers: h, responseType: ResponseType.plain)))
@@ -223,7 +244,7 @@ Future<void> _hlsMedia(String pl, String path, Report report, String label,
 
 Future<bool> downloadDash(String url, String path, String audioPath,
     String referer, Report report, CancelToken cancel) async {
-  final h = {'Referer': referer};
+  final h = await dlHeaders(url, referer);
   final txt = (await Dio().get<String>(url,
           cancelToken: cancel,
           options: Options(headers: h, responseType: ResponseType.plain)))

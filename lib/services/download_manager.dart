@@ -141,7 +141,7 @@ class DownloadManager extends ChangeNotifier {
       } else {
         await Dio().download(url, path,
             cancelToken: task.cancel,
-            options: Options(headers: {'Referer': referer}),
+            options: Options(headers: await dlHeaders(url, referer)),
             onReceiveProgress: (r, tot) {
           task.progress.value = tot > 0 ? r / tot : -1;
           task.label.value = tot > 0
@@ -205,7 +205,13 @@ class DownloadManager extends ChangeNotifier {
       final canceled = e is CanceledException ||
           (e is DioException && CancelToken.isCancel(e));
       task.status = canceled ? DlStatus.canceled : DlStatus.failed;
-      task.error = canceled ? S.t('canceled') : '$e';
+      task.error = canceled
+          ? S.t('canceled')
+          : e is DioException
+              ? (e.response?.statusCode != null
+                  ? 'HTTP ${e.response!.statusCode}'
+                  : e.type.name)
+              : '$e';
       if (canceled) active.remove(task);
     }
     notifyListeners();
