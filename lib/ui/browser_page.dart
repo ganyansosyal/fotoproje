@@ -576,24 +576,13 @@ class _BrowserPageState extends State<BrowserPage>
             injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
             forMainFrameOnly: false),
         UserScript(
+            source: noAutoplayJs,
+            injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+            forMainFrameOnly: false),
+        UserScript(
             source: viewportJs,
             injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
             forMainFrameOnly: true),
-        // Sayfa hep tam boyda; bar altında kalan üst boşluk sayfa içinden verilir
-        // (sayfayla birlikte kayıp gider, WebView hiç oynamaz)
-        if (_autoHideBar)
-          UserScript(
-              source: '(function(){var H=${_barH.toInt()};function a(){'
-                  'var sw=screen.width||window.innerWidth||360;'
-                  'var r=Math.max(1,(window.innerWidth||sw)/sw);'
-                  'var e=document.documentElement; if(!e) return;'
-                  'if(location.href.indexOf("$homeBase")===0) return;'
-                  'e.style.setProperty("box-sizing","border-box","important");'
-                  'e.style.setProperty("padding-top",(H*r)+"px","important");}'
-                  'a(); window.addEventListener("resize",a);'
-                  'document.addEventListener("DOMContentLoaded",a);})();',
-              injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-              forMainFrameOnly: true),
         // Kaydırma dinleyicisi yalnızca bar gizleme açıkken eklenir
         if (_autoHideBar)
           UserScript(
@@ -687,9 +676,8 @@ class _BrowserPageState extends State<BrowserPage>
               }
               if (show != barShown && !focus.hasFocus) {
                 _lastBarToggle = now;
-                barShown = show;
+                setState(() => barShown = show);
                 _syncBar();
-                if (_bannerOn) setState(() {});
               }
               return null;
             });
@@ -894,14 +882,14 @@ class _BrowserPageState extends State<BrowserPage>
                           return Stack(
                             clipBehavior: Clip.hardEdge,
                             children: [
-                              // Sayfa (platform görünümü) animasyonla kaydırılmaz:
-                              // her karede yeniden konumlandırmak takılma ve
-                              // bulanıklık yapar. Tek karede yer değiştirir.
+                              // Bar görünürken sayfa barın altında başlar (YouTube gibi
+                              // sabit başlıklı siteler de doğru yerde durur); bar
+                              // gizlenince sayfa tek adımda tam ekran olur.
                               Positioned(
                                 left: 0,
                                 right: 0,
-                                top: (_autoHideBar || fullScreen) ? 0 : _barH,
-                                height: (_autoHideBar || fullScreen) ? h : h - _barH,
+                                top: (fullScreen || !barShown) ? 0 : _barH,
+                                height: (fullScreen || !barShown) ? h : h - _barH,
                                 child: IndexedStack(
                                   index: cur,
                                   children: [
@@ -916,7 +904,10 @@ class _BrowserPageState extends State<BrowserPage>
                                 right: 0,
                                 top: 0,
                                 height: _barH,
-                                child: RepaintBoundary(
+                                // Stack, kaydırılmış (Transform) çocuğu kırpmaz; bu yüzden
+                                // bar gizlenirken durum çubuğunun üstüne taşıyordu.
+                                child: ClipRect(
+                                  child: RepaintBoundary(
                                   child: AnimatedBuilder(
                                     animation: _barAnim,
                                     builder: (_, c) => Transform.translate(
@@ -939,6 +930,7 @@ class _BrowserPageState extends State<BrowserPage>
                                       onMenu: _menu,
                                     ),
                                   ),
+                                ),
                                 ),
                               ),
                             ],
