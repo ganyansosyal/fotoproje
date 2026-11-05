@@ -15,7 +15,9 @@ import '../services/download_manager.dart';
 import '../services/engine.dart' show writeBlobChunk;
 import '../services/fav_icons.dart';
 import '../services/probe.dart';
+import 'bottom_bar.dart';
 import 'perf_meter.dart';
+import 'top_bar.dart';
 import 'downloads_pages.dart';
 import 'home_html.dart';
 import 'lists.dart';
@@ -532,177 +534,7 @@ class _BrowserPageState extends State<BrowserPage>
     }
   }
 
-  PopupMenuItem<String> _mi(String v, IconData i, String text, {Widget? trailing}) {
-    final c = Theme.of(context).colorScheme.onSurfaceVariant;
-    return PopupMenuItem<String>(
-      value: v,
-      height: 46,
-      child: Row(
-        children: [
-          Icon(i, color: c, size: 20),
-          const SizedBox(width: 14),
-          Expanded(
-              child: Text(text,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w500, fontSize: 14.5))),
-          if (trailing != null) trailing,
-        ],
-      ),
-    );
-  }
-
   // ---------------------------------------------------------------- arayüz
-
-  Widget _topBar(ColorScheme cs) {
-    final bar = cs.surfaceContainerHighest;
-    final bm = s.isBookmarked(t.url);
-    return Material(
-      color: cs.surface,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox(
-            height: 52,
-            child: Row(
-              children: [
-                const SizedBox(width: 10),
-                GestureDetector(
-                  onTap: () => setState(() => panelOpen = !panelOpen),
-                  child: Container(
-                    width: 24,
-                    height: 24,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      border: Border.all(color: cs.onSurface, width: 1.6),
-                      borderRadius: BorderRadius.circular(5),
-                    ),
-                    child: Text('${tabs.length}',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w700, fontSize: 12)),
-                  ),
-                ),
-                IconButton(
-                    iconSize: 22,
-                    icon: const Icon(Icons.home_rounded),
-                    onPressed: () => openUrl(homeUrl)),
-                Expanded(
-                  child: Container(
-                    height: 40,
-                    padding: const EdgeInsets.only(left: 16),
-                    decoration: BoxDecoration(
-                        color: bar, borderRadius: BorderRadius.circular(20)),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: tc,
-                            focusNode: focus,
-                            onSubmitted: go,
-                            keyboardType: TextInputType.url,
-                            textInputAction: TextInputAction.go,
-                            maxLines: 1,
-                            style: const TextStyle(
-                                fontSize: 14, fontWeight: FontWeight.w500),
-                            decoration: InputDecoration(
-                                isCollapsed: true,
-                                border: InputBorder.none,
-                                hintText: S.t('search')),
-                          ),
-                        ),
-                        if (editing)
-                          IconButton(
-                            iconSize: 20,
-                            visualDensity: VisualDensity.compact,
-                            icon: const Icon(Icons.keyboard_return_rounded),
-                            onPressed: () => go(tc.text),
-                          )
-                        else
-                          ValueListenableBuilder<bool>(
-                            key: ObjectKey(t),
-                            valueListenable: t.loading,
-                            builder: (_, l, __) => IconButton(
-                              iconSize: 20,
-                              visualDensity: VisualDensity.compact,
-                              icon: Icon(l ? Icons.close : Icons.refresh),
-                              onPressed: () =>
-                                  l ? t.c?.stopLoading() : t.c?.reload(),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-                ValueListenableBuilder<List<MediaInfo>>(
-                  key: ObjectKey(t),
-                  valueListenable: t.found,
-                  builder: (_, list, __) {
-                    final n = list.length;
-                    return IconButton(
-                      iconSize: 22,
-                      tooltip: S.t('videosFound'),
-                      icon: Badge(
-                        isLabelVisible: n > 0,
-                        label: Text('$n'),
-                        backgroundColor: _green,
-                        child: Icon(Icons.error_rounded,
-                            size: 22, color: n > 0 ? _green : cs.onSurface),
-                      ),
-                      onPressed: showFound,
-                    );
-                  },
-                ),
-                PopupMenuButton<String>(
-                  iconSize: 22,
-                  icon: const Icon(Icons.more_vert),
-                  onSelected: _menu,
-                  itemBuilder: (_) => [
-                    _mi('new', Icons.add_box_rounded, S.t('newTab')),
-                    _mi('share', Icons.share, S.t('share')),
-                    _mi('history', Icons.history, S.t('history')),
-                    _mi('copy', Icons.copy_rounded, S.t('copyLink')),
-                    _mi('bookmarks', Icons.bookmark_border, S.t('bookmarks')),
-                    _mi(
-                        'addbm',
-                        bm ? Icons.bookmark_remove_outlined : Icons.bookmark_add_outlined,
-                        bm ? S.t('removeBookmark') : S.t('addBookmark')),
-                    _mi('full', Icons.fullscreen_rounded, 'Tam ekran'),
-                    _mi('desktop', Icons.desktop_windows_rounded, S.t('desktop'),
-                        trailing: IgnorePointer(
-                            child: Checkbox(
-                                value: t.desktop,
-                                onChanged: (_) {},
-                                visualDensity: VisualDensity.compact))),
-                    _mi('meter', Icons.speed, S.t('perfMeter'),
-                        trailing: IgnorePointer(
-                            child: Checkbox(
-                                value: _meterOn,
-                                onChanged: (_) {},
-                                visualDensity: VisualDensity.compact))),
-                    _mi('shareapp', Icons.group, S.t('shareApp')),
-                    _mi('settings', Icons.settings, S.t('settings')),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          SizedBox(
-            height: 2,
-            child: ValueListenableBuilder<bool>(
-              key: ObjectKey(t),
-              valueListenable: t.loading,
-              builder: (_, l, __) => l
-                  ? ValueListenableBuilder<double>(
-                      valueListenable: t.progress,
-                      builder: (_, p, __) =>
-                          LinearProgressIndicator(value: p, minHeight: 2),
-                    )
-                  : const SizedBox.shrink(),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   Widget _webView(TabData x) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1058,7 +890,21 @@ class _BrowserPageState extends State<BrowserPage>
                                         offset: Offset(
                                             0, -_barH * (1 - _barAnim.value)),
                                         child: c),
-                                    child: _topBar(cs),
+                                    child: TopBar(
+                                      tab: t,
+                                      tabCount: tabs.length,
+                                      bookmarked: s.isBookmarked(t.url),
+                                      editing: editing,
+                                      meterOn: _meterOn,
+                                      controller: tc,
+                                      focus: focus,
+                                      onTabs: () =>
+                                          setState(() => panelOpen = !panelOpen),
+                                      onHome: () => openUrl(homeUrl),
+                                      onGo: go,
+                                      onFound: showFound,
+                                      onMenu: _menu,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -1249,52 +1095,14 @@ class _BrowserPageState extends State<BrowserPage>
         // sayfadaki bir alana yazarken ise klavye açıkken gizlenir.
         bottomNavigationBar: fullScreen ? null : _KbHide(
             editing: editing || _hold,
-            child: ListenableBuilder(
-          listenable: dm,
-          builder: (_, __) {
-            // Bitti sekmesi açıkken kırmızı sayıyı sıfırla
-            if (section == 2 && dm.unseen > 0) {
-              WidgetsBinding.instance.addPostFrameCallback((_) => dm.markSeen());
-            }
-            return NavigationBar(
-            height: 52,
-            selectedIndex: section,
-            onDestinationSelected: (i) => setState(() {
-              section = i;
-              panelOpen = false;
-              barShown = true; // sekmeye dönünce bar görünür olsun
-            }),
-            destinations: [
-              NavigationDestination(
-                  icon: const Icon(Icons.layers_outlined),
-                  selectedIcon: const Icon(Icons.layers_rounded),
-                  label: S.t('tab')),
-              NavigationDestination(
-                  icon: Badge(
-                      isLabelVisible: dm.active.isNotEmpty,
-                      label: Text('${dm.active.length}'),
-                      child: const Icon(Icons.download_outlined)),
-                  selectedIcon: const Icon(Icons.download_rounded),
-                  label: S.t('progress')),
-              NavigationDestination(
-                  icon: Badge(
-                      isLabelVisible: dm.unseen > 0,
-                      backgroundColor: Colors.red,
-                      label: Text('${dm.unseen}'),
-                      child: const Icon(Icons.folder_outlined)),
-                  selectedIcon: Badge(
-                      isLabelVisible: dm.unseen > 0,
-                      backgroundColor: Colors.red,
-                      label: Text('${dm.unseen}'),
-                      child: const Icon(Icons.folder_rounded)),
-                  label: S.t('done')),
-              NavigationDestination(
-                  icon: const Icon(Icons.settings_outlined),
-                  selectedIcon: const Icon(Icons.settings_rounded),
-                  label: S.t('settings')),
-            ],
-          );
-          },
+            child: BottomBar(
+          dm: dm,
+          section: section,
+          onSelect: (i) => setState(() {
+            section = i;
+            panelOpen = false;
+            barShown = true; // sekmeye dönünce bar görünür olsun
+          }),
         )),
       )),
     );
