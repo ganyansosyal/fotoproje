@@ -45,7 +45,7 @@ display:flex;align-items:center;justify-content:center;font-size:28px;font-weigh
 .t span{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style></head><body>
 <h1>${esc.convert(S.t('home'))}</h1><p>${esc.convert(S.t('favHint'))}</p>
-<form id="f"><input id="q" readonly inputmode="none" placeholder="${esc.convert(S.t('search'))}" autocomplete="off"></form>
+<form id="f"><input id="q" type="text" enterkeyhint="go" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="${esc.convert(S.t('search'))}" autocomplete="off"></form>
 <div class="g">$tiles</div>
 <script>
 var base=$base;
@@ -59,7 +59,6 @@ document.querySelectorAll('img.lg').forEach(function(im){
  if(!h){ im.src=globe; } else { next(); }
 });
 function H(n,a,b){try{window.flutter_inappwebview.callHandler(n,a,b)}catch(e){}}
-document.getElementById('q').addEventListener('click',function(e){e.preventDefault();this.blur();H('focusBar','','')});
 document.getElementById('addfav').addEventListener('click',function(e){e.preventDefault();H('addFav','','')});
 document.querySelectorAll('.t').forEach(function(a){
  if(a.id==='addfav') return;
