@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'core/settings.dart';
+import 'services/fav_icons.dart';
+import 'ui/home_html.dart';
 import 'services/download_manager.dart';
 import 'ui/browser_page.dart';
 
@@ -9,6 +11,8 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final settings = AppSettings();
   await settings.load();
+  await FavIcons.i.load();
+  FavIcons.i.ensure(homeHosts(settings)); // arka planda, beklenmez
   final downloads = DownloadManager(settings);
   await downloads.load();
   runApp(App(settings: settings, downloads: downloads));
