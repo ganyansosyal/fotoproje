@@ -1049,13 +1049,19 @@ class _BrowserPageState extends State<BrowserPage>
                                 height: _barH,
                                 child: IgnorePointer(
                                   ignoring: !barShown,
-                                  child: AnimatedSlide(
-                                    duration: const Duration(milliseconds: 120),
-                                    curve: Curves.easeOut,
-                                    offset: barShown
-                                        ? Offset.zero
-                                        : const Offset(0, -1),
-                                    child: RepaintBoundary(child: _topBar(cs)),
+                                  // ClipRect şart: kayan bar kutusunun dışına,
+                                  // durum çubuğunun altına taşıp görünmesin.
+                                  child: ClipRect(
+                                    child: AnimatedSlide(
+                                      duration:
+                                          const Duration(milliseconds: 120),
+                                      curve: Curves.easeOut,
+                                      offset: barShown
+                                          ? Offset.zero
+                                          : const Offset(0, -1),
+                                      child:
+                                          RepaintBoundary(child: _topBar(cs)),
+                                    ),
                                   ),
                                 ),
                               ),
