@@ -58,6 +58,7 @@ class _BrowserPageState extends State<BrowserPage>
   final _meter = PerfMeter();
   bool _meterOn = false;
   DateTime _lastBarToggle = DateTime.fromMillisecondsSinceEpoch(0);
+  Timer? _barTimer;
   MediaInfo? _bannerInfo;
   bool _bannerOn = false;
   Timer? _bannerTimer;
@@ -130,6 +131,7 @@ class _BrowserPageState extends State<BrowserPage>
     WidgetsBinding.instance.removeObserver(this);
     s.removeListener(_onSettings);
     _bannerTimer?.cancel();
+    _barTimer?.cancel();
     _meter.stop();
     tc.dispose();
     focus.dispose();
@@ -814,12 +816,21 @@ class _BrowserPageState extends State<BrowserPage>
                 return null;
               }
               final show = args[0].toString() != 'down';
-              // Not: JS yalnızca yön değişince bildirir (kendi sönümlemesi var).
-              // Burada mesaj düşürülürse aynı yön tekrar gönderilmez ve bar
-              // yanlış durumda kalır; bu yüzden zaman sınırı yok.
-              if (show != barShown && !focus.hasFocus) {
+              _barTimer?.cancel();
+              void apply() {
+                if (!mounted || focus.hasFocus || show == barShown) return;
                 _lastBarToggle = DateTime.now();
                 setState(() => barShown = show);
+              }
+
+              // Çok sık açılıp kapanmasın; ama mesaj düşmesin (JS aynı yönü
+              // tekrar göndermez): erken geldiyse kalan süre sonra uygula.
+              final wait = 150 -
+                  DateTime.now().difference(_lastBarToggle).inMilliseconds;
+              if (wait > 0) {
+                _barTimer = Timer(Duration(milliseconds: wait), apply);
+              } else {
+                apply();
               }
               return null;
             });
@@ -1014,31 +1025,27 @@ class _BrowserPageState extends State<BrowserPage>
                             children: [
                               // Sayfa (platform görünümü) animasyonla kaydırılmaz:
                               // her karede yeniden konumlandırmak takılma ve
-                              // bulanıklık yapar. Tek karede yer değiştirir;
-                              // bar ise GPU üzerinde (Transform) akıcı kayar.
-                              Positioned(
+                              // bulanıklık yapar. Tek karede yer değiştirir.
+                              AnimatedPositioned(
+                                duration: const Duration(milliseconds: 200),
+                                curve: Curves.easeOutCubic,
                                 left: 0,
                                 right: 0,
                                 top: barShown ? _barH : 0,
-                                height: barShown ? h - _barH : h,
+                                height: _autoHideBar ? h : h - _barH,
                                 child: IndexedStack(
                                   index: cur,
                                   children: [for (final x in tabs) _webView(x)],
                                 ),
                               ),
-                              Positioned(
+                              AnimatedPositioned(
+                                duration: const Duration(milliseconds: 200),
+                                curve: Curves.easeOutCubic,
                                 left: 0,
                                 right: 0,
-                                top: 0,
+                                top: barShown ? 0 : -_barH,
                                 height: _barH,
-                                child: AnimatedSlide(
-                                  duration: const Duration(milliseconds: 180),
-                                  curve: Curves.easeOutCubic,
-                                  offset: barShown
-                                      ? Offset.zero
-                                      : const Offset(0, -1),
-                                  child: RepaintBoundary(child: _topBar(cs)),
-                                ),
+                                child: RepaintBoundary(child: _topBar(cs)),
                               ),
                             ],
                           );
