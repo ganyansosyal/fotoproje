@@ -837,7 +837,10 @@ class _BrowserPageState extends State<BrowserPage>
           SystemNavigator.pop();
         }
       },
-      child: Scaffold(
+      // Klavye animasyonu sürerken WebView her karede yeniden boyutlanmasın;
+      // klavye yerleşince bir kez boyutlanır.
+      child: SettledInsets(
+          child: Scaffold(
         // Adres düzenlerken WebView klavyeyle yeniden boyutlanmasın (hızlı klavye)
         resizeToAvoidBottomInset: !(editing || _hold),
         body: SafeArea(
@@ -1057,7 +1060,47 @@ class _BrowserPageState extends State<BrowserPage>
           );
           },
         ),
-      ),
+      )),
+    );
+  }
+}
+
+/// Klavye yüksekliğini animasyon bitince tek seferde uygular. Böylece klavye
+/// açılıp kapanırken WebView (platform görünümü) her karede yeniden boyutlanmaz.
+class SettledInsets extends StatefulWidget {
+  final Widget child;
+  const SettledInsets({super.key, required this.child});
+  @override
+  State<SettledInsets> createState() => _SettledInsetsState();
+}
+
+class _SettledInsetsState extends State<SettledInsets> {
+  double _settled = 0;
+  Timer? _timer;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final cur = MediaQuery.viewInsetsOf(context).bottom;
+    _timer?.cancel();
+    if (cur == _settled) return;
+    _timer = Timer(const Duration(milliseconds: 110), () {
+      if (mounted) setState(() => _settled = MediaQuery.viewInsetsOf(context).bottom);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    return MediaQuery(
+      data: mq.copyWith(viewInsets: mq.viewInsets.copyWith(bottom: _settled)),
+      child: widget.child,
     );
   }
 }
