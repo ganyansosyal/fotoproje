@@ -1,6 +1,7 @@
 package com.ganyansosyal.fotoproje
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.MediaCodec
 import android.media.MediaExtractor
@@ -83,6 +84,13 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "blobWrite" -> blobWrite(call, result)
+                "openNative" -> {
+                    val u = call.argument<String>("url") ?: "https://www.google.com"
+                    startActivity(
+                        Intent(this, BrowserActivity::class.java).putExtra("url", u)
+                    )
+                    result.success(true)
+                }
                 else -> result.notImplemented()
             }
         }
