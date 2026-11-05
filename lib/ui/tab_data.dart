@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -40,17 +41,64 @@ class TabData {
 
   TabData(this.url, {this.windowId});
 
-  void addMedia(String u, [String? hint]) {
-    if (media.add(u)) mediaCount.value = media.length;
-    if (hint != null && hint.isNotEmpty) hints[u] = hint;
+  // Sayfadaki oynatıcının son bildirimi (null: şu an oynayan video yok)
+  String? playerId;
+  double playerDur = 0;
+  bool playerLive = false;
+  int playerH = 0;
+  String playerSrc = '';
+  String? playerRef; // videonun bulunduğu çerçevenin adresi (Referer için)
+  int probeGen = 0;
+
+  /// Oynatıcı bildirimini işler. Değişiklik olduysa true döner.
+  bool onPlayer(String raw) {
+    Map m;
+    try {
+      final d = jsonDecode(raw);
+      if (d is! Map) return false;
+      m = d;
+    } catch (_) {
+      return false;
+    }
+    final id = m['id']?.toString() ?? '';
+    if (m['stop'] == true) {
+      if (id != playerId) return false;
+      clearMedia();
+      return true;
+    }
+    final dur = (m['d'] as num?)?.toDouble() ?? 0;
+    if (id != playerId || (dur - playerDur).abs() > 1) bannerDone = false;
+    playerId = id;
+    playerDur = dur;
+    playerLive = m['live'] == true;
+    playerH = (m['h'] as num?)?.toInt() ?? 0;
+    playerSrc = m['src']?.toString() ?? '';
+    final ref = m['ref']?.toString() ?? '';
+    playerRef = ref.startsWith('http') ? ref : null;
+    media
+      ..clear()
+      ..addAll([
+        for (final u in (m['urls'] as List? ?? const [])) u.toString()
+      ]);
+    mediaCount.value = media.length;
+    hints.clear();
+    (m['hints'] as Map?)?.forEach((k, v) => hints[k.toString()] = v.toString());
+    return true;
   }
 
   void clearMedia() {
     media.clear();
+    hints.clear();
     mediaCount.value = 0;
     probeTimer?.cancel();
     found.value = const [];
     bannerDone = false;
+    playerId = null;
+    playerDur = 0;
+    playerLive = false;
+    playerH = 0;
+    playerSrc = '';
+    playerRef = null;
   }
 
   bool disposed = false;
