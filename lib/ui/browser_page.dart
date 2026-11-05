@@ -1122,8 +1122,11 @@ class _BrowserPageState extends State<BrowserPage>
             ],
           ),
         ),
-        // Klavye açılınca alt çubuk klavyenin üstüne çıkar, sayfa kalan alana sığar
-        bottomNavigationBar: _KbLift(
+        // Alt çubuk klavyeyle birlikte yukarı kaymaz (takılma yapıyordu):
+        // adres düzenlerken klavyenin arkasında sabit kalır, sayfadaki bir
+        // alana yazarken ise klavye açıkken gizlenir.
+        bottomNavigationBar: _KbHide(
+            hideWhenKeyboard: !(editing || _hold),
             child: ListenableBuilder(
           listenable: dm,
           builder: (_, __) {
@@ -1175,15 +1178,20 @@ class _BrowserPageState extends State<BrowserPage>
   }
 }
 
-/// Alt çubuğu klavye yüksekliği kadar yukarı alır (klavyenin üstünde durur).
-class _KbLift extends StatelessWidget {
+/// Alt çubuk klavyeyle yukarı kaymaz. Klavye açıkken ya klavyenin arkasında
+/// sabit kalır ya da (hideWhenKeyboard) tek seferde gizlenir; animasyon yok.
+class _KbHide extends StatelessWidget {
   final Widget child;
-  const _KbLift({required this.child});
+  final bool hideWhenKeyboard;
+  const _KbHide({required this.child, required this.hideWhenKeyboard});
 
   @override
-  Widget build(BuildContext context) => Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-      child: child);
+  Widget build(BuildContext context) {
+    if (hideWhenKeyboard && MediaQuery.viewInsetsOf(context).bottom > 0) {
+      return const SizedBox.shrink();
+    }
+    return child;
+  }
 }
 
 /// Klavye yüksekliğini animasyon bitince tek seferde uygular. Böylece klavye
