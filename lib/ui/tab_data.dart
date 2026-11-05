@@ -132,6 +132,10 @@ class TabData {
 
   bool disposed = false;
 
+  /// Bellek için dondurulmuş sekme: WebView'ı kapatılmıştır, seçilince adresten yeniden açılır.
+  bool frozen = false;
+  DateTime used = DateTime.now();
+
   // Yenileme sırasında eski sayfanın görüntüsü (boş ekran görünmesin diye)
   final shot = ValueNotifier<Uint8List?>(null);
   final shotOn = ValueNotifier<bool>(false);
