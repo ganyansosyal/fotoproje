@@ -22,97 +22,16 @@ jobs:
       - name: Android klasorunu olustur
         run: flutter create --platforms=android --project-name fotoproje --org com.ganyansosyal .
 
-      - name: Ses+video birlestirici (MediaMuxer) ekle
-        run: |
-          D=android/app/src/main/kotlin/com/ganyansosyal/fotoproje
-          mkdir -p $D
-          cat > $D/MainActivity.kt <<'EOF'
-          package com.ganyansosyal.fotoproje
-
-          import android.media.MediaCodec
-          import android.media.MediaExtractor
-          import android.media.MediaFormat
-          import android.media.MediaMuxer
-          import io.flutter.embedding.android.FlutterActivity
-          import io.flutter.embedding.engine.FlutterEngine
-          import io.flutter.plugin.common.MethodChannel
-          import java.nio.ByteBuffer
-
-          class MainActivity : FlutterActivity() {
-              override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-                  super.configureFlutterEngine(flutterEngine)
-                  MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "mux")
-                      .setMethodCallHandler { call, result ->
-                          if (call.method == "merge") {
-                              val v = call.argument<String>("video")!!
-                              val a = call.argument<String>("audio")!!
-                              val o = call.argument<String>("out")!!
-                              Thread {
-                                  try {
-                                      merge(v, a, o)
-                                      runOnUiThread { result.success(true) }
-                                  } catch (e: Exception) {
-                                      runOnUiThread { result.error("mux", e.toString(), null) }
-                                  }
-                              }.start()
-                          } else {
-                              result.notImplemented()
-                          }
-                      }
-              }
-
-              private fun pick(x: MediaExtractor, prefix: String): Int {
-                  for (i in 0 until x.trackCount) {
-                      val m = x.getTrackFormat(i).getString(MediaFormat.KEY_MIME)
-                      if (m != null && m.startsWith(prefix)) return i
-                  }
-                  return -1
-              }
-
-              private fun copy(x: MediaExtractor, mux: MediaMuxer, track: Int) {
-                  val buf = ByteBuffer.allocate(4 * 1024 * 1024)
-                  val info = MediaCodec.BufferInfo()
-                  while (true) {
-                      buf.clear()
-                      val n = x.readSampleData(buf, 0)
-                      if (n < 0) break
-                      info.offset = 0
-                      info.size = n
-                      info.presentationTimeUs = x.sampleTime
-                      info.flags = if ((x.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC) != 0)
-                          MediaCodec.BUFFER_FLAG_SYNC_FRAME else 0
-                      mux.writeSampleData(track, buf, info)
-                      x.advance()
-                  }
-              }
-
-              private fun merge(video: String, audio: String, out: String) {
-                  val vx = MediaExtractor()
-                  vx.setDataSource(video)
-                  val ax = MediaExtractor()
-                  ax.setDataSource(audio)
-                  val vt = pick(vx, "video/")
-                  val at = pick(ax, "audio/")
-                  if (vt < 0 || at < 0) throw Exception("video veya ses izi bulunamadi")
-                  vx.selectTrack(vt)
-                  ax.selectTrack(at)
-                  val mux = MediaMuxer(out, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-                  val vo = mux.addTrack(vx.getTrackFormat(vt))
-                  val ao = mux.addTrack(ax.getTrackFormat(at))
-                  mux.start()
-                  copy(vx, mux, vo)
-                  copy(ax, mux, ao)
-                  mux.stop()
-                  mux.release()
-                  vx.release()
-                  ax.release()
-              }
-          }
-          EOF
-
       - name: INTERNET izni ekle
         run: |
           sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' android/app/src/main/AndroidManifest.xml
+
+      - name: Izinler ve http (cleartext) destegi
+        run: |
+          M=android/app/src/main/AndroidManifest.xml
+          sed -i 's#<application#<application android:usesCleartextTraffic="true"#' $M
+          sed -i 's#<application#<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>\n    <application#' $M
+          cat $M
 
       - name: Skia motoruna gec (Impeller kapali)
         run: |
