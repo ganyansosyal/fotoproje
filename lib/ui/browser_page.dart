@@ -486,14 +486,15 @@ class _BrowserPageState extends State<BrowserPage>
     final c = Theme.of(context).colorScheme.onSurfaceVariant;
     return PopupMenuItem<String>(
       value: v,
-      height: 52,
+      height: 46,
       child: Row(
         children: [
-          Icon(i, color: c),
-          const SizedBox(width: 16),
+          Icon(i, color: c, size: 20),
+          const SizedBox(width: 14),
           Expanded(
               child: Text(text,
-                  style: const TextStyle(fontWeight: FontWeight.w600))),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w500, fontSize: 14.5))),
           if (trailing != null) trailing,
         ],
       ),
@@ -511,34 +512,35 @@ class _BrowserPageState extends State<BrowserPage>
         mainAxisSize: MainAxisSize.min,
         children: [
           SizedBox(
-            height: 60,
+            height: 52,
             child: Row(
               children: [
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 GestureDetector(
                   onTap: () => setState(() => panelOpen = !panelOpen),
                   child: Container(
-                    width: 30,
-                    height: 30,
+                    width: 24,
+                    height: 24,
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
-                      border: Border.all(color: cs.onSurface, width: 2.2),
+                      border: Border.all(color: cs.onSurface, width: 1.6),
                       borderRadius: BorderRadius.circular(5),
                     ),
                     child: Text('${tabs.length}',
                         style: const TextStyle(
-                            fontWeight: FontWeight.w800, fontSize: 15)),
+                            fontWeight: FontWeight.w700, fontSize: 12)),
                   ),
                 ),
                 IconButton(
+                    iconSize: 22,
                     icon: const Icon(Icons.home_rounded),
                     onPressed: () => openUrl(homeUrl)),
                 Expanded(
                   child: Container(
-                    height: 48,
-                    padding: const EdgeInsets.only(left: 18),
+                    height: 40,
+                    padding: const EdgeInsets.only(left: 16),
                     decoration: BoxDecoration(
-                        color: bar, borderRadius: BorderRadius.circular(24)),
+                        color: bar, borderRadius: BorderRadius.circular(20)),
                     child: Row(
                       children: [
                         Expanded(
@@ -550,7 +552,7 @@ class _BrowserPageState extends State<BrowserPage>
                             textInputAction: TextInputAction.go,
                             maxLines: 1,
                             style: const TextStyle(
-                                fontSize: 16.5, fontWeight: FontWeight.w600),
+                                fontSize: 14, fontWeight: FontWeight.w500),
                             decoration: InputDecoration(
                                 isCollapsed: true,
                                 border: InputBorder.none,
@@ -559,6 +561,7 @@ class _BrowserPageState extends State<BrowserPage>
                         ),
                         if (editing)
                           IconButton(
+                            iconSize: 20,
                             visualDensity: VisualDensity.compact,
                             icon: const Icon(Icons.keyboard_return_rounded),
                             onPressed: () => go(tc.text),
@@ -568,6 +571,7 @@ class _BrowserPageState extends State<BrowserPage>
                             key: ObjectKey(t),
                             valueListenable: t.loading,
                             builder: (_, l, __) => IconButton(
+                              iconSize: 20,
                               visualDensity: VisualDensity.compact,
                               icon: Icon(l ? Icons.close : Icons.refresh),
                               onPressed: () =>
@@ -584,19 +588,21 @@ class _BrowserPageState extends State<BrowserPage>
                   builder: (_, list, __) {
                     final n = list.length;
                     return IconButton(
+                      iconSize: 22,
                       tooltip: S.t('videosFound'),
                       icon: Badge(
                         isLabelVisible: n > 0,
                         label: Text('$n'),
                         backgroundColor: _green,
                         child: Icon(Icons.error_rounded,
-                            size: 28, color: n > 0 ? _green : cs.onSurface),
+                            size: 22, color: n > 0 ? _green : cs.onSurface),
                       ),
                       onPressed: showFound,
                     );
                   },
                 ),
                 PopupMenuButton<String>(
+                  iconSize: 22,
                   icon: const Icon(Icons.more_vert),
                   onSelected: _menu,
                   itemBuilder: (_) => [
@@ -1096,22 +1102,22 @@ class _BrowserPageState extends State<BrowserPage>
                                   customBorder: const StadiumBorder(),
                                   onTap: downloadPressed,
                                   child: Container(
-                                    height: 46,
+                                    height: 40,
                                     padding: EdgeInsets.symmetric(
-                                        horizontal: on ? 16 : 11),
+                                        horizontal: on ? 14 : 9),
                                     child: Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         Icon(Icons.download_rounded,
-                                            size: 24,
+                                            size: 20,
                                             color: on ? Colors.white : cs.surface),
                                         if (on) ...[
                                           const SizedBox(width: 8),
                                           Text(S.t('getVideo'),
                                               style: const TextStyle(
                                                   color: Colors.white,
-                                                  fontWeight: FontWeight.w700,
-                                                  fontSize: 14)),
+                                                  fontWeight: FontWeight.w600,
+                                                  fontSize: 13)),
                                         ],
                                       ],
                                     ),
@@ -1141,7 +1147,7 @@ class _BrowserPageState extends State<BrowserPage>
               WidgetsBinding.instance.addPostFrameCallback((_) => dm.markSeen());
             }
             return NavigationBar(
-            height: 58,
+            height: 52,
             selectedIndex: section,
             onDestinationSelected: (i) => setState(() {
               section = i;

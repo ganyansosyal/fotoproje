@@ -48,21 +48,21 @@ String buildHomeHtml(AppSettings s, bool dark) {
 <style>
 *{-webkit-tap-highlight-color:transparent}
 html,body{margin:0;background:$bg;color:$fg;font-family:sans-serif;overscroll-behavior-y:auto}
-body{padding:28px 16px 40px;min-height:100vh;box-sizing:border-box}
-h1{text-align:center;font-weight:700;font-size:28px;margin:26px 0 8px}
-p{text-align:center;margin:0 0 22px;color:$sub;font-size:13px}
+body{padding:20px 16px 32px;min-height:100vh;box-sizing:border-box}
+h1{text-align:center;font-weight:600;font-size:22px;margin:22px 0 6px}
+p{text-align:center;margin:0 0 20px;color:$sub;font-size:12px}
 form{max-width:520px;margin:0 auto 30px}
-input{width:100%;box-sizing:border-box;padding:14px 20px;border-radius:28px;border:0;
-background:$card;color:$fg;font-size:16px;outline:none}
-.g{display:grid;grid-template-columns:repeat(4,1fr);gap:20px 8px;max-width:520px;margin:auto}
-.t{text-decoration:none;color:$fg;text-align:center;font-size:12px;transform:translate3d(0,0,0);will-change:transform;transition:transform .15s ease-out}
+input{width:100%;box-sizing:border-box;padding:11px 18px;border-radius:24px;border:0;
+background:$card;color:$fg;font-size:14px;outline:none}
+.g{display:grid;grid-template-columns:repeat(4,1fr);gap:18px 8px;max-width:520px;margin:auto}
+.t{text-decoration:none;color:$fg;text-align:center;font-size:11px;transform:translate3d(0,0,0);will-change:transform;transition:transform .15s ease-out}
 .t:active{transform:translate3d(0,0,0) scale(.92)}
-.i{width:56px;height:56px;border-radius:50%;margin:0 auto 6px;background:$card;overflow:hidden;
-display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:600}
-.i img{width:32px;height:32px;object-fit:contain;opacity:0;transition:opacity .2s}
+.i{width:46px;height:46px;border-radius:50%;margin:0 auto 5px;background:$card;overflow:hidden;
+display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:600}
+.i img{width:26px;height:26px;object-fit:contain;opacity:0;transition:opacity .2s}
 .i img.ok,.i img.show{opacity:1}
 .i img.ok{transition:none}
-.t span{display:block;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.t span{display:block;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style></head><body>
 <h1>${esc.convert(S.t('home'))}</h1><p>${esc.convert(S.t('favHint'))}</p>
 <form id="f"><input id="q" type="text" enterkeyhint="go" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="${esc.convert(S.t('search'))}" autocomplete="off"></form>
