@@ -53,6 +53,17 @@ jobs:
           sed -i 's#</application>#    <activity android:name="com.ganyansosyal.fotoproje.BrowserActivity" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout|uiMode|density" android:hardwareAccelerated="true" android:enableOnBackInvokedCallback="false" android:windowSoftInputMode="adjustResize" android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar"/>\n    </application>#' $M
           grep -n "BrowserActivity" $M
 
+      - name: androidx.webkit bagimliligi (belge-basi betik icin)
+        run: |
+          G=android/app/build.gradle.kts
+          if [ -f "$G" ]; then
+            printf '\ndependencies {\n    implementation("androidx.webkit:webkit:1.12.1")\n}\n' >> "$G"
+          else
+            G=android/app/build.gradle
+            printf "\ndependencies {\n    implementation 'androidx.webkit:webkit:1.12.1'\n}\n" >> "$G"
+          fi
+          tail -5 "$G"
+
       - name: Skia motoruna gec (Impeller kapali)
         run: |
           sed -i 's#</application>#    <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false"/>\n    </application>#' android/app/src/main/AndroidManifest.xml
