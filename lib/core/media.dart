@@ -112,7 +112,20 @@ const scrollJs = r'''
  var last=new WeakMap(), dir='', mute=0, acc=0;
  function send(d){ if(d===dir) return; dir=d; mute=Date.now()+180; acc=0;
   try{window.flutter_inappwebview.callHandler('scrollDir',d);}catch(e){} }
+ // Kaydırma sırasında tıklama/hover işlemini geçici kapat (yeniden hesaplama yükü azalır)
+ var peT=0, peSt=null, root=document.documentElement;
+ function peOn(){
+  try{
+   if(!peSt){ peSt=document.createElement('style');
+    peSt.textContent='html.__scr,html.__scr *{pointer-events:none!important}';
+    (document.head||root).appendChild(peSt); }
+   root.classList.add('__scr');
+   clearTimeout(peT);
+   peT=setTimeout(function(){ root.classList.remove('__scr'); },150);
+  }catch(x){}
+ }
  document.addEventListener('scroll',function(e){
+  peOn();
   var now=Date.now();
   var el=e.target;
   if(el===document||el===document.documentElement||el===document.body) el=document.scrollingElement||document.documentElement;
@@ -127,7 +140,7 @@ const scrollJs = r'''
   if(Math.abs(d)>350){ acc=0; return; }
   if((d>0)!==(acc>0)) acc=0;
   acc+=d;
-  if(acc>28){ send('down'); } else if(acc<-6){ send('up'); }
+  if(acc>40){ send('down'); } else if(acc<-12){ send('up'); }
  },{capture:true,passive:true});
 })();
 ''';
