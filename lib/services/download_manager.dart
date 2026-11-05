@@ -54,6 +54,13 @@ class DownloadManager extends ChangeNotifier {
 
   final List<DownloadTask> active = [];
   final List<DownloadTask> done = [];
+  int unseen = 0; // Bitti sekmesinde henüz görülmemiş biten indirme sayısı
+
+  void markSeen() {
+    if (unseen == 0) return;
+    unseen = 0;
+    notifyListeners();
+  }
   late SharedPreferences _p;
   String _appDir = '';
 
@@ -192,6 +199,7 @@ class DownloadManager extends ChangeNotifier {
       task.progress.value = 1;
       active.remove(task);
       done.insert(0, task);
+      unseen++;
       _persist();
     } catch (e) {
       final canceled = e is CanceledException ||
