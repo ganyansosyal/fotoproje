@@ -260,7 +260,8 @@ void showMediaSheet(BuildContext context, List<MediaInfo> items,
             child: ListView(
               shrinkWrap: true,
               children: [
-                for (var i = 0; i < items.length; i++)
+                // Sadece en iyi (önerilen) video gösterilir
+                for (var i = 0; i < 1 && i < items.length; i++)
                   ListTile(
                     leading: CircleAvatar(
                       backgroundColor: i == 0
@@ -278,7 +279,7 @@ void showMediaSheet(BuildContext context, List<MediaInfo> items,
                             : items[i].subtitle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis),
-                    trailing: const Icon(Icons.download_rounded),
+                    trailing: const Icon(Icons.download_rounded, size: 22),
                     onTap: () {
                       Navigator.pop(ctx);
                       pick(items[i]);
