@@ -61,7 +61,7 @@ const hookJs = r'''
 /// Yalnızca yön değişince Flutter'a haber verir; kare başına mesaj yok.
 const scrollJs = r'''
 (function(){ if(window.__sc) return; window.__sc=1;
- var last=new WeakMap(), dir='', mute=0;
+ var last=new WeakMap(), dir='', mute=0, acc=0;
  function send(d){ if(d===dir) return; dir=d; mute=Date.now()+450;
   try{window.flutter_inappwebview.callHandler('scrollDir',d);}catch(e){} }
  document.addEventListener('scroll',function(e){
@@ -71,8 +71,11 @@ const scrollJs = r'''
   if(!el||el.clientHeight<window.innerHeight*0.5) return;
   var y=el.scrollTop, p=last.get(el); last.set(el,y);
   if(p===undefined) return;
-  if(y<=8){ send('up'); return; }
-  var d=y-p; if(d>12) send('down'); else if(d<-12) send('up');
+  if(y<=8){ acc=0; send('up'); return; }
+  var d=y-p; if(!d) return;
+  if((d>0)!==(acc>0)) acc=0;
+  acc+=d;
+  if(acc>90){ acc=0; send('down'); } else if(acc<-90){ acc=0; send('up'); }
  },{capture:true,passive:true});
 })();
 ''';
