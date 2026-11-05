@@ -32,6 +32,27 @@ class _Empty extends StatelessWidget {
   }
 }
 
+/// Net kenarlı, yuvarlak beyaz kart (zeminden belirgin ayrılır)
+class _CardBox extends StatelessWidget {
+  final Widget child;
+  const _CardBox({required this.child});
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+      child: Material(
+        color: cs.surface,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+            side: BorderSide(color: cs.outlineVariant)),
+        child: child,
+      ),
+    );
+  }
+}
+
 /// "İlerleme" sekmesi: devam eden / başarısız indirmeler
 class ProgressPage extends StatelessWidget {
   final DownloadManager dm;
@@ -46,7 +67,7 @@ class ProgressPage extends StatelessWidget {
           return _Empty(Icons.downloading_rounded, S.t('noActive'));
         }
         return ListView.builder(
-          padding: const EdgeInsets.symmetric(vertical: 8),
+          padding: const EdgeInsets.symmetric(vertical: 10),
           itemCount: dm.active.length,
           itemBuilder: (_, i) => _ActiveTile(dm, dm.active[i]),
         );
@@ -65,7 +86,7 @@ class _ActiveTile extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
     final failed = t.status == DlStatus.failed;
     return RepaintBoundary(
-      child: ListTile(
+      child: _CardBox(child: ListTile(
         leading: CircleAvatar(
           backgroundColor: failed ? cs.errorContainer : cs.primaryContainer,
           child: Icon(failed ? Icons.error_outline : Icons.downloading_rounded,
@@ -86,7 +107,7 @@ class _ActiveTile extends StatelessWidget {
                       ClipRRect(
                         borderRadius: BorderRadius.circular(4),
                         child: LinearProgressIndicator(
-                            value: p < 0 ? null : p.clamp(0, 1), minHeight: 6),
+                            value: p < 0 ? null : p.clamp(0, 1), minHeight: 8),
                       ),
                       const SizedBox(height: 4),
                       ValueListenableBuilder<String>(
@@ -102,7 +123,7 @@ class _ActiveTile extends StatelessWidget {
           icon: Icon(failed ? Icons.close : Icons.cancel_outlined),
           onPressed: () => failed ? dm.removeFailed(t) : dm.cancel(t),
         ),
-      ),
+      )),
     );
   }
 }
@@ -122,12 +143,12 @@ class DonePage extends StatelessWidget {
         }
         final cs = Theme.of(context).colorScheme;
         return ListView.builder(
-          padding: const EdgeInsets.symmetric(vertical: 8),
+          padding: const EdgeInsets.symmetric(vertical: 10),
           itemCount: dm.done.length,
           itemBuilder: (_, i) {
             final t = dm.done[i];
             return RepaintBoundary(
-              child: Dismissible(
+              child: _CardBox(child: Dismissible(
                 key: ValueKey(t.id),
                 direction: DismissDirection.endToStart,
                 background: Container(
@@ -166,7 +187,7 @@ class DonePage extends StatelessWidget {
                     ],
                   ),
                 ),
-              ),
+              )),
             );
           },
         );

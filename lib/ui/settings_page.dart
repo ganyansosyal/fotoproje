@@ -55,8 +55,10 @@ class SettingsPage extends StatelessWidget {
         return Scaffold(
           appBar: embedded ? null : AppBar(title: Text(S.t('settings'))),
           body: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             children: [
               _Header(S.t('download')),
+              _Group([
               ListTile(
                 title: Text(S.t('downloadAddr')),
                 subtitle: Text(dm.displayPath),
@@ -73,7 +75,9 @@ class SettingsPage extends StatelessWidget {
               ),
               _Switch(S.t('wifiOnly'), null, s.wifiOnly,
                   (v) => s.setBool('wifiOnly', v)),
+              ]),
               _Header(S.t('browser')),
+              _Group([
               _Switch(S.t('blockAds'), s.blockAds ? S.t('on') : S.t('off'),
                   s.blockAds, (v) => s.setBool('blockAds', v)),
               _Switch(S.t('recentSites'), null, s.recentSites,
@@ -111,7 +115,9 @@ class SettingsPage extends StatelessWidget {
                   if (context.mounted) _toast(context, S.t('cleared'));
                 },
               ),
+              ]),
               _Header(S.t('general')),
+              _Group([
               ListTile(
                 title: Text(S.t('language')),
                 trailing: DropdownButton<String>(
@@ -146,7 +152,9 @@ class SettingsPage extends StatelessWidget {
               ),
               _Switch(S.t('syncGallery'), s.syncGallery ? S.t('on') : S.t('off'),
                   s.syncGallery, (v) => s.setBool('syncGallery', v)),
+              ]),
               _Header(S.t('help')),
+              _Group([
               ListTile(
                 title: Text(S.t('howTo')),
                 onTap: () => _info(context, S.t('howTo'), S.t('howToText')),
@@ -160,6 +168,7 @@ class SettingsPage extends StatelessWidget {
                 onTap: () => _info(context, S.t('privacy'), S.t('privacyText')),
               ),
               const ListTile(title: Text(appVersion)),
+              ]),
               const SizedBox(height: 24),
             ],
           ),
@@ -219,13 +228,35 @@ class _Header extends StatelessWidget {
   const _Header(this.text);
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
+        padding: const EdgeInsets.fromLTRB(8, 22, 8, 8),
         child: Text(text,
             style: TextStyle(
                 color: Theme.of(context).colorScheme.primary,
-                fontWeight: FontWeight.w600,
-                fontSize: 15)),
+                fontWeight: FontWeight.w800,
+                fontSize: 16)),
       );
+}
+
+/// Bölümün ayarlarını tek, net kenarlı yuvarlak kartta toplar.
+class _Group extends StatelessWidget {
+  final List<Widget> children;
+  const _Group(this.children);
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Material(
+      color: cs.surface,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(22),
+          side: BorderSide(color: cs.outlineVariant)),
+      child: Column(
+        children: ListTile.divideTiles(
+                context: context, tiles: children, color: cs.outlineVariant)
+            .toList(),
+      ),
+    );
+  }
 }
 
 class _Switch extends StatelessWidget {
