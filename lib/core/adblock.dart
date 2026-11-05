@@ -40,6 +40,26 @@ const _adHosts = <String>[
   'zedo.com',
 ];
 
+final _adSet = {for (final h in _adHosts) if (!h.contains('/')) h};
+final _adPaths = [for (final h in _adHosts) if (h.contains('/')) h];
+
+/// Reklam/izleyici adresi mi? Regex yok: alan adı sonekleri küme araması ile bakılır.
+bool isAdUrl(String url) {
+  final u = Uri.tryParse(url);
+  if (u == null) return false;
+  var h = u.host;
+  while (h.isNotEmpty) {
+    if (_adSet.contains(h)) return true;
+    final i = h.indexOf('.');
+    if (i < 0) break;
+    h = h.substring(i + 1);
+  }
+  for (final p in _adPaths) {
+    if (url.contains(p)) return true;
+  }
+  return false;
+}
+
 /// Sayfadaki yaygın reklam kutularını gizleyen CSS seçicileri.
 const _hideCss =
     'ins.adsbygoogle,.adsbygoogle,[id^="google_ads"],[id^="div-gpt-ad"],'
@@ -47,8 +67,23 @@ const _hideCss =
     '[id*="ad-slot"],[class*="sponsored"],iframe[src*="doubleclick"],'
     'iframe[src*="googlesyndication"]';
 
-List<ContentBlocker> buildContentBlockers() {
+List<ContentBlocker> buildContentBlockers({bool ads = true, bool fast = false}) {
   final list = <ContentBlocker>[];
+  // Hızlı mod: resim ve yazı tipi dosyalarını hiç indirme (CSS/JS'e dokunulmaz;
+  // oynatıcı ve sayfa düzeni bozulmasın). Kurallar WebView'ın kendi içinde (native) çalışır.
+  if (fast) {
+    list.add(ContentBlocker(
+      trigger: ContentBlockerTrigger(
+        urlFilter: '.*',
+        resourceType: [
+          ContentBlockerTriggerResourceType.IMAGE,
+          ContentBlockerTriggerResourceType.FONT,
+        ],
+      ),
+      action: ContentBlockerAction(type: ContentBlockerActionType.BLOCK),
+    ));
+  }
+  if (!ads) return list;
   // Her istek tüm kurallara karşı denendiği için tek birleşik kural kullan.
   final alt = _adHosts
       .map((h) => h.replaceAll('.', r'\.').replaceAll('/', r'\/'))

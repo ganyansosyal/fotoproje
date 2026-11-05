@@ -165,3 +165,17 @@ double? isoSeconds(String? s) {
       (int.tryParse(m[3] ?? '') ?? 0) * 60 +
       (double.tryParse(m[4] ?? '') ?? 0);
 }
+
+/// Performans ölçer: sayfada requestAnimationFrame ile kare hızını ölçer.
+const perfStartJs = r'''
+(function(){ var gen=window.__pg=(window.__pg||0)+1;
+ var last=performance.now(), t0=last, frames=0, worst=0, jank=0;
+ function tick(n){ if(window.__pg!==gen) return;
+  var d=n-last; last=n; frames++; if(d>worst) worst=d; if(d>50) jank++;
+  if(n-t0>=500){ try{ window.flutter_inappwebview.callHandler('perf',Math.round(frames*1000/(n-t0)),Math.round(worst),jank); }catch(e){}
+   frames=0; worst=0; jank=0; t0=n; }
+  requestAnimationFrame(tick); }
+ requestAnimationFrame(tick); })();
+''';
+
+const perfStopJs = 'window.__pg=(window.__pg||0)+1;';
