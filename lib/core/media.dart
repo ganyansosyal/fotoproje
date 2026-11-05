@@ -127,7 +127,7 @@ const scrollJs = r'''
   if(Math.abs(d)>350){ acc=0; return; }
   if((d>0)!==(acc>0)) acc=0;
   acc+=d;
-  if(acc>40){ send('down'); } else if(acc<-12){ send('up'); }
+  if(acc>28){ send('down'); } else if(acc<-6){ send('up'); }
  },{capture:true,passive:true});
 })();
 ''';
