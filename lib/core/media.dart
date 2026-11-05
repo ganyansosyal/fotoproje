@@ -16,7 +16,7 @@ const hookJs = r'''
   if(ct.indexOf('dash+xml')>-1){send(u,'mpd');return true}
   if(ct.indexOf('video/')===0){send(u,'mp4');return true}
   return false; }
- function scan(t,max){ if(!t||t.length>(max||600000)) return;
+ function scan(t,max){ if(!t||t.length>(max||250000)) return;
   if(!quick.test(t)) return;
   t=t.replace(/\\\//g,'/').replace(/\\u0026/g,'&').replace(/&amp;/g,'&');
   var m=t.match(rx); if(m) m.forEach(function(u){add(u)}); }
@@ -46,7 +46,7 @@ const hookJs = r'''
    var ct=res.headers.get('content-type')||'';
    if(ctype(ct,res.url||u)) return;
    var len=parseInt(res.headers.get('content-length')||'0',10);
-   if(len>600000) return;
+   if(len>250000) return;
    if(/json|text|javascript|xml/i.test(ct)) res.clone().text().then(function(t){scan(t)}).catch(function(){});
   }catch(e){} }).catch(function(){});
   return p; };
@@ -62,23 +62,28 @@ const hookJs = r'''
 const scrollJs = r'''
 (function(){ if(window.__sc) return; window.__sc=1;
  var last=new WeakMap(), dir='', mute=0, acc=0;
- function send(d){ if(d===dir) return; dir=d; mute=Date.now()+450;
+ function send(d){ if(d===dir) return; dir=d; mute=Date.now()+900; acc=0;
   try{window.flutter_inappwebview.callHandler('scrollDir',d);}catch(e){} }
  document.addEventListener('scroll',function(e){
-  if(Date.now()<mute) return;
+  var now=Date.now();
   var el=e.target;
   if(el===document||el===document.documentElement||el===document.body) el=document.scrollingElement||document.documentElement;
   if(!el||el.clientHeight<window.innerHeight*0.5) return;
   var y=el.scrollTop, p=last.get(el); last.set(el,y);
+  // Bar gizlenip gösterilirken WebView boyutu değişir; o sırada oluşan kaymalar sayılmaz.
+  if(now<mute) return;
   if(p===undefined) return;
   if(y<=8){ acc=0; send('up'); return; }
   var d=y-p; if(!d) return;
+  // Ani sıçramalar (sayfa uzunluğu/yerleşim değişimi) parmak kaydırması değildir.
+  if(Math.abs(d)>350){ acc=0; return; }
   if((d>0)!==(acc>0)) acc=0;
   acc+=d;
-  if(acc>90){ acc=0; send('down'); } else if(acc<-90){ acc=0; send('up'); }
+  if(acc>160){ send('down'); } else if(acc<-160){ send('up'); }
  },{capture:true,passive:true});
 })();
 ''';
+
 
 String? mediaKind(String u) {
   if (u.startsWith('blob:')) return 'blob';

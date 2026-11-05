@@ -49,13 +49,14 @@ const _hideCss =
 
 List<ContentBlocker> buildContentBlockers() {
   final list = <ContentBlocker>[];
-  for (final h in _adHosts) {
-    final esc = h.replaceAll('.', r'\.').replaceAll('/', r'\/');
-    list.add(ContentBlocker(
-      trigger: ContentBlockerTrigger(urlFilter: '.*$esc.*'),
-      action: ContentBlockerAction(type: ContentBlockerActionType.BLOCK),
-    ));
-  }
+  // Her istek tüm kurallara karşı denendiği için tek birleşik kural kullan.
+  final alt = _adHosts
+      .map((h) => h.replaceAll('.', r'\.').replaceAll('/', r'\/'))
+      .join('|');
+  list.add(ContentBlocker(
+    trigger: ContentBlockerTrigger(urlFilter: '.*($alt).*'),
+    action: ContentBlockerAction(type: ContentBlockerActionType.BLOCK),
+  ));
   list.add(ContentBlocker(
     trigger: ContentBlockerTrigger(urlFilter: '.*'),
     action: ContentBlockerAction(
