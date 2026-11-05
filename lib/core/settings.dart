@@ -47,6 +47,8 @@ class AppSettings extends ChangeNotifier {
   String theme = 'system'; // system | light | dark
   List<String> bookmarks = [];
   List<HistoryEntry> history = [];
+  List<List<String>> favorites = []; // [ad, adres]
+  int accent = 0xFF1A73E8;
 
   ThemeMode get themeMode => theme == 'light'
       ? ThemeMode.light
@@ -65,6 +67,19 @@ class AppSettings extends ChangeNotifier {
     lang = _p.getString('lang') ?? 'system';
     theme = _p.getString('theme') ?? 'system';
     bookmarks = _p.getStringList('bm') ?? [];
+    accent = _p.getInt('accent') ?? 0xFF1A73E8;
+    try {
+      final f = _p.getString('favs');
+      if (f != null) {
+        favorites = (jsonDecode(f) as List)
+            .map((e) => List<String>.from(e as List))
+            .toList();
+      } else {
+        favorites = [for (final e in defaultSites) [e[0], e[1]]];
+      }
+    } catch (_) {
+      favorites = [for (final e in defaultSites) [e[0], e[1]]];
+    }
     try {
       final raw = _p.getString('history');
       if (raw != null) {
@@ -129,7 +144,7 @@ class AppSettings extends ChangeNotifier {
     }
     history.insert(0, HistoryEntry(url, title, DateTime.now().millisecondsSinceEpoch));
     if (history.length > 300) history.removeRange(300, history.length);
-    _persistHistory();
+    _persistHistory(notify: false);
   }
 
   void updateHistoryTitle(String url, String title) {
@@ -149,18 +164,40 @@ class AppSettings extends ChangeNotifier {
     if (notify) notifyListeners();
   }
 
+  void setAccent(int c) {
+    accent = c;
+    _p.setInt('accent', c);
+    _save();
+  }
+
+  void _saveFavs() {
+    _p.setString('favs', jsonEncode(favorites));
+    _save();
+  }
+
+  bool isFavorite(String url) => favorites.any((e) => e[1] == url);
+
+  void addFavorite(String name, String url) {
+    if (url.isEmpty || isFavorite(url)) return;
+    final host = Uri.tryParse(url)?.host ?? url;
+    favorites.add([name.trim().isEmpty ? host.replaceFirst('www.', '') : name.trim(), url]);
+    _saveFavs();
+  }
+
+  void removeFavorite(String url) {
+    favorites.removeWhere((e) => e[1] == url);
+    _saveFavs();
+  }
+
   /// Ana sayfada gösterilecek siteler: yer imleri + son ziyaretler + varsayılanlar
   List<List<String>> homeSites() {
-    final out = <List<String>>[...defaultSites];
+    final out = <List<String>>[for (final e in favorites) [e[0], e[1]]];
     void add(String url, String name) {
       if (out.any((e) => e[1] == url)) return;
       final host = Uri.tryParse(url)?.host ?? url;
       out.add([name.isNotEmpty ? name : host.replaceFirst('www.', ''), url]);
     }
 
-    for (final b in bookmarks) {
-      add(b, '');
-    }
     if (recentSites) {
       final seen = <String>{};
       for (final h in history) {
