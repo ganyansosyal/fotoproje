@@ -112,9 +112,9 @@ const scrollJs = r'''
  var last=new WeakMap(), dir='', mute=0, acc=0;
  function send(d){ if(d===dir) return; dir=d; mute=Date.now()+250; acc=0;
   try{window.flutter_inappwebview.callHandler('scrollDir',d);}catch(e){} }
- document.addEventListener('scroll',function(e){
+ var pend=null;
+ function handle(el){
   var now=Date.now();
-  var el=e.target;
   if(el===document||el===document.documentElement||el===document.body) el=document.scrollingElement||document.documentElement;
   if(!el||el.clientHeight<window.innerHeight*0.4) return;
   var y=el.scrollTop, p=last.get(el); last.set(el,y);
@@ -128,6 +128,12 @@ const scrollJs = r'''
   if((d>0)!==(acc>0)) acc=0;
   acc+=d;
   if(acc>90){ send('down'); } else if(acc<-50){ send('up'); }
+ }
+ // Kaydırma olayları kare başına en fazla bir kez işlenir (ana iş parçacığı rahat kalır)
+ document.addEventListener('scroll',function(e){
+  if(pend){ pend=e.target; return; }
+  pend=e.target;
+  requestAnimationFrame(function(){ var el=pend; pend=null; handle(el); });
  },{capture:true,passive:true});
 })();
 ''';
