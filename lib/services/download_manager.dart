@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:gal/gal.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -25,6 +26,7 @@ class DownloadTask {
   DlStatus status = DlStatus.running;
   String? path;
   String? error;
+  String? note;
   int size = 0;
   final progress = ValueNotifier<double>(0);
   final label = ValueNotifier<String>('');
@@ -245,22 +247,43 @@ class DownloadManager extends ChangeNotifier {
 
   bool folderFallback = false;
 
+  static const _mux = MethodChannel('app/mux');
+
   Future<void> _finish(DownloadTask task, String tmpPath, String? audioTmp) async {
+    // Ayrı ses varsa yerel MediaMuxer ile tek mp4'e birleştir.
+    var src = tmpPath;
+    var sepAudio = audioTmp;
+    if (audioTmp != null) {
+      task.label.value = '...';
+      final out = '${tmpPath}_m.mp4';
+      try {
+        await _mux.invokeMethod('mux',
+            {'video': tmpPath, 'audio': audioTmp, 'out': out});
+        File(tmpPath).delete().ignore();
+        File(audioTmp).delete().ignore();
+        src = out;
+        sepAudio = null;
+      } catch (_) {
+        task.note = S.t('mergeFail');
+        File(out).delete().ignore();
+      }
+    }
     final dir = await _targetDir();
     final base = _safe(task.title);
-    var dest = '${dir.path}/$base.${tmpPath.split('.').last}';
+    final ext = src.split('.').last;
+    var dest = '${dir.path}/$base.$ext';
     var n = 1;
     while (File(dest).existsSync()) {
-      dest = '${dir.path}/$base (${n++}).${tmpPath.split('.').last}';
+      dest = '${dir.path}/$base (${n++}).$ext';
     }
-    await File(tmpPath).copy(dest);
-    File(tmpPath).delete().ignore();
+    await File(src).copy(dest);
+    File(src).delete().ignore();
     task.path = dest;
     task.size = await File(dest).length();
-    if (audioTmp != null) {
+    if (sepAudio != null) {
       final ad = dest.replaceFirst(RegExp(r'\.[^.]+$'), '_ses.m4a');
-      await File(audioTmp).copy(ad);
-      File(audioTmp).delete().ignore();
+      await File(sepAudio).copy(ad);
+      File(sepAudio).delete().ignore();
     }
     if (settings.syncGallery) {
       try {
