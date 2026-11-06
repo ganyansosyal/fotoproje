@@ -125,7 +125,7 @@ object Http {
             val len = c.contentLength
             val out = ByteArrayOutputStream(if (len > 0) len else 65536)
             c.inputStream.use { ins ->
-                val buf = ByteArray(65536)
+                val buf = ByteArray(262144)
                 while (true) {
                     val n = ins.read(buf)
                     if (n < 0) break
@@ -374,7 +374,7 @@ object Native {
                 var got = 0L
                 c.inputStream.use { ins ->
                     FileOutputStream(path).use { fo ->
-                        val buf = ByteArray(65536)
+                        val buf = ByteArray(262144)
                         while (true) {
                             val n = ins.read(buf)
                             if (n < 0) break
@@ -424,7 +424,7 @@ object Native {
                             Http.get(url, headers, "bytes=$from-$to", cancel) { c ->
                                 if (c.responseCode != 206) throw IOException("Parça eksik geldi")
                                 c.inputStream.use { ins ->
-                                    val buf = ByteArray(65536)
+                                    val buf = ByteArray(262144)
                                     var pos = from
                                     while (true) {
                                         val r = ins.read(buf)

@@ -393,13 +393,13 @@ object Downloads {
         var dest = File(dir, "$base.$ext")
         var n = 1
         while (dest.exists()) dest = File(dir, "$base (${n++}).$ext")
-        File(src).copyTo(dest, overwrite = false)
+        File(src).copyTo(dest, overwrite = false, bufferSize = 262144)
         File(src).delete()
         task.path = dest.path
         task.size = dest.length()
         if (sepAudio != null) {
             val ad = File(dest.path.replace(Regex("\\.[^.]+$"), "_ses.m4a"))
-            File(sepAudio).copyTo(ad, overwrite = true)
+            File(sepAudio).copyTo(ad, overwrite = true, bufferSize = 262144)
             File(sepAudio).delete()
         }
         if (Store.syncGallery) Gallery.putVideo(ctx, dest)
@@ -488,7 +488,7 @@ object Gallery {
                 v.put(MediaStore.Video.Media.IS_PENDING, 1)
                 val r = ctx.contentResolver
                 val uri = r.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, v) ?: return
-                r.openOutputStream(uri)?.use { out -> f.inputStream().use { it.copyTo(out) } }
+                r.openOutputStream(uri)?.use { out -> f.inputStream().use { it.copyTo(out, 262144) } }
                 v.clear()
                 v.put(MediaStore.Video.Media.IS_PENDING, 0)
                 r.update(uri, v, null, null)
