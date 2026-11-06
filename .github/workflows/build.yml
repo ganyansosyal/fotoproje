@@ -21,7 +21,14 @@ jobs:
           gradle-version: '8.7'
 
       - name: APK derle
-        run: gradle :app:assembleRelease --no-daemon --stacktrace
+        run: |
+          set +e
+          gradle :app:assembleRelease --no-daemon > build.log 2>&1
+          code=$?
+          echo "=========== HATA OZETI ==========="
+          grep -E "^e: |What went wrong|Could not|error:" -A4 build.log | head -60
+          echo "=========== OZET SONU ==========="
+          exit $code
 
       - uses: actions/upload-artifact@v4
         with:
