@@ -2,6 +2,8 @@ name: Build APK
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
 
 jobs:
   build:
@@ -14,81 +16,14 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - uses: subosito/flutter-action@v2
+      - uses: gradle/actions/setup-gradle@v4
         with:
-          channel: stable
-          cache: true
+          gradle-version: '8.7'
 
-      - name: Android klasorunu olustur
-        run: flutter create --platforms=android --project-name fotoproje --org com.ganyansosyal .
-
-      - name: INTERNET izni ekle
-        run: |
-          sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' android/app/src/main/AndroidManifest.xml
-
-      - name: Izinler ve http (cleartext) destegi
-        run: |
-          M=android/app/src/main/AndroidManifest.xml
-          sed -i 's#<application#<application android:usesCleartextTraffic="true"#' $M
-          sed -i 's#<application#<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>\n    <application#' $M
-          cat $M
-
-      - name: Yerel Android kodunu kopyala (native/*.kt)
-        run: |
-          D=android/app/src/main/kotlin/com/ganyansosyal/fotoproje
-          mkdir -p $D
-          cp native/*.kt $D/
-          ls -la $D
-
-      - name: Arka plan indirme servisi izinleri
-        run: |
-          M=android/app/src/main/AndroidManifest.xml
-          sed -i 's#<application#<uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n    <application#' $M
-          sed -i 's#</application>#    <service android:name="com.ganyansosyal.fotoproje.DlService" android:exported="false" android:foregroundServiceType="dataSync"/>\n    </application>#' $M
-          cat $M
-
-      - name: Yerel tarayici ekrani (BrowserActivity) manifeste ekle
-        run: |
-          M=android/app/src/main/AndroidManifest.xml
-          sed -i 's#</application>#    <activity android:name="com.ganyansosyal.fotoproje.BrowserActivity" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout|uiMode|density" android:hardwareAccelerated="true" android:enableOnBackInvokedCallback="false" android:windowSoftInputMode="adjustResize" android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar"/>\n    </application>#' $M
-          grep -n "BrowserActivity" $M
-
-      - name: androidx.webkit bagimliligi (belge-basi betik icin)
-        run: |
-          G=android/app/build.gradle.kts
-          if [ -f "$G" ]; then
-            printf '\ndependencies {\n    implementation("androidx.webkit:webkit:1.12.1")\n}\n' >> "$G"
-          else
-            G=android/app/build.gradle
-            printf "\ndependencies {\n    implementation 'androidx.webkit:webkit:1.12.1'\n}\n" >> "$G"
-          fi
-          tail -5 "$G"
-
-      - name: Skia motoruna gec (Impeller kapali)
-        run: |
-          sed -i 's#</application>#    <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false"/>\n    </application>#' android/app/src/main/AndroidManifest.xml
-          grep -n "Impeller" android/app/src/main/AndroidManifest.xml
-
-      - name: Yerel tema her zaman acik (WebView sistemin koyu modunu almasin)
-        run: |
-          for f in android/app/src/main/res/values*/styles.xml; do
-            [ -f "$f" ] && sed -i 's#Theme\.Black\.NoTitleBar#Theme.Light.NoTitleBar#g; s#Theme\.DeviceDefault\.NoActionBar#Theme.DeviceDefault.Light.NoActionBar#g' "$f"
-          done
-          cat android/app/src/main/res/values*/styles.xml || true
-
-      - run: flutter pub get
-
-      - name: inappwebview Proguard hatasini yamala
-        run: |
-          for f in $HOME/.pub-cache/hosted/pub.dev/flutter_inappwebview_android-*/android/build.gradle; do
-            echo "Yamalaniyor: $f"
-            sed -i "s/proguard-android\.txt/proguard-android-optimize.txt/g" "$f"
-            grep -n "proguard" "$f" || true
-          done
-
-      - run: flutter build apk --release
+      - name: APK derle
+        run: gradle :app:assembleRelease --no-daemon --stacktrace
 
       - uses: actions/upload-artifact@v4
         with:
           name: tarayici-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: app/build/outputs/apk/release/app-release.apk
