@@ -1343,7 +1343,7 @@ class BrowserActivity : Activity() {
             "perf" -> if (tb === cur) onPerf(arr.optInt(0), arr.optInt(1), arr.optInt(2))
             // Ana sayfa düğmeleri yalnızca ana sayfada geçerlidir
             "addFav" -> if (tb.isHome) showAddFav()
-            "linkDl" -> if (tb.isHome) LinkSheet.show(this, dark) { loadInCurrent(it) }
+            "linkDl" -> if (tb.isHome) LinkSheet.show(this, dark, { loadInCurrent(it) })
             "favMenu" -> if (tb.isHome) confirmRemoveFav(arr.optString(0), arr.optString(1))
         }
     }

@@ -73,16 +73,46 @@ object YouTube {
     /** Bağlantı kutusu için: başlık, süre ve seçilebilir kaliteler. */
     class Info(val title: String, val duration: Long, val url: String, val heights: List<Int>, val hasAudio: Boolean)
 
+    /** MediaMuxer (MP4) ile birleştirilebilen ayrı video akışı: yalnızca H.264 / mp4. */
+    private fun mergeable(s: org.schabi.newpipe.extractor.stream.VideoStream): Boolean =
+        s.isVideoOnly && s.content.isNotEmpty() &&
+            (s.format?.suffix ?: "") == "mp4" && (s.codec ?: "").startsWith("avc")
+
     fun info(url: String): Info {
         init()
         val u = clean(url)
         val si = StreamInfo.getInfo(u)
-        val hs = si.videoStreams
-            .filter { !it.isVideoOnly && it.content.isNotEmpty() }
-            .map { it.height }.distinct().sortedDescending()
         val au = si.audioStreams.any { it.content.isNotEmpty() }
+        val muxed = si.videoStreams.filter { !it.isVideoOnly && it.content.isNotEmpty() }.map { it.height }
+        val split = if (au) si.videoOnlyStreams.filter { mergeable(it) }.map { it.height } else emptyList()
+        val hs = (muxed + split).filter { it > 0 }.distinct().sortedDescending()
         if (hs.isEmpty() && !au) throw IOException("YouTube akışı bulunamadı")
         return Info(si.name ?: "YouTube", si.duration, u, hs, au)
+    }
+
+    /** İndirme seçimi: video adresi + (ayrı akışsa) ses adresi. */
+    class Sel(val video: String, val audio: String?)
+
+    /** height>0 ise o kalite, yoksa en yüksek. Birleşik akış varsa onu, yoksa video+ses ikilisini seçer. */
+    fun select(url: String, height: Int = 0): Sel {
+        init()
+        val si = StreamInfo.getInfo(clean(url))
+        val muxed = si.videoStreams.filter { !it.isVideoOnly && it.content.isNotEmpty() }
+        val audios = si.audioStreams.filter { it.content.isNotEmpty() }
+        val split = if (audios.isNotEmpty()) si.videoOnlyStreams.filter { mergeable(it) } else emptyList()
+        val want = if (height > 0) height else (muxed + split).maxOfOrNull { it.height } ?: 0
+        val m = muxed.filter { it.height == want }.maxByOrNull { it.bitrate }
+        val v = split.filter { it.height == want }.maxByOrNull { it.bitrate }
+        if (m != null) return Sel(m.content, null)
+        if (v != null) {
+            val m4a = audios.filter { (it.format?.suffix ?: "") == "m4a" }
+            val a = m4a.ifEmpty { audios }.maxByOrNull { it.averageBitrate }
+            if (a != null) return Sel(v.content, a.content)
+        }
+        // İstenen kalite yoksa eldeki en iyi birleşik akışa düş
+        val fb = muxed.maxByOrNull { it.height * 10_000_000L + it.bitrate }
+            ?: throw IOException("YouTube akışı bulunamadı")
+        return Sel(fb.content, null)
     }
 
     /** Ses+görüntü birleşik (muxed) akışın adresi. height>0 ise o kalite, yoksa en yüksek. */
