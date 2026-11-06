@@ -171,7 +171,10 @@ object Native {
         if (fg.decrementAndGet() <= 0) {
             fg.set(0)
             try {
-                ctx.stopService(Intent(ctx, DlService::class.java))
+                // stopService() servis startForeground() demeden çağrılırsa uygulama çöker;
+                // bunun yerine servise "dur" komutu gönderilir, o da önce startForeground der.
+                val i = Intent(ctx, DlService::class.java).setAction(DlService.ACTION_STOP)
+                if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
             } catch (_: Exception) {
             }
         }
@@ -483,33 +486,53 @@ object Native {
 
 /** İndirme sürerken uygulamanın arka planda kesilmemesi için ön plan servisi. */
 class DlService : Service() {
+    companion object { const val ACTION_STOP = "dl_stop" }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     @Suppress("DEPRECATION")
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val chId = "dl"
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (Build.VERSION.SDK_INT >= 26) {
-            nm.createNotificationChannel(
-                NotificationChannel(chId, "İndirmeler", NotificationManager.IMPORTANCE_LOW)
-            )
+    private fun goForeground(): Boolean {
+        return try {
+            val chId = "dl"
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (Build.VERSION.SDK_INT >= 26) {
+                nm.createNotificationChannel(
+                    NotificationChannel(chId, "İndirmeler", NotificationManager.IMPORTANCE_LOW)
+                )
+            }
+            val launch = packageManager.getLaunchIntentForPackage(packageName)
+            val pi = if (launch != null) PendingIntent.getActivity(
+                this, 0, launch, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            ) else null
+            val b = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, chId)
+            else Notification.Builder(this)
+            b.setContentTitle("Video indiriliyor")
+                .setContentText("İndirme arka planda devam ediyor")
+                .setSmallIcon(android.R.drawable.stat_sys_download)
+                .setOngoing(true)
+            if (pi != null) b.setContentIntent(pi)
+            val n = b.build()
+            if (Build.VERSION.SDK_INT >= 29) {
+                startForeground(4711, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            } else {
+                startForeground(4711, n)
+            }
+            true
+        } catch (_: Throwable) {
+            false
         }
-        val launch = packageManager.getLaunchIntentForPackage(packageName)
-        val pi = if (launch != null) PendingIntent.getActivity(
-            this, 0, launch, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        ) else null
-        val b = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, chId)
-        else Notification.Builder(this)
-        b.setContentTitle("Video indiriliyor")
-            .setContentText("İndirme arka planda devam ediyor")
-            .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setOngoing(true)
-        if (pi != null) b.setContentIntent(pi)
-        val n = b.build()
-        if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(4711, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        } else {
-            startForeground(4711, n)
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        goForeground() // mümkün olan en erken anda
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val ok = goForeground() // her komutta tekrar: sistem bunu şart koşar
+        if (intent?.action == ACTION_STOP || !ok) {
+            try { stopForeground(true) } catch (_: Throwable) {}
+            stopSelf()
         }
         return START_NOT_STICKY
     }
