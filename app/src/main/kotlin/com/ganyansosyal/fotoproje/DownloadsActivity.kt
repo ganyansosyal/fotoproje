@@ -197,19 +197,40 @@ class DownloadsActivity : Activity() {
 
     private fun doneRow(t: DownloadTask): View {
         val c = cardBox()
+        val top = LinearLayout(this)
+        top.orientation = LinearLayout.HORIZONTAL
+        top.gravity = Gravity.CENTER_VERTICAL
+
+        // Küçük resim (videonun bir karesi)
+        val thumb = android.widget.ImageView(this)
+        thumb.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+        thumb.background = GradientDrawable().apply {
+            cornerRadius = dp(10).toFloat()
+            setColor(if (Store.dark) 0xFF3C4043.toInt() else 0xFFE8EAED.toInt())
+        }
+        thumb.clipToOutline = true
+        val p = t.path
+        if (p != null && !p.endsWith(".m4a")) loadThumb(p, thumb)
+        top.addView(thumb, LinearLayout.LayoutParams(dp(88), dp(64)).apply { rightMargin = dp(12) })
+
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
         val name = TextView(this)
         name.text = t.title
-        name.maxLines = 1
+        name.maxLines = 2
         name.ellipsize = android.text.TextUtils.TruncateAt.END
         name.setTextColor(fg)
         name.textSize = 16f
-        c.addView(name)
+        col.addView(name)
         val s = TextView(this)
         val sz = Media.fmtBytes(t.size)
         s.text = if (t.note == null) sz else "$sz · ${t.note}"
         s.setTextColor(sub)
         s.textSize = 12f
-        c.addView(s)
+        col.addView(s)
+        top.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
+        c.addView(top)
+
         val row = LinearLayout(this)
         row.gravity = Gravity.END
         row.addView(action(L.t("share")) { shareFile(t) })
@@ -217,6 +238,30 @@ class DownloadsActivity : Activity() {
         c.addView(row)
         c.setOnClickListener { openFile(t) }
         return c
+    }
+
+    private fun loadThumb(path: String, iv: android.widget.ImageView) {
+        thumbCache[path]?.let { iv.setImageBitmap(it); return }
+        Thread {
+            var bmp: android.graphics.Bitmap? = null
+            val r = android.media.MediaMetadataRetriever()
+            try {
+                r.setDataSource(path)
+                bmp = r.getFrameAtTime(1_000_000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    ?: r.getFrameAtTime(0)
+                if (bmp != null) {
+                    val w = 320
+                    val h = (bmp.height * w.toFloat() / bmp.width).toInt().coerceAtLeast(1)
+                    bmp = android.graphics.Bitmap.createScaledBitmap(bmp, w, h, true)
+                }
+            } catch (_: Throwable) {
+            } finally {
+                try { r.release() } catch (_: Throwable) {}
+            }
+            val out = bmp ?: return@Thread
+            thumbCache[path] = out
+            runOnUiThread { iv.setImageBitmap(out) }
+        }.start()
     }
 
     private fun uriOf(path: String): Uri =
@@ -243,5 +288,9 @@ class DownloadsActivity : Activity() {
             startActivity(Intent.createChooser(i, null))
         } catch (_: Throwable) {
         }
+    }
+
+    companion object {
+        private val thumbCache = java.util.concurrent.ConcurrentHashMap<String, android.graphics.Bitmap>()
     }
 }

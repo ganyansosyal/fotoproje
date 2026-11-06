@@ -338,35 +338,53 @@ object Downloads {
         return d
     }
 
+    private fun freeDest(base: String, ext: String): File {
+        val dir = targetDir()
+        var dest = File(dir, "$base.$ext")
+        var n = 1
+        while (dest.exists()) dest = File(dir, "$base (${n++}).$ext")
+        return dest
+    }
+
     private fun finish(task: DownloadTask, tmpPath: String, audioTmp: String?) {
         var src = tmpPath
         var sepAudio = audioTmp
+        var dest: File? = null
         task.progress = -1.0
         if (audioTmp != null) {
             task.label = L.t("merging")
             notifyUi(true)
-            val out = tmpPath + "_m.mp4"
+            // Birleştirmeyi doğrudan hedef klasöre yaz: ikinci bir kopyalama gerekmez
+            val d = freeDest(safe(task.title), "mp4")
             try {
-                Mux.run(tmpPath, audioTmp, out)
+                var lastP = -1
+                Mux.run(tmpPath, audioTmp, d.path) { p ->
+                    val pc = (p * 100).toInt()
+                    if (pc != lastP) {
+                        lastP = pc
+                        task.progress = p.coerceIn(0.0, 1.0)
+                        task.label = L.t("merging") + " %" + pc
+                        notifyUi()
+                    }
+                }
                 File(tmpPath).delete()
                 File(audioTmp).delete()
-                src = out
+                dest = d
                 sepAudio = null
             } catch (_: Throwable) {
                 task.note = L.t("mergeFail")
-                File(out).delete()
+                d.delete()
             }
         }
-        task.label = L.t("saving")
-        notifyUi(true)
-        val dir = targetDir()
-        val base = safe(task.title)
-        val ext = src.substringAfterLast('.')
-        var dest = File(dir, "$base.$ext")
-        var n = 1
-        while (dest.exists()) dest = File(dir, "$base (${n++}).$ext")
-        File(src).copyTo(dest, overwrite = false, bufferSize = 262144)
-        File(src).delete()
+        if (dest == null) {
+            task.label = L.t("saving")
+            notifyUi(true)
+            val ext = src.substringAfterLast('.')
+            val d = freeDest(safe(task.title), ext)
+            File(src).copyTo(d, overwrite = false, bufferSize = 262144)
+            File(src).delete()
+            dest = d
+        }
         task.path = dest.path
         task.size = dest.length()
         if (sepAudio != null) {
@@ -410,7 +428,7 @@ object Mux {
         return -1
     }
 
-    fun run(video: String, audio: String, out: String) {
+    fun run(video: String, audio: String, out: String, onProgress: (Double) -> Unit = {}) {
         val ve = MediaExtractor()
         val ae = MediaExtractor()
         var muxer: MediaMuxer? = null
@@ -430,6 +448,7 @@ object Mux {
             started = true
             val buf = ByteBuffer.allocate(2 * 1024 * 1024)
             val info = MediaCodec.BufferInfo()
+            val totalUs = try { ve.getTrackFormat(vt).getLong(MediaFormat.KEY_DURATION) } catch (_: Throwable) { 0L }
             // Kareleri zaman sırasına göre iç içe yaz (art arda yazmak takılma yapıyordu)
             while (true) {
                 val vTime = ve.sampleTime
@@ -452,6 +471,7 @@ object Mux {
                     MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
                 muxer.writeSampleData(track, buf, info)
                 ex.advance()
+                if (useVideo && totalUs > 0) onProgress(info.presentationTimeUs.toDouble() / totalUs)
             }
         } finally {
             try { if (started) muxer?.stop() } catch (_: Throwable) {}

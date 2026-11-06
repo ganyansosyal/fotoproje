@@ -85,8 +85,12 @@ object Media {
   if(direct){ urls=[src]; }
   else{
    // Bu videonun yüklenmesinden kısa süre önce/sonra istenen adresler
-   var from=(t0.get(v)||(Date.now()-120000))-30000;
-   for(i=0;i<cand.length;i++){ if(cand[i].t>=from){ urls.push(cand[i].u); if(cand[i].k) hints[cand[i].u]=cand[i].k; } }
+   // Önce bu videonun yüklenmesine yakın (-8sn / +20sn) istekler; yoksa eski geniş pencere
+   var st=t0.get(v)||(Date.now()-120000), j, pass;
+   for(pass=0;pass<2&&!urls.length;pass++){
+    var from=pass?st-30000:st-8000, to=pass?9e15:st+20000;
+    for(j=0;j<cand.length;j++){ if(cand[j].t>=from&&cand[j].t<=to){ urls.push(cand[j].u); if(cand[j].k) hints[cand[j].u]=cand[j].k; } }
+   }
    urls=urls.slice(-12);
    if(!urls.length&&/^blob:/i.test(src)) urls=[src];
   }

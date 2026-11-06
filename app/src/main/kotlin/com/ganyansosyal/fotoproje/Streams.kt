@@ -32,6 +32,25 @@ object Streams {
         }
     }
 
+    /** Videoyu ve sesi aynı anda indirir (ses küçük olduğu için ilerleme videodan gösterilir). */
+    private fun parallel(video: () -> Unit, audio: () -> Unit) {
+        var err: Throwable? = null
+        val t = Thread {
+            try { audio() } catch (e: Throwable) { err = e }
+        }
+        t.start()
+        try {
+            video()
+        } catch (e: Throwable) {
+            t.interrupt()
+            throw e
+        }
+        t.join()
+        err?.let { throw it }
+    }
+
+    private val SILENT: Report = { _, _ -> }
+
     /** Dönüş: ayrı ses dosyası yazıldı mı */
     fun hls(
         url: String, path: String, audioPath: String, referer: String,
@@ -76,11 +95,14 @@ object Streams {
             }
         }
         val hasAudio = audioUrl != null
-        hlsMedia(pl, path, report, "Video", h, cancel, 0.0, if (hasAudio) 0.8 else 1.0)
         if (hasAudio) {
-            hlsMedia(audioUrl!!, audioPath, report, "Ses", h, cancel, 0.8, 0.2)
+            parallel(
+                { hlsMedia(pl, path, report, "Video", h, cancel, 0.0, 1.0) },
+                { hlsMedia(audioUrl!!, audioPath, SILENT, "Ses", h, cancel, 0.0, 1.0) }
+            )
             return true
         }
+        hlsMedia(pl, path, report, "Video", h, cancel, 0.0, 1.0)
         return false
     }
 
@@ -183,7 +205,7 @@ object Streams {
         if (bestSet == null || bestRep == null) throw IOException("Video bulunamadı")
         val hasAudio = bestASet != null && bestARep != null
 
-        fun grab(s: Element, r: Element, out: String, label: String, start: Double, span: Double) {
+        fun grab(s: Element, r: Element, out: String, label: String, start: Double, span: Double, rep: Report = report) {
             val id = r.attr("id") ?: ""
             val bw = r.attr("bandwidth") ?: "0"
             val b = baseOf(baseOf(b0, s), r)
@@ -234,14 +256,17 @@ object Streams {
             } else {
                 urls.add(b)
             }
-            saveSegments(init, urls, out, report, label, h, cancel, start, span)
+            saveSegments(init, urls, out, rep, label, h, cancel, start, span)
         }
 
-        grab(bestSet, bestRep, path, "Video", 0.0, if (hasAudio) 0.8 else 1.0)
         if (hasAudio) {
-            grab(bestASet!!, bestARep!!, audioPath, "Ses", 0.8, 0.2)
+            parallel(
+                { grab(bestSet, bestRep, path, "Video", 0.0, 1.0) },
+                { grab(bestASet!!, bestARep!!, audioPath, "Ses", 0.0, 1.0, SILENT) }
+            )
             return true
         }
+        grab(bestSet, bestRep, path, "Video", 0.0, 1.0)
         return false
     }
 }

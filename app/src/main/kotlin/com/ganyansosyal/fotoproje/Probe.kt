@@ -182,19 +182,23 @@ object Probe {
             pool.submit(Callable { probeOne(u, hints[u] ?: "", referer, children) })
         }
         val list = futures.map { try { it.get() } catch (_: Throwable) { null } }.filterNotNull()
-        val strict = expectDur >= 90
+        // Oynayan videonun süresi biliniyorsa (kısa klipler dâhil) eşleşmeyenleri ele
+        val strict = expectDur >= 5
         var ok = list.filter { it.usable && !synchronized(children) { children.contains(it.url) } }
+        val mismatch = HashSet<MediaInfo>()
         for (e in ok) {
             if (exactSrc.isNotEmpty() && e.url == exactSrc) {
                 if (e.duration <= 0) e.duration = expectDur
                 if (e.height <= 0) e.height = height
                 if (strict) e.verified = true
             } else if (strict && e.duration > 0) {
-                val tol = maxOf(4.0, expectDur * 0.04)
-                if (Math.abs(e.duration - expectDur) <= tol) e.verified = true else e.usable = false
+                val tol = maxOf(2.5, expectDur * 0.04)
+                if (Math.abs(e.duration - expectDur) <= tol) e.verified = true else mismatch.add(e)
             }
         }
-        ok = ok.filter { it.usable }
+        // Hepsi eşleşmediyse (süre yanlış bildirilmiş olabilir) boş bırakma
+        val okMatch = ok.filter { it !in mismatch }
+        if (okMatch.isNotEmpty()) ok = okMatch
         if (ok.any { it.verified }) ok = ok.filter { it.verified }
         ok = ok.sortedByDescending { it.rank }
         val seen = HashSet<String>()
