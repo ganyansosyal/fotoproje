@@ -325,7 +325,7 @@ class BrowserActivity : Activity() {
             fab,
             FrameLayout.LayoutParams(dp(68), dp(68)).apply {
                 gravity = Gravity.END or Gravity.BOTTOM
-                rightMargin = dp(10)
+                rightMargin = dp(18)
                 bottomMargin = dp(10)
             }
         )
@@ -2138,8 +2138,13 @@ class BrowserActivity : Activity() {
             }
         }
         fab.post {
-            fab.translationX = clampTx(sp.getFloat("fabX", 0f))
-            fab.translationY = clampTy(sp.getFloat("fabY", 0f))
+            if (sp.contains("fabX") || sp.contains("fabY")) {
+                fab.translationX = clampTx(sp.getFloat("fabX", 0f))
+                fab.translationY = clampTy(sp.getFloat("fabY", 0f))
+            } else {
+                // İlk açılış: köşeye yapışık durmasın, sürüklenebildiği anlaşılsın
+                fab.translationY = clampTy(-content.height * 0.22f)
+            }
         }
     }
 
