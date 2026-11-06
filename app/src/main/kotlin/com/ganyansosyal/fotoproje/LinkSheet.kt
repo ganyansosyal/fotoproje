@@ -128,43 +128,92 @@ object LinkSheet {
             }
         }
 
+        fun clipAny(): String {
+            return try {
+                val cm = act.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.primaryClip?.getItemAt(0)?.text?.toString()?.trim() ?: ""
+            } catch (_: Throwable) {
+                ""
+            }
+        }
+
         fun showInput(prefill: String, err: String?) {
             box.removeAllViews()
-            box.addView(label(tr("Link ile indir", "Download from link"), 19f, fg, true))
+            box.addView(label(tr("Link ile indir", "Download from link"), 22f, fg, true))
             box.addView(gap(4))
             box.addView(
                 label(
-                    tr(
-                        "YouTube linkini yapıştır. Diğer sitelerde sayfa açılır.",
-                        "Paste a YouTube link. Other sites open the page."
-                    ), 13f, sub
+                    tr("Linki yapıştır, videoyu bulalım.", "Paste a link and we'll find the video."),
+                    14f, sub
                 )
             )
-            box.addView(gap(14))
+            box.addView(gap(18))
+
+            // Arama çubuğu: [🔎  link ............ Yapıştır/✕]
+            val pill = LinearLayout(act)
+            pill.orientation = LinearLayout.HORIZONTAL
+            pill.gravity = Gravity.CENTER_VERTICAL
+            pill.background = rounded(card, 28, if (err != null) red else line, 1)
+            pill.setPadding(dp(18), 0, dp(8), 0)
+            pill.addView(label("\uD83D\uDD0E", 17f, sub))
+
             val et = EditText(act)
             et.setText(prefill)
-            et.hint = tr("Linki buraya yapıştır", "Paste the link here")
+            et.hint = tr("youtube.com/watch?v=…", "youtube.com/watch?v=…")
             et.setHintTextColor(sub)
             et.setTextColor(fg)
             et.textSize = 15f
             et.isSingleLine = true
             et.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
             et.imeOptions = EditorInfo.IME_ACTION_GO
-            et.background = rounded(card, 14)
-            et.setPadding(dp(16), dp(13), dp(16), dp(13))
+            et.background = null
+            et.setPadding(dp(12), dp(16), dp(8), dp(16))
+            pill.addView(et, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+
+            val act2 = TextView(act)
+            act2.textSize = 13f
+            act2.typeface = Typeface.DEFAULT_BOLD
+            act2.gravity = Gravity.CENTER
+            act2.setTextColor(acc)
+            act2.background = rounded(accBg, 20)
+            act2.setPadding(dp(14), 0, dp(14), 0)
+            fun refresh() {
+                act2.text = if (et.text.isNullOrEmpty()) tr("Yapıştır", "Paste") else "\u2715"
+            }
+            refresh()
+            act2.setOnClickListener {
+                if (et.text.isNullOrEmpty()) et.setText(clipAny()) else et.setText("")
+                et.setSelection(et.text.length)
+            }
+            et.addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
+                override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {}
+                override fun afterTextChanged(s: android.text.Editable?) = refresh()
+            })
+            pill.addView(act2, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(38)))
+            box.addView(pill, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(56)))
+
             et.setOnEditorActionListener { _, id, _ ->
                 if (id == EditorInfo.IME_ACTION_GO) {
                     find(et.text.toString())
                     true
                 } else false
             }
-            box.addView(et)
             if (err != null) {
                 box.addView(gap(8))
                 box.addView(label(err, 13f, red))
             }
             box.addView(gap(16))
-            box.addView(button(tr("Bul", "Find")) { find(et.text.toString()) })
+            box.addView(button(tr("Videoyu bul", "Find video")) { find(et.text.toString()) })
+            box.addView(gap(12))
+            val hint = label(
+                tr(
+                    "YouTube, Shorts ve canlı yayın linkleri desteklenir. Diğer siteler tarayıcıda açılır.",
+                    "YouTube, Shorts and live links are supported. Other sites open in the browser."
+                ), 12f, sub
+            )
+            hint.gravity = Gravity.CENTER
+            box.addView(hint)
             if (prefill.isEmpty()) {
                 dlg.window?.setSoftInputMode(
                     WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE or
@@ -224,55 +273,83 @@ object LinkSheet {
 
         fun showOptions(info: YouTube.Info) {
             box.removeAllViews()
-            val title = label(info.title, 16f, fg, true)
+            val title = label(info.title, 18f, fg, true)
             title.maxLines = 2
             title.ellipsize = TextUtils.TruncateAt.END
             box.addView(title)
             val d = fmtDur(info.duration)
-            box.addView(gap(2))
-            box.addView(label(if (d.isEmpty()) "YouTube" else "$d · YouTube", 12f, sub))
-            box.addView(gap(14))
+            box.addView(gap(4))
+            box.addView(label(if (d.isEmpty()) "YouTube" else "$d  ·  YouTube", 13f, sub))
+            box.addView(gap(16))
 
             val modes = ArrayList<String>()
             val names = ArrayList<String>()
+            val vCount: Int
             for (h in info.heights) {
                 modes.add("v$h")
-                names.add("Video ${h}p")
+                names.add("${h}p")
             }
+            vCount = modes.size
             if (info.hasAudio) {
                 modes.add("m")
-                names.add(tr("Ses (MP3)", "Audio (MP3)"))
+                names.add("MP3")
                 modes.add("a")
-                names.add(tr("Ses (M4A)", "Audio (M4A)"))
+                names.add("M4A")
             }
             var sel = 0
-            val rows = ArrayList<TextView>()
+            val chips = ArrayList<TextView>()
             fun paint() {
-                for (i in rows.indices) {
+                for (i in chips.indices) {
                     val on = i == sel
-                    rows[i].background = if (on) rounded(accBg, 12, acc, 2) else rounded(bg, 12, line, 1)
-                    rows[i].setTextColor(if (on) acc else fg)
-                    rows[i].typeface = if (on) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+                    chips[i].background = if (on) rounded(accBg, 14, acc, 2) else rounded(card, 14)
+                    chips[i].setTextColor(if (on) acc else fg)
+                    chips[i].typeface = if (on) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
                 }
             }
-            for (i in names.indices) {
-                val r = TextView(act)
-                r.text = names[i]
-                r.textSize = 15f
-                r.gravity = Gravity.CENTER_VERTICAL
-                r.setPadding(dp(16), 0, dp(16), 0)
-                val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(48))
-                lp.bottomMargin = dp(8)
-                r.layoutParams = lp
-                r.setOnClickListener {
-                    sel = i
-                    paint()
+            fun grid(from: Int, to: Int) {
+                var i = from
+                while (i < to) {
+                    val row = LinearLayout(act)
+                    row.orientation = LinearLayout.HORIZONTAL
+                    for (c in 0 until 3) {
+                        val idx = i + c
+                        val lp = LinearLayout.LayoutParams(0, dp(48), 1f)
+                        lp.setMargins(dp(4), dp(4), dp(4), dp(4))
+                        if (idx < to) {
+                            val t = TextView(act)
+                            t.text = names[idx]
+                            t.textSize = 15f
+                            t.gravity = Gravity.CENTER
+                            t.setOnClickListener {
+                                sel = idx
+                                paint()
+                            }
+                            chips.add(t)
+                            row.addView(t, lp)
+                        } else {
+                            row.addView(View(act), lp)
+                        }
+                    }
+                    val rp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                    rp.setMargins(-dp(4), 0, -dp(4), 0)
+                    box.addView(row, rp)
+                    i += 3
                 }
-                rows.add(r)
-                box.addView(r)
+            }
+            if (vCount > 0) {
+                box.addView(label(tr("VİDEO", "VIDEO"), 11f, sub, true))
+                box.addView(gap(4))
+                grid(0, vCount)
+                box.addView(gap(10))
+            }
+            if (modes.size > vCount) {
+                box.addView(label(tr("SES", "AUDIO"), 11f, sub, true))
+                box.addView(gap(4))
+                grid(vCount, modes.size)
+                box.addView(gap(10))
             }
             paint()
-            box.addView(gap(8))
+            box.addView(gap(6))
             box.addView(button(tr("İndir", "Download")) {
                 val mode = modes[sel]
                 dlg.dismiss()
