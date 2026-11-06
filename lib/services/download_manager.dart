@@ -15,7 +15,7 @@ import '../core/settings.dart';
 import '../core/strings.dart';
 import 'engine.dart';
 
-enum DlStatus { running, done, failed, canceled }
+enum DlStatus { running, paused, done, failed, canceled }
 
 class DownloadTask {
   final String id;
@@ -30,7 +30,10 @@ class DownloadTask {
   int size = 0;
   final progress = ValueNotifier<double>(0);
   final label = ValueNotifier<String>('');
-  final cancel = CancelToken();
+  CancelToken cancel = CancelToken();
+  Future<void> Function()? body; // duraklat/yeniden dene için çalışma gövdesi
+  bool pausing = false;
+  bool canPause = true; // blob okuma yarıda kesilemez
 
   DownloadTask(this.id, this.url, this.referer, this.title)
       : createdAt = DateTime.now().millisecondsSinceEpoch;
@@ -118,6 +121,7 @@ class DownloadManager extends ChangeNotifier {
     final name = title?.trim().isNotEmpty == true ? title!.trim() : _nameOf(url);
     final task = DownloadTask(
         DateTime.now().microsecondsSinceEpoch.toString(), url, referer, name);
+    task.canPause = kind != 'blob';
     active.insert(0, task);
     notifyListeners();
     _run(task, () async {
@@ -212,6 +216,7 @@ class DownloadManager extends ChangeNotifier {
   }
 
   Future<void> _run(DownloadTask task, Future<void> Function() body) async {
+    task.body = body;
     try {
       await body();
       task.status = DlStatus.done;
@@ -223,6 +228,14 @@ class DownloadManager extends ChangeNotifier {
     } catch (e) {
       final canceled = e is CanceledException ||
           (e is DioException && CancelToken.isCancel(e));
+      if (canceled && task.pausing) {
+        // Duraklatıldı: listede kalır, "Devam" ile yeniden başlar
+        task.status = DlStatus.paused;
+        task.progress.value = task.progress.value < 0 ? 0 : task.progress.value;
+        task.label.value = S.t('paused');
+        notifyListeners();
+        return;
+      }
       task.status = canceled ? DlStatus.canceled : DlStatus.failed;
       task.error = canceled
           ? S.t('canceled')
@@ -237,11 +250,36 @@ class DownloadManager extends ChangeNotifier {
   }
 
   void cancel(DownloadTask t) {
+    t.pausing = false;
     if (!t.cancel.isCancelled) t.cancel.cancel();
-    if (t.status == DlStatus.failed) {
+    if (t.status == DlStatus.failed || t.status == DlStatus.paused) {
+      t.status = DlStatus.canceled;
       active.remove(t);
       notifyListeners();
     }
+  }
+
+  /// Duraklat: çalışan indirmeyi durdurur (Devam, baştan yeniden başlatır).
+  void pause(DownloadTask t) {
+    if (t.status != DlStatus.running || !t.canPause) return;
+    t.pausing = true;
+    t.label.value = S.t('pausing');
+    if (!t.cancel.isCancelled) t.cancel.cancel();
+  }
+
+  /// Devam / yeniden dene.
+  void resume(DownloadTask t) {
+    final b = t.body;
+    if (b == null) return;
+    if (t.status != DlStatus.paused && t.status != DlStatus.failed) return;
+    t.pausing = false;
+    t.cancel = CancelToken();
+    t.status = DlStatus.running;
+    t.error = null;
+    t.progress.value = 0;
+    t.label.value = '';
+    notifyListeners();
+    _run(t, b);
   }
 
   void removeFailed(DownloadTask t) {
@@ -286,8 +324,9 @@ class DownloadManager extends ChangeNotifier {
     // Ayrı ses varsa yerel MediaMuxer ile tek mp4'e birleştir.
     var src = tmpPath;
     var sepAudio = audioTmp;
+    task.progress.value = -1; // belirsiz çubuk: indirme bitti, dosya hazırlanıyor
     if (audioTmp != null) {
-      task.label.value = '...';
+      task.label.value = S.t('merging');
       final out = '${tmpPath}_m.mp4';
       try {
         await _mux.invokeMethod('mux',
@@ -301,6 +340,7 @@ class DownloadManager extends ChangeNotifier {
         File(out).delete().ignore();
       }
     }
+    task.label.value = S.t('saving');
     final dir = await _targetDir();
     final base = _safe(task.title);
     final ext = src.split('.').last;
