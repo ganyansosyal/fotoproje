@@ -26,7 +26,6 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-        isCoreLibraryDesugaringEnabled = true // NewPipeExtractor için
     }
     kotlinOptions { jvmTarget = "17" }
     packaging { resources.excludes += setOf("META-INF/*.kotlin_module", "META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*") }
@@ -35,7 +34,5 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.webkit:webkit:1.12.1")
-    // YouTube çıkarımı (eski youtube_explode_dart yerine)
-    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.5")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 }
