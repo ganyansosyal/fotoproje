@@ -85,11 +85,17 @@ class _ActiveTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final failed = t.status == DlStatus.failed;
+    final paused = t.status == DlStatus.paused;
     return RepaintBoundary(
       child: _CardBox(child: ListTile(
         leading: CircleAvatar(
           backgroundColor: failed ? cs.errorContainer : cs.primaryContainer,
-          child: Icon(failed ? Icons.error_outline : Icons.downloading_rounded,
+          child: Icon(
+              failed
+                  ? Icons.error_outline
+                  : paused
+                      ? Icons.pause_rounded
+                      : Icons.downloading_rounded,
               color: failed ? cs.onErrorContainer : cs.onPrimaryContainer),
         ),
         title: Text(t.title, maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -107,7 +113,10 @@ class _ActiveTile extends StatelessWidget {
                       ClipRRect(
                         borderRadius: BorderRadius.circular(4),
                         child: LinearProgressIndicator(
-                            value: p < 0 ? null : p.clamp(0, 1), minHeight: 8),
+                            value: paused
+                                ? (p < 0 ? 0 : p.clamp(0, 1))
+                                : (p < 0 ? null : p.clamp(0, 1)),
+                            minHeight: 8),
                       ),
                       const SizedBox(height: 4),
                       ValueListenableBuilder<String>(
@@ -119,9 +128,26 @@ class _ActiveTile extends StatelessWidget {
                   ),
                 ),
               ),
-        trailing: IconButton(
-          icon: Icon(failed ? Icons.close : Icons.cancel_outlined),
-          onPressed: () => failed ? dm.removeFailed(t) : dm.cancel(t),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (failed || paused)
+              IconButton(
+                tooltip: S.t(failed ? 'retry' : 'resume'),
+                icon: Icon(failed ? Icons.refresh_rounded : Icons.play_arrow_rounded),
+                onPressed: () => dm.resume(t),
+              )
+            else if (t.canPause)
+              IconButton(
+                tooltip: S.t('pause'),
+                icon: const Icon(Icons.pause_rounded),
+                onPressed: () => dm.pause(t),
+              ),
+            IconButton(
+              icon: Icon(failed ? Icons.close : Icons.cancel_outlined),
+              onPressed: () => failed ? dm.removeFailed(t) : dm.cancel(t),
+            ),
+          ],
         ),
       )),
     );
