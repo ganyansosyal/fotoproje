@@ -387,8 +387,8 @@ class BrowserActivity : Activity() {
             tabsPanel,
             FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { gravity = Gravity.BOTTOM }
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
         )
         content.addView(
             tabsLayer,
@@ -778,17 +778,61 @@ class BrowserActivity : Activity() {
 
     // ---- sekme paneli
     private fun toggleTabs() {
-        if (tabsLayer.visibility == View.VISIBLE) hideTabs() else showTabs()
+        if (tabsShown) hideTabs() else showTabs()
     }
+
+    private var tabsShown = false
 
     private fun showTabs() {
         menuWin?.dismiss()
         buildTabsList()
+        tabsShown = true
+        tabsLayer.animate().cancel()
         tabsLayer.visibility = View.VISIBLE
+        val h = if (tabsLayer.height > 0) tabsLayer.height.toFloat() else dpf(600)
+        tabsLayer.alpha = 0f
+        tabsLayer.translationY = h * 0.35f
+        tabsLayer.animate()
+            .alpha(1f)
+            .translationY(0f)
+            .setDuration(260)
+            .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f))
+            .start()
+        // kartlar sırayla büyüyerek belirir
+        val grid = tabsPanel.getChildAt(1) as? ScrollView
+        val col = (grid?.getChildAt(0) as? LinearLayout)
+        if (col != null) {
+            var n = 0
+            for (i in 0 until col.childCount) {
+                val row = col.getChildAt(i) as? LinearLayout ?: continue
+                for (j in 0 until row.childCount) {
+                    val card = row.getChildAt(j)
+                    card.scaleX = 0.88f
+                    card.scaleY = 0.88f
+                    card.animate().scaleX(1f).scaleY(1f)
+                        .setStartDelay(40L * n++)
+                        .setDuration(240)
+                        .setInterpolator(android.view.animation.OvershootInterpolator(1.1f))
+                        .start()
+                }
+            }
+        }
     }
 
     private fun hideTabs() {
-        tabsLayer.visibility = View.GONE
+        if (!tabsShown) {
+            tabsLayer.visibility = View.GONE
+            return
+        }
+        tabsShown = false
+        tabsLayer.animate().cancel()
+        tabsLayer.animate()
+            .alpha(0f)
+            .translationY(tabsLayer.height * 0.25f)
+            .setDuration(180)
+            .setInterpolator(android.view.animation.AccelerateInterpolator())
+            .withEndAction { if (!tabsShown) tabsLayer.visibility = View.GONE }
+            .start()
     }
 
     private fun initialOf(tb: Tab): String {
@@ -807,18 +851,15 @@ class BrowserActivity : Activity() {
 
     private fun buildTabsList() {
         val p = pal
+        tabsLayer.setBackgroundColor(p.bg)
         tabsPanel.removeAllViews()
-        val r = dpf(18)
-        tabsPanel.background = GradientDrawable().apply {
-            setColor(p.bg)
-            cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
-        }
+        tabsPanel.background = null
 
         // başlık
         val head = LinearLayout(this)
         head.orientation = LinearLayout.HORIZONTAL
         head.gravity = Gravity.CENTER_VERTICAL
-        head.setPadding(dp(18), dp(6), dp(8), dp(2))
+        head.setPadding(dp(18), dp(8), dp(8), dp(4))
         val title = TextView(this)
         title.text = t("tabs") + " (" + tabs.size + ")"
         title.textSize = 17f
@@ -839,75 +880,30 @@ class BrowserActivity : Activity() {
         head.addView(nw, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)))
         tabsPanel.addView(head)
 
-        // liste
-        val list = LinearLayout(this)
-        list.orientation = LinearLayout.VERTICAL
-        for (tb in ArrayList(tabs)) {
-            val rowV = LinearLayout(this)
-            rowV.orientation = LinearLayout.HORIZONTAL
-            rowV.gravity = Gravity.CENTER_VERTICAL
-            rowV.setPadding(dp(14), dp(6), dp(2), dp(6))
-            if (tb === cur) rowV.setBackgroundColor(p.field)
-            val ic = TextView(this)
-            ic.text = initialOf(tb)
-            ic.gravity = Gravity.CENTER
-            ic.textSize = 15f
-            ic.setTypeface(ic.typeface, Typeface.BOLD)
-            ic.setTextColor(p.fg)
-            ic.background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(if (tb === cur) p.line else p.field)
+        // kart ızgarası (2 sütun)
+        val grid = LinearLayout(this)
+        grid.orientation = LinearLayout.VERTICAL
+        grid.setPadding(dp(10), dp(4), dp(10), dp(10))
+        val list = ArrayList(tabs)
+        var i = 0
+        while (i < list.size) {
+            val row = LinearLayout(this)
+            row.orientation = LinearLayout.HORIZONTAL
+            for (k in 0 until 2) {
+                val lp = LinearLayout.LayoutParams(0, dp(190), 1f)
+                lp.setMargins(dp(6), dp(6), dp(6), dp(6))
+                if (i + k < list.size) {
+                    row.addView(tabCard(list[i + k], p), lp)
+                } else {
+                    row.addView(View(this), lp) // tek kalan kart için boşluk
+                }
             }
-            rowV.addView(ic, LinearLayout.LayoutParams(dp(34), dp(34)))
-            val col = LinearLayout(this)
-            col.orientation = LinearLayout.VERTICAL
-            col.setPadding(dp(12), 0, dp(8), 0)
-            val t1 = TextView(this)
-            t1.text = tabLabel(tb)
-            t1.textSize = 15f
-            t1.setTextColor(p.fg)
-            t1.isSingleLine = true
-            t1.ellipsize = android.text.TextUtils.TruncateAt.END
-            if (tb === cur) t1.setTypeface(t1.typeface, Typeface.BOLD)
-            val t2 = TextView(this)
-            t2.text = if (tb.isHome) "" else shown(tb.url)
-            t2.textSize = 12f
-            t2.setTextColor(p.sub)
-            t2.isSingleLine = true
-            t2.ellipsize = android.text.TextUtils.TruncateAt.END
-            col.addView(t1)
-            if (!tb.isHome) col.addView(t2)
-            rowV.addView(col, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            val x = TextView(this)
-            x.text = "✕"
-            x.textSize = 16f
-            x.gravity = Gravity.CENTER
-            x.setTextColor(p.sub)
-            x.setOnClickListener {
-                closeTab(tb)
-                if (tabsLayer.visibility == View.VISIBLE) buildTabsList()
-            }
-            rowV.addView(x, LinearLayout.LayoutParams(dp(46), dp(44)))
-            rowV.setOnClickListener {
-                selectTab(tb)
-                hideTabs()
-            }
-            list.addView(rowV)
+            grid.addView(row)
+            i += 2
         }
         val sv = ScrollView(this)
-        sv.addView(list)
-        val maxH = (if (contentH > 0) contentH else resources.displayMetrics.heightPixels) * 55 / 100
-        list.measure(
-            View.MeasureSpec.makeMeasureSpec(resources.displayMetrics.widthPixels, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
-        )
-        tabsPanel.addView(
-            sv,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                minOf(list.measuredHeight, maxH)
-            )
-        )
+        sv.addView(grid)
+        tabsPanel.addView(sv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
         // alt: hepsini kapat
         val all = TextView(this)
@@ -920,6 +916,62 @@ class BrowserActivity : Activity() {
             closeAllTabs()
         }
         tabsPanel.addView(all, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46)))
+    }
+
+    private fun tabCard(tb: Tab, p: Pal): View {
+        val card = LinearLayout(this)
+        card.orientation = LinearLayout.VERTICAL
+        card.background = GradientDrawable().apply {
+            setColor(p.field)
+            cornerRadius = dpf(14)
+            setStroke(dp(2), if (tb === cur) 0xFF1A73E8.toInt() else p.line)
+        }
+        // üst: başlık + ✕
+        val top = LinearLayout(this)
+        top.orientation = LinearLayout.HORIZONTAL
+        top.gravity = Gravity.CENTER_VERTICAL
+        top.setPadding(dp(12), 0, 0, 0)
+        val t1 = TextView(this)
+        t1.text = tabLabel(tb)
+        t1.textSize = 13f
+        t1.setTextColor(p.fg)
+        t1.isSingleLine = true
+        t1.ellipsize = android.text.TextUtils.TruncateAt.END
+        if (tb === cur) t1.setTypeface(t1.typeface, Typeface.BOLD)
+        top.addView(t1, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val x = TextView(this)
+        x.text = "✕"
+        x.textSize = 15f
+        x.gravity = Gravity.CENTER
+        x.setTextColor(p.fg)
+        x.setOnClickListener {
+            closeTab(tb)
+            if (tabsLayer.visibility == View.VISIBLE) buildTabsList()
+        }
+        top.addView(x, LinearLayout.LayoutParams(dp(42), dp(40)))
+        card.addView(top)
+        // orta: önizleme yerine harf / simge
+        val ic = TextView(this)
+        ic.text = initialOf(tb)
+        ic.gravity = Gravity.CENTER
+        ic.textSize = 34f
+        ic.setTypeface(ic.typeface, Typeface.BOLD)
+        ic.setTextColor(p.sub)
+        card.addView(ic, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        // alt: adres
+        val t2 = TextView(this)
+        t2.text = if (tb.isHome) "" else shown(tb.url)
+        t2.textSize = 11f
+        t2.setTextColor(p.sub)
+        t2.isSingleLine = true
+        t2.ellipsize = android.text.TextUtils.TruncateAt.END
+        t2.setPadding(dp(12), 0, dp(12), dp(10))
+        card.addView(t2)
+        card.setOnClickListener {
+            selectTab(tb)
+            hideTabs()
+        }
+        return card
     }
 
     private fun updateTabCount() {
