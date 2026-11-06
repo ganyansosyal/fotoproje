@@ -55,7 +55,7 @@ object Store {
 
     @Volatile var wifiOnly = true
     @Volatile var blockAds = true
-    @Volatile var recentSites = true
+    @Volatile var recentSites = false
     @Volatile var syncGallery = true
     @Volatile var publicFolder = false
     @Volatile var engine = "Google"
@@ -74,7 +74,7 @@ object Store {
         p = a.getSharedPreferences("fp_settings", Context.MODE_PRIVATE)
         wifiOnly = p.getBoolean("wifiOnly", true)
         blockAds = p.getBoolean("blockAds", true)
-        recentSites = p.getBoolean("recentSites", true)
+        recentSites = p.getBoolean("recentSites", false)
         syncGallery = p.getBoolean("syncGallery", true)
         publicFolder = p.getBoolean("publicFolder", false)
         engine = p.getString("engine", "Google") ?: "Google"

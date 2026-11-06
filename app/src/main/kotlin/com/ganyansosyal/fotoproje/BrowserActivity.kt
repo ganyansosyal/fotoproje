@@ -74,6 +74,8 @@ class BrowserActivity : Activity() {
     private lateinit var progress: ProgressBar
     private lateinit var fab: LinearLayout
     private lateinit var fabText: TextView
+    private lateinit var dlBadge: TextView
+    private val dlListener: () -> Unit = { runOnUiThread { updateDlBadge() } }
     private lateinit var line: View
     private lateinit var bottom: LinearLayout
     private lateinit var backBtn: TextView
@@ -164,12 +166,14 @@ class BrowserActivity : Activity() {
         cur?.web?.onResume()
         // Ayarlar/favoriler başka ekranda değişmiş olabilir
         loadCfg(0)
+        updateDlBadge()
         val c = cur
         if (c != null && c.isHome && c.web != null && !c.loading) loadHome(c)
     }
 
     override fun onDestroy() {
         if (current === this) current = null
+        Downloads.removeListener(dlListener)
         ui.removeCallbacks(saveRun)
         for (j in ArrayList(blobJobs.values)) finishBlob(j, false)
         for (tb in ArrayList(tabs)) destroyWeb(tb)
@@ -293,32 +297,32 @@ class BrowserActivity : Activity() {
         fab = LinearLayout(this)
         fab.orientation = LinearLayout.HORIZONTAL
         fab.gravity = Gravity.CENTER_VERTICAL
-        fab.setPadding(dp(11), 0, dp(11), 0)
-        fab.elevation = dpf(4)
+        fab.setPadding(dp(18), 0, dp(20), 0)
+        fab.elevation = dpf(8)
         fab.background = GradientDrawable().apply {
-            cornerRadius = dpf(20)
+            cornerRadius = dpf(28)
             setColor(FAB_OFF)
         }
         val fabIcon = TextView(this)
         fabIcon.text = "⬇"
-        fabIcon.textSize = 16f
+        fabIcon.textSize = 24f
         fabIcon.setTextColor(Color.WHITE)
         fab.addView(fabIcon)
         fabText = TextView(this)
         fabText.text = t("getVideo")
-        fabText.textSize = 13f
+        fabText.textSize = 17f
         fabText.setTextColor(Color.WHITE)
         fabText.setTypeface(fabText.typeface, Typeface.BOLD)
-        fabText.setPadding(dp(8), 0, 0, 0)
-        fabText.visibility = View.GONE
+        fabText.setPadding(dp(10), 0, 0, 0)
+        fabText.visibility = View.VISIBLE
         fab.addView(fabText)
         fab.setOnClickListener { onFabTap() }
         content.addView(
             fab,
-            FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(40)).apply {
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(56)).apply {
                 gravity = Gravity.END or Gravity.BOTTOM
-                rightMargin = dp(16)
-                bottomMargin = dp(16)
+                rightMargin = dp(18)
+                bottomMargin = dp(20)
             }
         )
 
@@ -411,8 +415,29 @@ class BrowserActivity : Activity() {
             tabBox,
             FrameLayout.LayoutParams(dp(26), dp(26), Gravity.CENTER)
         )
-        val closeBtn = button("⬇", 20f)
+        val dlIcon = button("⬇", 26f)
+        dlIcon.setOnClickListener { openApp(1) }
+        dlBadge = TextView(this)
+        dlBadge.textSize = 11f
+        dlBadge.setTextColor(Color.WHITE)
+        dlBadge.setTypeface(dlBadge.typeface, Typeface.BOLD)
+        dlBadge.gravity = Gravity.CENTER
+        dlBadge.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(0xFFE53935.toInt())
+        }
+        dlBadge.visibility = View.GONE
+        val closeBtn = FrameLayout(this)
+        closeBtn.isClickable = true
         closeBtn.setOnClickListener { openApp(1) }
+        closeBtn.addView(dlIcon, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        closeBtn.addView(
+            dlBadge,
+            FrameLayout.LayoutParams(dp(20), dp(20), Gravity.CENTER).apply {
+                leftMargin = dp(18)
+                bottomMargin = dp(16)
+            }
+        )
         bottom.addView(backBtn, LinearLayout.LayoutParams(0, dp(48), 1f))
         bottom.addView(fwdBtn, LinearLayout.LayoutParams(0, dp(48), 1f))
         bottom.addView(homeBtn, LinearLayout.LayoutParams(0, dp(48), 1f))
@@ -424,6 +449,16 @@ class BrowserActivity : Activity() {
         )
 
         setContentView(root)
+        Downloads.addListener(dlListener)
+        updateDlBadge()
+    }
+
+    /** Alt çubuktaki indirme simgesinin kırmızı sayacı: sürenler + yeni biten indirmeler. */
+    private fun updateDlBadge() {
+        if (!::dlBadge.isInitialized) return
+        val n = Downloads.active.size + Downloads.unseen
+        dlBadge.text = if (n > 9) "9+" else n.toString()
+        dlBadge.visibility = if (n > 0) View.VISIBLE else View.GONE
     }
 
     private fun button(txt: String, size: Float): TextView {
@@ -1893,7 +1928,7 @@ class BrowserActivity : Activity() {
     private fun updateFab() {
         val tb = cur ?: return
         val on = tb.found.isNotEmpty() || isYoutube(tb.url)
-        fabText.visibility = if (on) View.VISIBLE else View.GONE
+        fabText.visibility = View.VISIBLE
         (fab.background as GradientDrawable).setColor(if (on) FAB_ON else FAB_OFF)
     }
 
@@ -2073,7 +2108,7 @@ class BrowserActivity : Activity() {
         private const val REQ_FILE = 4711
         private const val BLOB_CHUNK = 2 * 1024 * 1024
         private const val FAB_ON = 0xFF1E9E4A.toInt()
-        private const val FAB_OFF = 0x99757575.toInt()
+        private const val FAB_OFF = 0xE6616161.toInt()
 
         @Suppress("DEPRECATION")
         private const val IMMERSIVE = View.SYSTEM_UI_FLAG_FULLSCREEN or
