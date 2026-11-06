@@ -70,14 +70,41 @@ object YouTube {
         return if (m != null) "https://www.youtube.com/watch?v=" + m.groupValues[1] else url
     }
 
-    /** En yüksek kaliteli ses+görüntü birleşik (muxed) akışın adresi. */
-    fun pick(url: String): String {
+    /** Bağlantı kutusu için: başlık, süre ve seçilebilir kaliteler. */
+    class Info(val title: String, val duration: Long, val url: String, val heights: List<Int>, val hasAudio: Boolean)
+
+    fun info(url: String): Info {
+        init()
+        val u = clean(url)
+        val si = StreamInfo.getInfo(u)
+        val hs = si.videoStreams
+            .filter { !it.isVideoOnly && it.content.isNotEmpty() }
+            .map { it.height }.distinct().sortedDescending()
+        val au = si.audioStreams.any { it.content.isNotEmpty() }
+        if (hs.isEmpty() && !au) throw IOException("YouTube akışı bulunamadı")
+        return Info(si.name ?: "YouTube", si.duration, u, hs, au)
+    }
+
+    /** Ses+görüntü birleşik (muxed) akışın adresi. height>0 ise o kalite, yoksa en yüksek. */
+    fun pick(url: String, height: Int = 0): String {
         init()
         val info = StreamInfo.getInfo(clean(url))
-        val s = info.videoStreams
-            .filter { !it.isVideoOnly && it.content.isNotEmpty() }
-            .maxByOrNull { it.height * 10_000_000L + it.bitrate }
+        val all = info.videoStreams.filter { !it.isVideoOnly && it.content.isNotEmpty() }
+        val pool = if (height > 0) all.filter { it.height == height }.ifEmpty { all } else all
+        val s = pool.maxByOrNull { it.height * 10_000_000L + it.bitrate }
             ?: throw IOException("YouTube akışı bulunamadı")
         return s.content
+    }
+
+    /** En iyi ses akışı: (adres, uzantı). Önce m4a (AAC) tercih edilir. */
+    fun audio(url: String): Pair<String, String> {
+        init()
+        val info = StreamInfo.getInfo(clean(url))
+        val all = info.audioStreams.filter { it.content.isNotEmpty() }
+        val m4a = all.filter { (it.format?.suffix ?: "") == "m4a" }
+        val s = m4a.ifEmpty { all }.maxByOrNull { it.averageBitrate }
+            ?: throw IOException("YouTube ses akışı bulunamadı")
+        val ext = s.format?.suffix?.ifEmpty { null } ?: "m4a"
+        return Pair(s.content, ext)
     }
 }

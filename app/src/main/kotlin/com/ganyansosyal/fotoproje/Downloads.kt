@@ -182,8 +182,18 @@ object Downloads {
         task: DownloadTask, blobReader: ((String, String, BlobRes) -> Unit)?
     ): () -> Unit {
         if (task.yt) return {
-            val s = YouTube.pick(task.url)
-            val path = File(ctx.cacheDir, "yt_${task.createdAt}.mp4").path
+            val audioMode = task.kind == "a"
+            val q = (task.kind ?: "").removePrefix("v").toIntOrNull() ?: 0
+            var ext = "mp4"
+            val s: String
+            if (audioMode) {
+                val a = YouTube.audio(task.url)
+                s = a.first
+                ext = a.second
+            } else {
+                s = YouTube.pick(task.url, q)
+            }
+            val path = File(ctx.cacheDir, "yt_${task.createdAt}.$ext").path
             val report: Report = { p, l ->
                 task.progress = p
                 task.label = l
@@ -255,7 +265,7 @@ object Downloads {
         return null
     }
 
-    fun startYoutube(url: String, title: String?): String? {
+    fun startYoutube(url: String, title: String?, mode: String? = null): String? {
         if (!wifiOk()) return L.t("wifiBlocked")
         val task = DownloadTask(
             System.nanoTime().toString(), url, url,
@@ -263,6 +273,7 @@ object Downloads {
         )
         task.progress = -1.0
         task.yt = true
+        task.kind = mode
         active.add(0, task)
         notifyUi(true)
         run(task, bodyFor(task, null))
@@ -402,7 +413,9 @@ object Downloads {
             File(sepAudio).copyTo(ad, overwrite = true, bufferSize = 262144)
             File(sepAudio).delete()
         }
-        if (Store.syncGallery) Gallery.putVideo(ctx, dest)
+        if (Store.syncGallery) {
+            if (task.yt && task.kind == "a") Gallery.putAudio(ctx, dest) else Gallery.putVideo(ctx, dest)
+        }
     }
 
     private fun nameOf(url: String): String {
@@ -478,6 +491,27 @@ object Mux {
 
 /** Biten videoyu galeriye (MediaStore) ekler. */
 object Gallery {
+    fun putAudio(ctx: Context, f: File) {
+        try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                val v = ContentValues()
+                v.put(MediaStore.Audio.Media.DISPLAY_NAME, f.name)
+                v.put(MediaStore.Audio.Media.MIME_TYPE, if (f.extension == "m4a") "audio/mp4" else "audio/webm")
+                v.put(MediaStore.Audio.Media.RELATIVE_PATH, "Music/VideoDownloader")
+                v.put(MediaStore.Audio.Media.IS_PENDING, 1)
+                val r = ctx.contentResolver
+                val uri = r.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, v) ?: return
+                r.openOutputStream(uri)?.use { out -> f.inputStream().use { it.copyTo(out, 262144) } }
+                v.clear()
+                v.put(MediaStore.Audio.Media.IS_PENDING, 0)
+                r.update(uri, v, null, null)
+            } else {
+                android.media.MediaScannerConnection.scanFile(ctx, arrayOf(f.path), null, null)
+            }
+        } catch (_: Throwable) {
+        }
+    }
+
     fun putVideo(ctx: Context, f: File) {
         try {
             if (Build.VERSION.SDK_INT >= 29) {
