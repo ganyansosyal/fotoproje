@@ -393,7 +393,7 @@ class BrowserActivity : Activity() {
             )
         )
 
-        // ---- alt çubuk: geri / ileri / ana sayfa / sekmeler / uygulamaya dön
+        // ---- alt çubuk: geri / ileri / ana sayfa / sekmeler / indirmeler / ayarlar
         line = View(this)
         root.addView(line, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1))
         bottom = LinearLayout(this)
@@ -443,6 +443,9 @@ class BrowserActivity : Activity() {
         bottom.addView(homeBtn, LinearLayout.LayoutParams(0, dp(48), 1f))
         bottom.addView(tabCell, LinearLayout.LayoutParams(0, dp(48), 1f))
         bottom.addView(closeBtn, LinearLayout.LayoutParams(0, dp(48), 1f))
+        val settingsBtn = button("⚙", 24f)
+        settingsBtn.setOnClickListener { openApp(3) }
+        bottom.addView(settingsBtn, LinearLayout.LayoutParams(0, dp(48), 1f))
         root.addView(
             bottom,
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48))
@@ -1512,7 +1515,6 @@ class BrowserActivity : Activity() {
         item(t("perfMeter"), perfOn) { togglePerf() }
         divider()
         item(t("downloads")) { openApp(1) }
-        item(t("settings")) { openApp(3) }
         item(t("shareApp")) { shareText(t("shareAppText")) }
 
         col.measure(
