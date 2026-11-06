@@ -52,10 +52,33 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestHighRefreshRate()
+        maybeOpenNativeAtLaunch(savedInstanceState)
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7)
+        }
+    }
+
+    /**
+     * "Yerel tarayıcıyı ana ekran yap" ayarı (Flutter tarafında, SharedPreferences'ta)
+     * açıksa, uygulama simgesinden başlatılınca Flutter beklenmeden yerel ekran açılır.
+     * Koruma: yerel ekran açılışta çökerse bir sonraki başlatmada otomatik açma atlanır,
+     * böylece kullanıcı Flutter ekranından ayarı kapatabilir.
+     */
+    private fun maybeOpenNativeAtLaunch(saved: Bundle?) {
+        try {
+            if (saved != null || intent?.action != Intent.ACTION_MAIN) return
+            val fp = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
+            if (!fp.getBoolean("flutter.nativeDefault", false)) return
+            val np = getSharedPreferences("fp_native", MODE_PRIVATE)
+            if (np.getBoolean("boot_pending", false)) {
+                np.edit().putBoolean("boot_pending", false).apply()
+                return
+            }
+            np.edit().putBoolean("boot_pending", true).apply()
+            startActivity(Intent(this, BrowserActivity::class.java).putExtra("root", true))
+        } catch (_: Throwable) {
         }
     }
 
@@ -81,7 +104,26 @@ class MainActivity : FlutterActivity() {
             }
         }
 
-        browser = MethodChannel(msg, "app/browser")
+        val br = MethodChannel(msg, "app/browser")
+        br.setMethodCallHandler { call, result ->
+            val b = BrowserActivity.current
+            when (call.method) {
+                "readBlob" -> {
+                    if (b == null) {
+                        result.error("blob", "Yerel tarayıcı açık değil", null)
+                    } else {
+                        b.readBlob(
+                            call.argument<String>("url") ?: "",
+                            call.argument<String>("path") ?: "",
+                            call.argument<Number>("tab")?.toInt(),
+                            result
+                        )
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+        browser = br
         nat = MethodChannel(msg, "app/native")
         nat.setMethodCallHandler { call, result ->
             when (call.method) {
@@ -91,14 +133,42 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "blobWrite" -> blobWrite(call, result)
+                "cacheCfg" -> {
+                    // Dart ayarları yerel tarayıcının önbelleğine yazar (ilk açılışta hazır olsun)
+                    try {
+                        val e = getSharedPreferences("fp_native", MODE_PRIVATE).edit()
+                        e.putBoolean("dark", call.argument<Boolean>("dark") ?: false)
+                        e.putBoolean("blockAds", call.argument<Boolean>("blockAds") ?: true)
+                        e.putString("engine", call.argument<String>("engine") ?: "https://www.google.com/search?q=")
+                        e.putString("hook", call.argument<String>("hook") ?: "")
+                        e.putString("noAuto", call.argument<String>("noAutoplay") ?: "")
+                        val st = call.argument<Map<String, String>>("strings")
+                        if (st != null) e.putString("strings", org.json.JSONObject(st).toString())
+                        val bm = call.argument<List<String>>("bookmarks")
+                        if (bm != null) e.putString("bookmarks", org.json.JSONArray(bm).toString())
+                        e.apply()
+                    } catch (_: Throwable) {
+                    }
+                    result.success(true)
+                }
                 "openNative" -> {
-                    val u = call.argument<String>("url") ?: "https://www.google.com"
-                    startActivity(
-                        Intent(this, BrowserActivity::class.java)
-                            .putExtra("url", u)
-                            .putExtra("hook", call.argument<String>("hook") ?: "")
-                            .putExtra("noAutoplay", call.argument<String>("noAutoplay") ?: "")
-                    )
+                    val u = call.argument<String>("url") ?: ""
+                    val cur = BrowserActivity.current
+                    if (cur != null) {
+                        // Zaten açık (arka planda): yeni adresi sekme olarak ekle, öne getir
+                        cur.openFromApp(u)
+                        startActivity(
+                            Intent(this, BrowserActivity::class.java)
+                                .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                        )
+                    } else {
+                        startActivity(
+                            Intent(this, BrowserActivity::class.java)
+                                .putExtra("url", u)
+                                .putExtra("hook", call.argument<String>("hook") ?: "")
+                                .putExtra("noAutoplay", call.argument<String>("noAutoplay") ?: "")
+                        )
+                    }
                     result.success(true)
                 }
                 else -> result.notImplemented()
