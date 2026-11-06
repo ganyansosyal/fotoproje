@@ -193,7 +193,7 @@ class TopBar extends StatelessWidget {
                                 onChanged: (_) {},
                                 visualDensity: VisualDensity.compact))),
                     _mi(context, 'native', Icons.bolt_rounded,
-                        'Yerel tarayıcı (deneme)'),
+                        S.t('nativeBrowser')),
                     _mi(context, 'shareapp', Icons.group, S.t('shareApp')),
                     _mi(context, 'settings', Icons.settings, S.t('settings')),
                   ],

@@ -106,6 +106,7 @@ class _BrowserPageState extends State<BrowserPage>
     _lastAds = '${s.blockAds}';
     s.addListener(_onSettings);
     _brCh.setMethodCallHandler(_onBrowserCall);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _pushCfg());
     WidgetsBinding.instance.addObserver(this);
     focus.addListener(() {
       if (focus.hasFocus) {
@@ -177,6 +178,7 @@ class _BrowserPageState extends State<BrowserPage>
       s.blockAds ? buildContentBlockers(ads: true) : <ContentBlocker>[];
 
   void _onSettings() {
+    _pushCfg();
     final adKey = '${s.blockAds}';
     if (adKey != _lastAds) {
       _lastAds = adKey;
@@ -551,6 +553,36 @@ class _BrowserPageState extends State<BrowserPage>
 
   static const _brCh = MethodChannel('app/browser');
 
+  /// Yerel ekranın ihtiyaç duyduğu ayarlar + metinler (dil/tema/reklam engelleme).
+  Map<String, dynamic> _nativeCfg() => {
+        'blockAds': s.blockAds,
+        'dark': s.theme == 'dark',
+        'lang': S.code,
+        'engine': searchEngines[s.engine] ?? searchEngines['Google']!,
+        'bookmarks': List<String>.from(s.bookmarks),
+        'strings': S.all,
+        'hook': hookJs,
+        'noAutoplay': noAutoplayJs,
+      };
+
+  /// Ayarları yerel tarayıcı önbelleğine yazar (açılışta Flutter beklenmeden hazır olsun).
+  void _pushCfg() {
+    try {
+      const MethodChannel('app/native').invokeMethod('cacheCfg', _nativeCfg());
+    } catch (_) {}
+  }
+
+  /// Yerel ekrandan "İndirmeler" / "Ayarlar" istenince ilgili sekmeyi açar.
+  void _fromNative(int sec) {
+    if (!mounted) return;
+    if (fullScreen) _setFull(false);
+    setState(() {
+      section = sec;
+      panelOpen = false;
+      barShown = true;
+    });
+  }
+
   /// Yerel (Kotlin) tarayıcı ekranından gelen istekler: video inceleme ve indirme.
   Future<dynamic> _onBrowserCall(MethodCall call) async {
     final a = Map<String, dynamic>.from((call.arguments as Map?) ?? const {});
@@ -577,22 +609,68 @@ class _BrowserPageState extends State<BrowserPage>
             }
         ];
       case 'download':
+        final kindArg = a['kind']?.toString() ?? '';
         return dm.start(a['url'].toString(),
             referer: a['ref']?.toString() ?? '',
-            hint: a['kind']?.toString(),
-            title: tt.isEmpty ? null : tt);
+            hint: kindArg.isEmpty ? null : kindArg,
+            title: tt.isEmpty ? null : tt,
+            // blob: adresini yerel ekran, sayfadan parça parça okuyup dosyaya yazar
+            blobReader: (url, path) async {
+              try {
+                await _brCh.invokeMethod(
+                    'readBlob', {'url': url, 'path': path, 'tab': a['tab']});
+              } on PlatformException catch (e) {
+                throw e.message ?? S.t('blobFail');
+              }
+            });
       case 'youtube':
         return dm.startYoutube(a['url'].toString(),
             title: tt.isEmpty ? null : tt);
+      case 'cfg':
+        return _nativeCfg();
+      case 'home':
+        FavIcons.i.ensure(homeHosts(s));
+        return buildHomeHtml(s, s.theme == 'dark');
+      case 'addHistory':
+        s.addHistory(a['url']?.toString() ?? '', tt);
+        return true;
+      case 'historyTitle':
+        s.updateHistoryTitle(a['url']?.toString() ?? '', tt);
+        return true;
+      case 'bookmarks':
+        return List<String>.from(s.bookmarks);
+      case 'toggleBookmark':
+        s.toggleBookmark(a['url']?.toString() ?? '');
+        return List<String>.from(s.bookmarks);
+      case 'history':
+        return [
+          for (final h in s.history.take(300))
+            {'u': h.url, 't': h.title, 'd': h.time}
+        ];
+      case 'clearHistory':
+        s.clearHistory();
+        for (final x in tabs) {
+          x.c?.clearHistory();
+        }
+        return true;
+      case 'addFavorite':
+        s.addFavorite(a['name']?.toString() ?? '', a['url']?.toString() ?? '');
+        FavIcons.i.ensure(homeHosts(s));
+        return true;
+      case 'removeFavorite':
+        s.removeFavorite(a['url']?.toString() ?? '');
+        return true;
+      case 'section':
+        _fromNative((a['section'] as num?)?.toInt() ?? 0);
+        return true;
     }
     return null;
   }
 
   /// Yerel (Kotlin) tarayıcı ekranını açar: kaydırma akıcılığı denemesi.
   Future<void> _openNative() async {
-    final u = (t.url == homeUrl || t.url.isEmpty)
-        ? 'https://www.google.com'
-        : t.url;
+    // Boş adres: yerel ekran kayıtlı sekmelerini / ana sayfayı açar
+    final u = (t.url == homeUrl || t.url.isEmpty) ? '' : t.url;
     try {
       await const MethodChannel('app/native')
           .invokeMethod('openNative', {
