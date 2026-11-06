@@ -1927,6 +1927,8 @@ class BrowserActivity : Activity() {
         val l = u.lowercase()
         if (l.contains(".m3u8")) return "m3u8"
         if (l.contains(".mpd")) return "mpd"
+        if (l.contains("mime_type=video_mp4")) return "mp4"
+        if (l.contains("mime_type=video_webm")) return "webm"
         val path = try {
             (Uri.parse(u).path ?: l).lowercase()
         } catch (_: Exception) {
@@ -1951,7 +1953,7 @@ class BrowserActivity : Activity() {
                 }
             }
             if (isNew) {
-                tb.netCands.add(NetCand(u, k.groupValues[1].lowercase(), now))
+                tb.netCands.add(NetCand(u, k.groupValues[1].ifEmpty { k.groupValues[2] }.lowercase(), now))
                 if (tb.netCands.size > 40) tb.netCands.removeAt(0)
             }
         }
@@ -2498,7 +2500,7 @@ class BrowserActivity : Activity() {
         private const val PERF_STOP = "window.__pg=(window.__pg||0)+1;"
 
         private val MEDIA_RE = Regex(
-            "\\.(m3u8|mpd|mp4|webm|m4v|mov|mkv|flv)(?:\$|[?#/])", RegexOption.IGNORE_CASE
+            "\\.(m3u8|mpd|mp4|webm|m4v|mov|mkv|flv)(?:\$|[?#/])|[?&]mime_type=video_(mp4|webm)", RegexOption.IGNORE_CASE
         )
         private val EXT_RE = Regex("\\.(mp4|webm|mov|m4v|mkv|flv|3gp|ogv|avi|wmv)\$")
         private val BAD_RE = Regex(

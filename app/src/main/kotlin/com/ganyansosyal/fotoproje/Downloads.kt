@@ -412,40 +412,52 @@ object Mux {
 
     fun run(video: String, audio: String, out: String) {
         val ve = MediaExtractor()
-        ve.setDataSource(video)
         val ae = MediaExtractor()
-        ae.setDataSource(audio)
-        val vt = pick(ve, "video")
-        val at = pick(ae, "audio")
-        if (vt < 0 || at < 0) throw IOException("track yok")
-        ve.selectTrack(vt)
-        ae.selectTrack(at)
-        val muxer = MediaMuxer(out, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-        val vi = muxer.addTrack(ve.getTrackFormat(vt))
-        val ai = muxer.addTrack(ae.getTrackFormat(at))
-        muxer.start()
-        copy(ve, muxer, vi)
-        copy(ae, muxer, ai)
-        muxer.stop()
-        muxer.release()
-        ve.release()
-        ae.release()
-    }
-
-    private fun copy(ex: MediaExtractor, muxer: MediaMuxer, track: Int) {
-        val buf = ByteBuffer.allocate(8 * 1024 * 1024)
-        val info = MediaCodec.BufferInfo()
-        while (true) {
-            buf.clear()
-            val size = ex.readSampleData(buf, 0)
-            if (size < 0) break
-            info.offset = 0
-            info.size = size
-            info.presentationTimeUs = ex.sampleTime
-            info.flags = if ((ex.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC) != 0)
-                MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
-            muxer.writeSampleData(track, buf, info)
-            ex.advance()
+        var muxer: MediaMuxer? = null
+        var started = false
+        try {
+            ve.setDataSource(video)
+            ae.setDataSource(audio)
+            val vt = pick(ve, "video")
+            val at = pick(ae, "audio")
+            if (vt < 0 || at < 0) throw IOException("track yok")
+            ve.selectTrack(vt)
+            ae.selectTrack(at)
+            muxer = MediaMuxer(out, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            val vi = muxer.addTrack(ve.getTrackFormat(vt))
+            val ai = muxer.addTrack(ae.getTrackFormat(at))
+            muxer.start()
+            started = true
+            val buf = ByteBuffer.allocate(2 * 1024 * 1024)
+            val info = MediaCodec.BufferInfo()
+            // Kareleri zaman sırasına göre iç içe yaz (art arda yazmak takılma yapıyordu)
+            while (true) {
+                val vTime = ve.sampleTime
+                val aTime = ae.sampleTime
+                if (vTime < 0 && aTime < 0) break
+                val useVideo = vTime >= 0 && (aTime < 0 || vTime <= aTime)
+                val ex = if (useVideo) ve else ae
+                val track = if (useVideo) vi else ai
+                buf.clear()
+                val size = ex.readSampleData(buf, 0)
+                if (size < 0) {
+                    ex.advance()
+                    if (ex.sampleTime < 0) { if (useVideo) { if (aTime < 0) break } else { if (vTime < 0) break } }
+                    continue
+                }
+                info.offset = 0
+                info.size = size
+                info.presentationTimeUs = ex.sampleTime
+                info.flags = if ((ex.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC) != 0)
+                    MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
+                muxer.writeSampleData(track, buf, info)
+                ex.advance()
+            }
+        } finally {
+            try { if (started) muxer?.stop() } catch (_: Throwable) {}
+            try { muxer?.release() } catch (_: Throwable) {}
+            try { ve.release() } catch (_: Throwable) {}
+            try { ae.release() } catch (_: Throwable) {}
         }
     }
 }
