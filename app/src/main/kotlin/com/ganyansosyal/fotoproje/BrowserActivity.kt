@@ -2069,14 +2069,6 @@ class BrowserActivity : Activity() {
         )
     }
 
-    private fun downloadYoutube(tb: Tab) {
-        dart(
-            "youtube", mapOf("url" to tb.url, "title" to tb.title),
-            { r -> toast(if (r is String) r else t("downloadStarted")) },
-            { toast(t("failed")) }
-        )
-    }
-
     /** İndir düğmesi: parmakla sürüklenir (sağ/sol/yukarı/aşağı), bırakılan yer hatırlanır. */
     @Suppress("ClickableViewAccessibility")
     private fun setupFabDrag() {
@@ -2152,7 +2144,7 @@ class BrowserActivity : Activity() {
     private fun onFabTap() {
         val tb = cur ?: return
         if (isYoutube(tb.url)) {
-            LinkSheet.show(this, dark, { loadInCurrent(it) }, tb.url)
+            toast(if (L.code == "tr") "YouTube videoları indirilemez" else "YouTube videos can't be downloaded")
             return
         }
         if (tb.playerId == null) {

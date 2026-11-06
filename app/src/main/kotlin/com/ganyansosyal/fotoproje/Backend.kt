@@ -58,10 +58,6 @@ object Backend {
                     }
                     done(r)
                 }
-                "youtube" -> bg.execute {
-                    val title = s("title")
-                    done(Downloads.startYoutube(s("url"), title.ifEmpty { null }, s("mode").ifEmpty { null }))
-                }
                 "addHistory" -> { Store.addHistory(s("url"), s("title")); done(true) }
                 "historyTitle" -> { Store.updateHistoryTitle(s("url"), s("title")); done(true) }
                 "bookmarks" -> done(ArrayList(Store.bookmarks))

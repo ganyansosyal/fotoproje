@@ -159,7 +159,7 @@ object LinkSheet {
 
             val et = EditText(act)
             et.setText(prefill)
-            et.hint = tr("youtube.com/watch?v=…", "youtube.com/watch?v=…")
+            et.hint = "https://…"
             et.setHintTextColor(sub)
             et.setTextColor(fg)
             et.textSize = 15f
@@ -208,8 +208,8 @@ object LinkSheet {
             box.addView(gap(12))
             val hint = label(
                 tr(
-                    "YouTube, Shorts ve canlı yayın linkleri desteklenir. Diğer siteler tarayıcıda açılır.",
-                    "YouTube, Shorts and live links are supported. Other sites open in the browser."
+                    "Link tarayıcıda açılır. Sayfada video bulunursa indirme düğmesi yanar.",
+                    "The link opens in the browser. The download button lights up when a video is found."
                 ), 12f, sub
             )
             hint.gravity = Gravity.CENTER
@@ -238,132 +238,17 @@ object LinkSheet {
                 return
             }
             val url = if (s.startsWith("http://") || s.startsWith("https://")) s else "https://$s"
-            if (!isYt(url)) {
-                dlg.dismiss()
-                openOther(url)
-                Toast.makeText(
-                    act,
-                    tr("Sayfa açıldı. Video bulununca indirme düğmesi yanar.", "Page opened. The download button lights up when a video is found."),
-                    Toast.LENGTH_LONG
-                ).show()
+            if (isYt(url)) {
+                showInput(s, tr("YouTube videoları indirilemez.", "YouTube videos can't be downloaded."))
                 return
             }
-            showLoading()
-            Thread {
-                try {
-                    val info = YouTube.info(url)
-                    act.runOnUiThread { if (dlg.isShowing) showOptions(info) }
-                } catch (_: Throwable) {
-                    act.runOnUiThread {
-                        if (dlg.isShowing) showInput(
-                            s, tr("Video bulunamadı. Linki kontrol et.", "Video not found. Check the link.")
-                        )
-                    }
-                }
-            }.start()
-        }
-
-        fun fmtDur(sec: Long): String {
-            if (sec <= 0) return ""
-            val h = sec / 3600
-            val m = (sec % 3600) / 60
-            val s = sec % 60
-            return if (h > 0) String.format("%d:%02d:%02d", h, m, s) else String.format("%d:%02d", m, s)
-        }
-
-        fun showOptions(info: YouTube.Info) {
-            box.removeAllViews()
-            val title = label(info.title, 18f, fg, true)
-            title.maxLines = 2
-            title.ellipsize = TextUtils.TruncateAt.END
-            box.addView(title)
-            val d = fmtDur(info.duration)
-            box.addView(gap(4))
-            box.addView(label(if (d.isEmpty()) "YouTube" else "$d  ·  YouTube", 13f, sub))
-            box.addView(gap(16))
-
-            val modes = ArrayList<String>()
-            val names = ArrayList<String>()
-            val vCount: Int
-            for (h in info.heights) {
-                modes.add("v$h")
-                names.add("${h}p")
-            }
-            vCount = modes.size
-            if (info.hasAudio) {
-                modes.add("m")
-                names.add("MP3")
-                modes.add("a")
-                names.add("M4A")
-            }
-            var sel = 0
-            val chips = ArrayList<TextView>()
-            fun paint() {
-                for (i in chips.indices) {
-                    val on = i == sel
-                    chips[i].background = if (on) rounded(accBg, 14, acc, 2) else rounded(card, 14)
-                    chips[i].setTextColor(if (on) acc else fg)
-                    chips[i].typeface = if (on) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
-                }
-            }
-            fun grid(from: Int, to: Int) {
-                var i = from
-                while (i < to) {
-                    val row = LinearLayout(act)
-                    row.orientation = LinearLayout.HORIZONTAL
-                    for (c in 0 until 3) {
-                        val idx = i + c
-                        val lp = LinearLayout.LayoutParams(0, dp(48), 1f)
-                        lp.setMargins(dp(4), dp(4), dp(4), dp(4))
-                        if (idx < to) {
-                            val t = TextView(act)
-                            t.text = names[idx]
-                            t.textSize = 15f
-                            t.gravity = Gravity.CENTER
-                            t.setOnClickListener {
-                                sel = idx
-                                paint()
-                            }
-                            chips.add(t)
-                            row.addView(t, lp)
-                        } else {
-                            row.addView(View(act), lp)
-                        }
-                    }
-                    val rp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-                    rp.setMargins(-dp(4), 0, -dp(4), 0)
-                    box.addView(row, rp)
-                    i += 3
-                }
-            }
-            if (vCount > 0) {
-                box.addView(label(tr("VİDEO", "VIDEO"), 11f, sub, true))
-                box.addView(gap(4))
-                grid(0, vCount)
-                box.addView(gap(10))
-            }
-            if (modes.size > vCount) {
-                box.addView(label(tr("SES", "AUDIO"), 11f, sub, true))
-                box.addView(gap(4))
-                grid(vCount, modes.size)
-                box.addView(gap(10))
-            }
-            paint()
-            box.addView(gap(6))
-            box.addView(button(tr("İndir", "Download")) {
-                val mode = modes[sel]
-                dlg.dismiss()
-                Thread {
-                    val err = try {
-                        Downloads.startYoutube(info.url, info.title, mode)
-                    } catch (e: Throwable) {
-                        e.message ?: e.toString()
-                    }
-                    act.runOnUiThread {
-                        Toast.makeText(act, err ?: L.t("downloadStarted"), Toast.LENGTH_SHORT).show()
-                    }
-                }.start()
-            })
+            dlg.dismiss()
+            openOther(url)
+            Toast.makeText(
+                act,
+                tr("Sayfa açıldı. Video bulununca indirme düğmesi yanar.", "Page opened. The download button lights up when a video is found."),
+                Toast.LENGTH_LONG
+            ).show()
         }
     }
 }

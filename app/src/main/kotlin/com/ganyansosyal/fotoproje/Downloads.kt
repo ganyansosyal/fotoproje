@@ -181,58 +181,6 @@ object Downloads {
     private fun bodyFor(
         task: DownloadTask, blobReader: ((String, String, BlobRes) -> Unit)?
     ): () -> Unit {
-        if (task.yt) return {
-            val audioMode = task.kind == "a" || task.kind == "m"
-            val q = (task.kind ?: "").removePrefix("v").toIntOrNull() ?: 0
-            val report: Report = { p, l ->
-                task.progress = p
-                task.label = l
-                notifyUi()
-            }
-            val hdr = mapOf("User-Agent" to Net.UA)
-            if (audioMode) {
-                val toMp3 = task.kind == "m"
-                val a = YouTube.audio(task.url)
-                val apath = File(ctx.cacheDir, "yt_${task.createdAt}.${a.second}").path
-                val r1: Report = { p, l -> report(if (toMp3 && p >= 0) p * 0.7 else p, l) }
-                Streams.direct(a.first, apath, hdr, task.cancel, r1, 8, false)
-                if (!toMp3) {
-                    finish(task, apath, null)
-                } else {
-                    val mp3 = File(ctx.cacheDir, "yt_${task.createdAt}.mp3").path
-                    var ok = false
-                    try {
-                        Mp3.encode(apath, mp3, task.cancel) { p -> report(0.7 + 0.3 * p, "MP3 %" + (p * 100).toInt()) }
-                        ok = true
-                    } catch (e: Throwable) {
-                        if (e is CanceledEx || task.cancel.on) throw e
-                        File(mp3).delete()
-                        task.note = if (L.code == "tr") "MP3'e çevrilemedi, M4A olarak kaydedildi"
-                        else "Couldn't convert to MP3, saved as M4A"
-                    }
-                    if (ok) {
-                        File(apath).delete()
-                        finish(task, mp3, null)
-                    } else {
-                        finish(task, apath, null)
-                    }
-                }
-            } else {
-                val sel = YouTube.select(task.url, q)
-                val path = File(ctx.cacheDir, "yt_${task.createdAt}.mp4").path
-                if (sel.audio == null) {
-                    Streams.direct(sel.video, path, hdr, task.cancel, report, 8, false)
-                    finish(task, path, null)
-                } else {
-                    val apath = File(ctx.cacheDir, "yt_${task.createdAt}_a.m4a").path
-                    val r1: Report = { p, l -> report(if (p >= 0) p * 0.85 else p, l) }
-                    val r2: Report = { p, l -> report(if (p >= 0) 0.85 + p * 0.15 else p, l) }
-                    Streams.direct(sel.video, path, hdr, task.cancel, r1, 8, false)
-                    Streams.direct(sel.audio, apath, hdr, task.cancel, r2, 8, false)
-                    finish(task, path, apath)
-                }
-            }
-        }
         val url = task.url
         val referer = task.referer
         val kind = task.kind ?: "mp4"
@@ -290,21 +238,6 @@ object Downloads {
         active.add(0, task)
         notifyUi(true)
         run(task, bodyFor(task, blobReader))
-        return null
-    }
-
-    fun startYoutube(url: String, title: String?, mode: String? = null): String? {
-        if (!wifiOk()) return L.t("wifiBlocked")
-        val task = DownloadTask(
-            System.nanoTime().toString(), url, url,
-            if (!title.isNullOrEmpty()) title else "YouTube"
-        )
-        task.progress = -1.0
-        task.yt = true
-        task.kind = mode
-        active.add(0, task)
-        notifyUi(true)
-        run(task, bodyFor(task, null))
         return null
     }
 
@@ -442,7 +375,7 @@ object Downloads {
             File(sepAudio).delete()
         }
         if (Store.syncGallery) {
-            if (task.yt && (task.kind == "a" || task.kind == "m")) Gallery.putAudio(ctx, dest) else Gallery.putVideo(ctx, dest)
+            Gallery.putVideo(ctx, dest)
         }
     }
 
