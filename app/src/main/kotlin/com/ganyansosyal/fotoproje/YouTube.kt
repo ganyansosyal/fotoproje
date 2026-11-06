@@ -17,11 +17,18 @@ object YouTube {
             val c = URL(request.url()).openConnection() as HttpURLConnection
             c.connectTimeout = 20000
             c.readTimeout = 30000
+            c.instanceFollowRedirects = true
             c.requestMethod = request.httpMethod()
             c.setRequestProperty("User-Agent", Net.UA)
+            c.setRequestProperty("Accept-Language", "en-US,en;q=0.9")
+            c.setRequestProperty("Cookie", "SOCS=CAI; CONSENT=YES+1")
             for ((k, v) in request.headers()) {
-                if (v.isNotEmpty()) c.setRequestProperty(k, v.joinToString(", "))
+                if (v.isEmpty()) continue
+                // gzip'i biz çözeceğiz; ayrıca çerezi ezmeyelim
+                if (k.equals("Accept-Encoding", true)) continue
+                c.setRequestProperty(k, v.joinToString(", "))
             }
+            c.setRequestProperty("Accept-Encoding", "gzip")
             val data = request.dataToSend()
             if (data != null) {
                 c.doOutput = true
@@ -32,7 +39,9 @@ object YouTube {
                 c.disconnect()
                 throw ReCaptchaException("reCaptcha", request.url())
             }
-            val stream = if (code >= 400) c.errorStream else c.inputStream
+            val raw = if (code >= 400) c.errorStream else c.inputStream
+            val gz = (c.contentEncoding ?: "").contains("gzip", true)
+            val stream = if (raw != null && gz) java.util.zip.GZIPInputStream(raw) else raw
             val body = stream?.use { it.readBytes().toString(Charsets.UTF_8) } ?: ""
             val hdr = HashMap<String, List<String>>()
             for ((k, v) in c.headerFields) if (k != null) hdr[k] = v

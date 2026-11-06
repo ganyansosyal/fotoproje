@@ -22,6 +22,7 @@ import android.os.Message
 import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
@@ -325,6 +326,7 @@ class BrowserActivity : Activity() {
                 bottomMargin = dp(16)
             }
         )
+        setupFabDrag()
 
         // ---- performans ölçer (menüden açılır)
         perfView = TextView(this)
@@ -1956,6 +1958,73 @@ class BrowserActivity : Activity() {
             { r -> toast(if (r is String) r else t("downloadStarted")) },
             { toast(t("failed")) }
         )
+    }
+
+    /** İndir düğmesi: parmakla sürüklenir (sağ/sol/yukarı/aşağı), bırakılan yer hatırlanır. */
+    @Suppress("ClickableViewAccessibility")
+    private fun setupFabDrag() {
+        val sp = getSharedPreferences("fp_ui", MODE_PRIVATE)
+        var startTx = 0f
+        var startTy = 0f
+        var downX = 0f
+        var downY = 0f
+        var moved = false
+        val slop = dp(8)
+
+        fun clampTx(v: Float) = v.coerceIn(-fab.left.toFloat(), (content.width - fab.right).toFloat())
+        fun clampTy(v: Float) = v.coerceIn(-fab.top.toFloat(), (content.height - fab.bottom).toFloat())
+
+        fab.setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    startTx = fab.translationX
+                    startTy = fab.translationY
+                    downX = e.rawX
+                    downY = e.rawY
+                    moved = false
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = e.rawX - downX
+                    val dy = e.rawY - downY
+                    if (!moved && (Math.abs(dx) > slop || Math.abs(dy) > slop)) {
+                        moved = true
+                        v.parent?.requestDisallowInterceptTouchEvent(true)
+                    }
+                    if (moved) {
+                        fab.translationX = clampTx(startTx + dx)
+                        fab.translationY = clampTy(startTy + dy)
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (moved) {
+                        try {
+                            sp.edit().putFloat("fabX", fab.translationX).putFloat("fabY", fab.translationY).apply()
+                        } catch (_: Throwable) {
+                        }
+                    } else {
+                        v.performClick()
+                    }
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> true
+                else -> false
+            }
+        }
+        // Ekran boyutu / alt çubuk değişince düğme dışarıda kalmasın
+        fab.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            if (content.width > 0) {
+                val x = clampTx(fab.translationX)
+                val y = clampTy(fab.translationY)
+                if (x != fab.translationX) fab.translationX = x
+                if (y != fab.translationY) fab.translationY = y
+            }
+        }
+        fab.post {
+            fab.translationX = clampTx(sp.getFloat("fabX", 0f))
+            fab.translationY = clampTy(sp.getFloat("fabY", 0f))
+        }
     }
 
     private fun onFabTap() {

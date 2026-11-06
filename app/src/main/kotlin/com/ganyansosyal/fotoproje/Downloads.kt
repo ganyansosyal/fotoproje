@@ -37,6 +37,8 @@ class DownloadTask(val id: String, val url: String, val referer: String, var tit
     @Volatile var pausing = false
     @Volatile var canPause = true
     var body: (() -> Unit)? = null
+    var kind: String? = null   // mp4 / m3u8 / mpd / blob
+    var yt = false             // YouTube görevi mi
 }
 
 /** blob: içeriğini sayfadan okuyan yerel ekranın sonucu. */
@@ -113,6 +115,25 @@ object Downloads {
             }
         } catch (_: Throwable) {
         }
+        try {
+            val raw = prefs.getString("pending", null) ?: return
+            val a = JSONArray(raw)
+            for (i in 0 until a.length()) {
+                val m = a.getJSONObject(i)
+                val t = DownloadTask(m.getString("id"), m.optString("u"), m.optString("r"), m.optString("t"))
+                t.createdAt = m.optLong("c")
+                t.kind = m.optString("k").ifEmpty { null }
+                t.yt = m.optBoolean("y")
+                // Uygulama kapanınca çalışan indirme de "duraklatıldı" sayılır; Devam ile başlar
+                t.status = if (m.optString("st") == "FAILED") DlStatus.FAILED else DlStatus.PAUSED
+                t.error = m.optString("e").ifEmpty { null }
+                t.progress = 0.0
+                if (t.status == DlStatus.PAUSED) t.label = L.t("paused")
+                t.body = bodyFor(t, null)
+                active.add(t)
+            }
+        } catch (_: Throwable) {
+        }
     }
 
     private fun persist() {
@@ -121,7 +142,17 @@ object Downloads {
             JSONObject().put("id", t.id).put("u", t.url).put("t", t.title)
                 .put("p", t.path).put("s", t.size).put("c", t.createdAt)
         )
-        prefs.edit().putString("done", a.toString()).apply()
+        val pend = JSONArray()
+        for (t in active) {
+            if (t.kind == "blob") continue // blob sayfaya bağlıdır, yeniden başlatılamaz
+            if (t.status == DlStatus.CANCELED) continue
+            pend.put(
+                JSONObject().put("id", t.id).put("u", t.url).put("r", t.referer).put("t", t.title)
+                    .put("c", t.createdAt).put("k", t.kind ?: "").put("y", t.yt)
+                    .put("st", t.status.name).put("e", t.error ?: "")
+            )
+        }
+        prefs.edit().putString("done", a.toString()).putString("pending", pend.toString()).apply()
     }
 
     private val appDir: String
@@ -146,19 +177,28 @@ object Downloads {
         }
     }
 
-    /** Hata mesajı döner (null: başladı). */
-    fun start(
-        url: String, referer: String, hint: String?, title: String?,
-        blobReader: ((String, String, BlobRes) -> Unit)?
-    ): String? {
-        if (!wifiOk()) return L.t("wifiBlocked")
-        val kind = Media.kind(url) ?: hint ?: "mp4"
-        val name = if (!title.isNullOrBlank()) title.trim() else nameOf(url)
-        val task = DownloadTask(System.nanoTime().toString(), url, referer, name)
-        task.canPause = kind != "blob"
-        active.add(0, task)
-        notifyUi(true)
-        run(task) {
+    /** Görevin gövdesi (ilk başlatmada ve yeniden açılışta Devam için aynı kod). */
+    private fun bodyFor(
+        task: DownloadTask, blobReader: ((String, String, BlobRes) -> Unit)?
+    ): () -> Unit {
+        if (task.yt) return {
+            val s = YouTube.pick(task.url)
+            val path = File(ctx.cacheDir, "yt_${task.createdAt}.mp4").path
+            val report: Report = { p, l ->
+                task.progress = p
+                task.label = l
+                notifyUi()
+            }
+            Streams.direct(
+                s, path,
+                mapOf("User-Agent" to Net.UA), task.cancel, report, 8, false
+            )
+            finish(task, path, null)
+        }
+        val url = task.url
+        val referer = task.referer
+        val kind = task.kind ?: "mp4"
+        return {
             val ts = task.createdAt
             val stream = kind == "m3u8" || kind == "mpd" || kind == "blob"
             val tmp = ctx.cacheDir
@@ -196,6 +236,22 @@ object Downloads {
             }
             finish(task, path, if (sepAudio) apath else null)
         }
+    }
+
+    /** Hata mesajı döner (null: başladı). */
+    fun start(
+        url: String, referer: String, hint: String?, title: String?,
+        blobReader: ((String, String, BlobRes) -> Unit)?
+    ): String? {
+        if (!wifiOk()) return L.t("wifiBlocked")
+        val kind = Media.kind(url) ?: hint ?: "mp4"
+        val name = if (!title.isNullOrBlank()) title.trim() else nameOf(url)
+        val task = DownloadTask(System.nanoTime().toString(), url, referer, name)
+        task.canPause = kind != "blob"
+        task.kind = kind
+        active.add(0, task)
+        notifyUi(true)
+        run(task, bodyFor(task, blobReader))
         return null
     }
 
@@ -206,27 +262,16 @@ object Downloads {
             if (!title.isNullOrEmpty()) title else "YouTube"
         )
         task.progress = -1.0
+        task.yt = true
         active.add(0, task)
         notifyUi(true)
-        run(task) {
-            val s = YouTube.pick(url)
-            val path = File(ctx.cacheDir, "yt_${task.createdAt}.mp4").path
-            val report: Report = { p, l ->
-                task.progress = p
-                task.label = l
-                notifyUi()
-            }
-            Streams.direct(
-                s, path,
-                mapOf("User-Agent" to Net.UA), task.cancel, report, 8, false
-            )
-            finish(task, path, null)
-        }
+        run(task, bodyFor(task, null))
         return null
     }
 
     private fun run(task: DownloadTask, body: () -> Unit) {
         task.body = body
+        persist()
         Native.fgStart(ctx)
         exec.execute {
             try {
@@ -248,6 +293,7 @@ object Downloads {
                     task.error = if (canceled) L.t("canceled") else (e.message ?: e.toString())
                     if (canceled) active.remove(task)
                 }
+                persist()
             } finally {
                 Native.fgStop(ctx)
             }
@@ -262,6 +308,7 @@ object Downloads {
         if (t.status == DlStatus.FAILED || t.status == DlStatus.PAUSED) {
             t.status = DlStatus.CANCELED
             active.remove(t)
+            persist()
             notifyUi(true)
         }
     }
@@ -290,6 +337,7 @@ object Downloads {
 
     fun removeFailed(t: DownloadTask) {
         active.remove(t)
+        persist()
         notifyUi(true)
     }
 
