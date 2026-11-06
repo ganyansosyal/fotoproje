@@ -390,6 +390,28 @@ class BrowserActivity : Activity() {
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
         )
+        val fab = TextView(this)
+        fab.text = "+"
+        fab.textSize = 30f
+        fab.gravity = Gravity.CENTER
+        fab.setTextColor(0xFFFFFFFF.toInt())
+        fab.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(0xFF1A73E8.toInt())
+        }
+        fab.elevation = dpf(6)
+        fab.setOnClickListener {
+            hideTabs()
+            openTab(HOME, true, null)
+        }
+        tabsLayer.addView(
+            fab,
+            FrameLayout.LayoutParams(dp(56), dp(56)).apply {
+                gravity = Gravity.BOTTOM or Gravity.END
+                rightMargin = dp(20)
+                bottomMargin = dp(60)
+            }
+        )
         content.addView(
             tabsLayer,
             FrameLayout.LayoutParams(
@@ -866,18 +888,6 @@ class BrowserActivity : Activity() {
         title.setTypeface(title.typeface, Typeface.BOLD)
         title.setTextColor(p.fg)
         head.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        val nw = TextView(this)
-        nw.text = "＋ " + t("newTab")
-        nw.textSize = 14f
-        nw.setTextColor(0xFF1A73E8.toInt())
-        nw.setTypeface(nw.typeface, Typeface.BOLD)
-        nw.gravity = Gravity.CENTER
-        nw.setPadding(dp(12), 0, dp(12), 0)
-        nw.setOnClickListener {
-            hideTabs()
-            openTab(HOME, true, null)
-        }
-        head.addView(nw, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44)))
         tabsPanel.addView(head)
 
         // kart ızgarası (2 sütun)
