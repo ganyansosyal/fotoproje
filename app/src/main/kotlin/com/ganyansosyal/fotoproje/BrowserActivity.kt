@@ -1841,7 +1841,7 @@ class BrowserActivity : Activity() {
         bar.visibility = vis
         bottom.visibility = vis
         line.visibility = vis
-        fab.visibility = View.VISIBLE
+        updateFab()
         exitFullBtn.visibility = if (on) View.VISIBLE else View.GONE
         barShown = true
         acc = 0
@@ -2084,6 +2084,8 @@ class BrowserActivity : Activity() {
         val tb = cur ?: return
         val on = tb.found.isNotEmpty() || isYoutube(tb.url)
         fabView.setOn(on)
+        // Yuvarlak düğme yalnızca YouTube'da görünür (orada videonun üstündeki düğme çalışmaz)
+        fab.visibility = if (isYoutube(tb.url)) View.VISIBLE else View.GONE
     }
 
     // ---- indirme
