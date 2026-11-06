@@ -297,32 +297,32 @@ class BrowserActivity : Activity() {
         fab = LinearLayout(this)
         fab.orientation = LinearLayout.HORIZONTAL
         fab.gravity = Gravity.CENTER_VERTICAL
-        fab.setPadding(dp(18), 0, dp(20), 0)
-        fab.elevation = dpf(8)
+        fab.setPadding(dp(13), 0, dp(15), 0)
+        fab.elevation = dpf(6)
         fab.background = GradientDrawable().apply {
-            cornerRadius = dpf(28)
+            cornerRadius = dpf(22)
             setColor(FAB_OFF)
         }
         val fabIcon = TextView(this)
         fabIcon.text = "⬇"
-        fabIcon.textSize = 24f
+        fabIcon.textSize = 18f
         fabIcon.setTextColor(Color.WHITE)
         fab.addView(fabIcon)
         fabText = TextView(this)
         fabText.text = t("getVideo")
-        fabText.textSize = 17f
+        fabText.textSize = 14f
         fabText.setTextColor(Color.WHITE)
         fabText.setTypeface(fabText.typeface, Typeface.BOLD)
-        fabText.setPadding(dp(10), 0, 0, 0)
+        fabText.setPadding(dp(6), 0, 0, 0)
         fabText.visibility = View.VISIBLE
         fab.addView(fabText)
         fab.setOnClickListener { onFabTap() }
         content.addView(
             fab,
-            FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(56)).apply {
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(42)).apply {
                 gravity = Gravity.END or Gravity.BOTTOM
-                rightMargin = dp(18)
-                bottomMargin = dp(20)
+                rightMargin = dp(16)
+                bottomMargin = dp(16)
             }
         )
 
