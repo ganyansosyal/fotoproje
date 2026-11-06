@@ -22,8 +22,8 @@ import android.widget.Toast
 
 /** "Link ile indir" alt sayfası: link yapıştır → YouTube ise video / ses seçenekleri. */
 object LinkSheet {
-    fun show(act: Activity, dark: Boolean, openOther: (String) -> Unit) {
-        Sheet(act, dark, openOther).start()
+    fun show(act: Activity, dark: Boolean, openOther: (String) -> Unit, autoUrl: String? = null) {
+        Sheet(act, dark, openOther).start(autoUrl)
     }
 
     private fun tr(a: String, b: String) = if (L.code == "tr") a else b
@@ -83,7 +83,7 @@ object LinkSheet {
             setOnClickListener { onClick() }
         }
 
-        fun start() {
+        fun start(autoUrl: String?) {
             dlg.requestWindowFeature(Window.FEATURE_NO_TITLE)
             val root = LinearLayout(act)
             root.orientation = LinearLayout.VERTICAL
@@ -108,8 +108,14 @@ object LinkSheet {
                 setGravity(Gravity.BOTTOM)
                 setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
             }
-            showInput(clipLink(), null)
-            dlg.show()
+            if (autoUrl != null) {
+                showLoading()
+                dlg.show()
+                find(autoUrl)
+            } else {
+                showInput(clipLink(), null)
+                dlg.show()
+            }
         }
 
         fun clipLink(): String {
@@ -234,6 +240,8 @@ object LinkSheet {
                 names.add("Video ${h}p")
             }
             if (info.hasAudio) {
+                modes.add("m")
+                names.add(tr("Ses (MP3)", "Audio (MP3)"))
                 modes.add("a")
                 names.add(tr("Ses (M4A)", "Audio (M4A)"))
             }

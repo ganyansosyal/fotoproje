@@ -2152,7 +2152,7 @@ class BrowserActivity : Activity() {
     private fun onFabTap() {
         val tb = cur ?: return
         if (isYoutube(tb.url)) {
-            downloadYoutube(tb)
+            LinkSheet.show(this, dark, { loadInCurrent(it) }, tb.url)
             return
         }
         if (tb.playerId == null) {
