@@ -24,7 +24,7 @@ object Streams {
 
     fun direct(
         url: String, path: String, headers: Map<String, String>, cancel: CancelFlag,
-        report: Report, conns: Int = 10, strict: Boolean = false
+        report: Report, conns: Int = 16, strict: Boolean = false
     ) {
         Native.direct(url, path, headers, conns, strict, cancel) { a, b ->
             if (b > 0) report(a.toDouble() / b, "%" + (a * 100 / b))

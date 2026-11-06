@@ -390,7 +390,7 @@ object Native {
             return
         }
 
-        val chunk = 3L * 1024 * 1024
+        val chunk = 16L * 1024 * 1024
         val n = ((total + chunk - 1) / chunk).toInt()
         val raf = RandomAccessFile(path, "rw")
         try {
