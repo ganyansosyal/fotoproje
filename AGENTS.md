@@ -3,61 +3,51 @@
 Bu dosya, projede çalışan herkes (insan ya da yapay zekâ) için bağlam notudur.
 Her büyük değişiklikten sonra "Yapılanlar" ve "Sıradakiler" bölümlerini güncelle.
 
-## Proje yapısı
-- Flutter uygulaması (tam özellikli tarayıcı + indirme yöneticisi), `lib/` altında.
-- `native/*.kt`: build sırasında Android paketine kopyalanan Kotlin dosyaları
-  (`build.yml` hepsini kopyalar; yeni `.kt` dosyası için ek ayar gerekmez).
-- Yerel (Kotlin) tarayıcı: akıcı kaydırma için Flutter katmanı olmadan çalışan WebView ekranı.
-  Flutter ile `app/browser` (bidirectional) ve `app/native` kanallarından konuşur.
-- Ayarlar, geçmiş, yer imi, favori, indirme yöneticisi **Dart'ta** kalır; yerel ekran bunları kanaldan ister.
+## Proje yapısı (v3.0 — Flutter tamamen kaldırıldı, saf Kotlin)
+Standart Gradle Android projesi: `app/src/main/kotlin/com/ganyansosyal/fotoproje/`
 
-## Kanal sözleşmesi (`app/browser`)
-Kotlin -> Dart: `cfg`, `home`, `probe`, `download`, `youtube`, `addHistory`, `historyTitle`,
-`bookmarks`, `toggleBookmark`, `history`, `clearHistory`, `addFavorite`, `removeFavorite`, `section`.
-Dart -> Kotlin: `readBlob` (blob videoyu sayfadan parça parça okuyup dosyaya yazar).
-`app/native`: `openNative`, `cacheCfg` (Dart ayarları yerel önbelleğe yazar), diğerleri eskisi gibi.
+| Dosya | Görev |
+|---|---|
+| `BrowserActivity.kt` | Tarayıcı ekranı (sekmeler, WebView, menü, blob indirme, probe/indirme tetikleme) |
+| `Backend.kt` | BrowserActivity'nin istekleri (`cfg`, `home`, `probe`, `download`, `youtube`, geçmiş, yer imi, favori) |
+| `Store.kt` | Ayarlar, geçmiş, yer imleri, favoriler (SharedPreferences) + `L` (TR/EN metin sistemi) |
+| `Strs.kt` | TR/EN metinler (eski `strings.dart`'tan otomatik aktarıldı) |
+| `Downloads.kt` | İndirme yöneticisi (kuyruk, duraklat/devam, birleştirme `Mux`, galeriye ekleme `Gallery`) |
+| `Streams.kt` | HLS / DASH / doğrudan dosya indirme (`Native.segments` / `Native.direct` kullanır) |
+| `Native.kt` | Paralel indirme motoru (`Http`, `Native`, `DlService`) |
+| `Probe.kt` | Bulunan video adaylarını inceler (süre, çözünürlük, boyut) |
+| `Net.kt` | İstek başlıkları (Referer/Origin/Cookie), metin getirme |
+| `YouTube.kt` | YouTube akışı: NewPipeExtractor |
+| `Media.kt` | Video algılama JS'i, no-autoplay JS'i, biçim yardımcıları |
+| `HomeHtml.kt`, `FavIcons.kt` | Ana sayfa HTML'i ve logo önbelleği |
+| `DownloadsActivity.kt`, `SettingsActivity.kt` | İndirmeler ve Ayarlar ekranları (saf Android görünümleri) |
+| `AdBlock.kt`, `TabState.kt` | Reklam engelleme, sekme durumu |
+
+Derleme: `.github/workflows/build.yml` → `gradle :app:assembleRelease` → `app-release.apk` (debug anahtarıyla imzalı).
 
 ## Yapılanlar
-- Yerel tarayıcı baştan yazıldı (`native/BrowserActivity.kt`, `AdBlock.kt`, `TabState.kt`, `MainActivity.kt`):
-  - Çoklu sekme (alttaki sayı kutusu, panel, yeni/kapat/hepsini kapat, window.open = sekme,
-    geri tuşu sayfa -> sekme kapat), en fazla 4 canlı WebView, sekmeler kalıcı saklanır.
-  - Reklam engelleme (alan adı listesi + hafif CSS gizleme), Dart ayarına bağlı.
-  - Yer imi ☆/★, Yer işaretleri ve Geçmiş listeleri (basılı tut = sil, Temizle).
-  - Blob video indirme (Kotlin parça parça okur, Dart indirme yöneticisi devralır).
-  - Ana sayfa + favoriler (Dart `buildHomeHtml`), karanlık tema, dil (`S.all` ile), tam ekran modu,
-    performans ölçer (sayfa fps), paylaş/bağlantıyı kopyala, İndirmeler/Ayarlar'a geçiş, dosya seçici.
-  - "Ana ekran yap" ayarı ve açılışta otomatik açma KALDIRILDI (kullanıcı istemedi). `nativeDefault` alanı settings.dart'ta artık kullanılmıyor.
-- Dart: `browser_page.dart` köprü işleyicileri, `strings.dart` yeni metinler + `S.all`,
-  `settings.dart` `nativeDefault`, `settings_page.dart` anahtar, `top_bar.dart` menü etiketi.
-
-- İndirmeler: Duraklat / Devam / Yeniden dene düğmeleri (`DownloadManager.pause/resume`),
-  bitiş aşamaları ("birleştiriliyor", "kaydediliyor") belirsiz çubukla gösterilir.
-
-- Yerel tarayıcı artık TEK tarayıcı: MainActivity açılışta onu başlatır (`boot_pending` korumalı),
-  Flutter'daki "Sekme" düğmesi ve İndirmeler/Ayarlar'dan geri tuşu yerel ekrana götürür.
-  Eski Flutter tarayıcı kodu (`browser_page.dart`) yedek olarak duruyor, ekrana artık çıkmıyor.
-- Yerel menüden "Uygulamaya dön" kaldırıldı (Flutter tarayıcıya düşüyordu); alt çubuktaki ✕ yerine ⬇ (İndirmeler) kondu.
-- Klavye yavaşlığı (Flutter tarayıcı): sayfa alanı klavyeyle artık yeniden boyutlanmıyor
-  (`resizeToAvoidBottomInset: false`, alt çubuk yerinde kalıyor); sayfadaki odaklı yazı alanı klavye
-  yerleşince `_revealField` ile JS kaydırmasıyla görünür yapılıyor. Denenmedi; yazı alanı klavyenin
-  altında kalırsa `_revealField` içindeki `cover` hesabını ayarla.
+- Flutter/Dart tamamen çıkarıldı; `lib/`, `pubspec.yaml`, `flutter create` adımları yok.
+- Tüm Dart işlevleri Kotlin'e taşındı: ayarlar, geçmiş, yer imi, favori, i18n, indirme yöneticisi,
+  HLS/DASH, probe, favicon önbelleği, ana sayfa, İndirmeler ve Ayarlar ekranları.
+- `BrowserActivity` aynı `dart(...)` çağrı adlarını korur ama artık `Backend.call` doğrudan Kotlin'i çağırır.
+- Sistem varsayılan tarayıcısı olabilir (http/https VIEW intent-filter, `singleTask` + `onNewIntent`).
+- Uygulama doğrudan `BrowserActivity` ile açılır (Flutter motoru beklemek yok).
+- YouTube: `youtube_explode_dart` yerine NewPipeExtractor (JitPack, `v0.24.4`).
 
 ## Bilinen durum / uyarılar
-- Kotlin ve Dart kodu derlenip denenmedi; ilk build'de hata çıkabilir. Log'a göre düzelt.
+- **Kod derlenip denenmedi** (taşıma ortamında Kotlin derleyicisi / ağ yoktu). İlk build'de hata çıkabilir; log'a göre düzelt.
+- NewPipeExtractor sürümü (`v0.24.4`) doğrulanmadı; JitPack'te yoksa güncel etiketi kullan. `Downloader` arayüzü sürüme göre
+  küçük farklar gösterebilir (`YouTube.kt`).
+- Eski Flutter verileri (SharedPreferences `flutter.*` anahtarları) taşınmadı: ayarlar/geçmiş/favoriler sıfırdan başlar.
+  Eski sürümün üstüne kurulursa `fp_native` sekmeleri korunur.
+- Duraklat şu an iptal edip Devam'da BAŞTAN başlatır (gerçek devam için Range tabanlı kısmi dosya gerekir).
 - Blob video iframe içindeyse okunamayabilir.
-- Yerel reklam gizleme kuralları Flutter'daki kadar geniş değil (kaydırma performansı için).
-- Eski sekmeler (4'ten fazlası) seçilince adresten yeniden yüklenir, kaydırma konumu kaybolur.
+- Galeriye ekleme Android 10+ ta MediaStore ile yapılır (Movies/VideoDownloader).
 
-## Sıradakiler (unutma)
-0. Duraklat şu an iptal edip Devam'da BAŞTAN başlatır; gerçek devam (kaldığı yerden) için
-   `Native.kt` direct/segments ve `engine.dart` Range tabanlı kısmi dosya devamı gerekir.
-   Takılı kalan "birleştiriliyor" için zaman aşımı / hata gösterimi eklenebilir.
+## Sıradakiler
 1. İlk build'i al, derleme hatalarını düzelt.
-2. Cihazda dene: sekmeler, geri tuşu, blob indirme, karanlık tema, ana sayfa/favoriler, duraklat/devam.
-3. Sistem varsayılan tarayıcısı: `AndroidManifest`'e http/https intent-filter ekle
-   (`build.yml` manifest adımı) ve gelen VIEW adresini `BrowserActivity`'de aç.
-4. Yerel ekrandan indirme ilerlemesini göster (şu an Flutter'a dönmek gerekiyor).
-5. Site izinleri: konum / kamera / mikrofon (`onPermissionRequest`, geolocation).
-6. Performans ölçeri Flutter'daki kadar ayrıntılı yap (isteğe bağlı).
-7. Yerel ekran sorunsuzsa eski Flutter tarayıcı kodunu tamamen sil (şu an yedek).
-8. Reklam gizleme kurallarını güvenli şekilde genişlet (kaydırmayı ölçerek).
+2. Cihazda dene: açılış, sekmeler, geri tuşu, ana sayfa/favoriler, ayarlar (tema/dil), indirme (mp4/HLS/DASH/blob/YouTube), duraklat/devam, paylaş/aç.
+3. Yerel ekrandan indirme ilerlemesini göster (şu an İndirmeler ekranına gitmek gerekiyor).
+4. Site izinleri: konum / kamera / mikrofon (`onPermissionRequest`).
+5. Gerçek "kaldığı yerden devam" (Range + kısmi dosya).
+6. Uygulama simgesi (şu an basit vektör).
