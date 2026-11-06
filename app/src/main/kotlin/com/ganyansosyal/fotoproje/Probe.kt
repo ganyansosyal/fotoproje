@@ -203,6 +203,12 @@ object Probe {
             val key = if (e.duration > 0) "${e.kind}|${Math.round(e.duration).toInt() / 3}|${e.height}" else e.url
             if (seen.add(key)) out.add(e)
         }
-        return out
+        // Aynı süreli, çözünürlüğü belli bir yayın varsa çözünürlüksüz olanı (ses/yan liste) gizle
+        return out.filter { e ->
+            !(e.isStream && e.height == 0 && e.duration > 0 && out.any { o ->
+                o !== e && o.isStream && o.height > 0 &&
+                    Math.abs(o.duration - e.duration) <= maxOf(4.0, e.duration * 0.04)
+            })
+        }
     }
 }

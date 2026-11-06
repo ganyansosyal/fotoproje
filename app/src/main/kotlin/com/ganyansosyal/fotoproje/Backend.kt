@@ -38,7 +38,10 @@ object Backend {
                             (a["h"] as? Number)?.toInt() ?: 0
                         )
                         done(items.map {
-                            mapOf("url" to it.url, "kind" to it.kind, "title" to it.title, "subtitle" to it.subtitle)
+                            mapOf(
+                                "url" to it.url, "kind" to it.kind, "title" to it.title, "subtitle" to it.subtitle,
+                                "h" to it.height, "d" to it.duration, "s" to it.size
+                            )
                         })
                     } catch (_: Throwable) {
                         ui.post { onFail() }
