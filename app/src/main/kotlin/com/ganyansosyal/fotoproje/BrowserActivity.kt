@@ -1485,7 +1485,25 @@ class BrowserActivity : Activity() {
         loadInCurrent(url)
         val tb = cur ?: return
         tb.autoShow = true
+        // 1) Asıl videoyu kendimiz başlatıp ararız (sayfa kendiliğinden oynatmıyorsa).
+        // 2) Aynı anda sayfanın içindeki video adreslerini (TikTok/Instagram/X) tararız.
+        try { tb.web?.settings?.mediaPlaybackRequiresUserGesture = false } catch (_: Throwable) {}
+        val started = System.currentTimeMillis()
+        var tick = 0
+        val step = object : Runnable {
+            override fun run() {
+                if (!tb.autoShow || tb !== cur || System.currentTimeMillis() - started > 25_000) return
+                if (!tb.loading || tb.progress >= 40) {
+                    tb.web?.evaluateJavascript("window.__fpAutoAll&&window.__fpAutoAll()", null)
+                    tick++
+                    if (tick == 2 || tick == 4 || tick == 7 || tick == 10) scanPage(tb)
+                }
+                ui.postDelayed(this, 2000)
+            }
+        }
+        ui.postDelayed(step, 2500)
         ui.postDelayed({
+            try { tb.web?.settings?.mediaPlaybackRequiresUserGesture = true } catch (_: Throwable) {}
             if (tb.autoShow) {
                 tb.autoShow = false
                 if (tb === cur && tb.found.isEmpty()) {
@@ -1495,7 +1513,41 @@ class BrowserActivity : Activity() {
                     )
                 }
             }
-        }, 25_000)
+        }, 26_000)
+    }
+
+    /** Sayfanın kaynağındaki video adreslerini bulup inceler; bulunursa indirme seçeneklerini açar. */
+    private fun scanPage(tb: Tab) {
+        val w = tb.web ?: return
+        w.evaluateJavascript(Media.SCAN_JS) { raw ->
+            val urls = ArrayList<String>()
+            try {
+                val str = org.json.JSONTokener(raw ?: "null").nextValue() as? String
+                if (str != null) {
+                    val arr = JSONArray(str)
+                    for (i in 0 until arr.length()) urls.add(arr.getString(i))
+                }
+            } catch (_: Throwable) {
+            }
+            if (urls.isEmpty() || !tb.autoShow || tb.found.isNotEmpty()) return@evaluateJavascript
+            val ref = tb.web?.url ?: tb.url
+            Thread {
+                val list = try {
+                    Probe.probeAll(urls, emptyMap(), ref).map {
+                        FoundItem(it.url, it.kind, it.title, it.subtitle, it.height, it.duration, it.size)
+                    }
+                } catch (_: Throwable) {
+                    emptyList()
+                }
+                ui.post {
+                    if (list.isNotEmpty() && tb.autoShow && tb.found.isEmpty()) {
+                        tb.found = list
+                        tb.autoShow = false
+                        if (tb === cur) showFound()
+                    }
+                }
+            }.start()
+        }
     }
 
     private fun updateStar() {
@@ -2084,8 +2136,8 @@ class BrowserActivity : Activity() {
         val tb = cur ?: return
         val on = tb.found.isNotEmpty() || isYoutube(tb.url)
         fabView.setOn(on)
-        // Yuvarlak düğme yalnızca YouTube'da görünür (orada videonun üstündeki düğme çalışmaz)
-        fab.visibility = if (isYoutube(tb.url)) View.VISIBLE else View.GONE
+        // Yuvarlak düğme kaldırıldı: indirme düğmesi artık her videonun üstünde
+        fab.visibility = View.GONE
     }
 
     // ---- indirme

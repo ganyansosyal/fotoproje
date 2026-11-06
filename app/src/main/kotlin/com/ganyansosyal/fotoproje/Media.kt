@@ -4,6 +4,24 @@ import java.net.URI
 
 /** Video algılama ve akış (HLS/DASH) yardımcıları (eski lib/core/media.dart). */
 object Media {
+    /** Sayfanın kendisinde (kaynak, meta, video öğeleri) video adresi arar; TikTok/Instagram/X için yedek yol. */
+    val SCAN_JS = """
+(function(){
+ var h=document.documentElement.outerHTML, out=[], seen={}, m, i, j;
+ function fix(u){ return u.replace(/\\u002F/gi,'/').replace(/\\u0026/gi,'&').replace(/\\\//g,'/').replace(/&amp;/g,'&'); }
+ function add(u){ u=fix(String(u)); if(!/^https?:\/\//i.test(u)||seen[u]||u.length>2500) return; seen[u]=1; out.push(u); }
+ var re=/https?:(?:\\u002F|\\\/|\/){2}(?:[^"'\s<>\\]|\\u002F|\\u0026|\\\/)+/gi;
+ while((m=re.exec(h))&&out.length<80){ var f=fix(m[0]);
+  if(/\.(mp4|m3u8|mpd|webm)\b|mime_type=video_|\/video\/tos\/|video\.twimg\.com/i.test(f)) add(m[0]); }
+ var mv=document.querySelectorAll('meta[property="og:video"],meta[property="og:video:url"],meta[property="og:video:secure_url"],meta[name="twitter:player:stream"]');
+ for(i=0;i<mv.length;i++){ var c=mv[i].getAttribute('content'); if(c) add(c); }
+ var vs=document.getElementsByTagName('video');
+ for(i=0;i<vs.length;i++){ if(vs[i].currentSrc) add(vs[i].currentSrc); if(vs[i].src) add(vs[i].src);
+  var ss=vs[i].getElementsByTagName('source'); for(j=0;j<ss.length;j++) if(ss[j].src) add(ss[j].src); }
+ return JSON.stringify(out.slice(0,20));
+})()
+"""
+
     val HOOK_JS = """
 (function(){ if(window.__hk) return; window.__hk=1;
  // YouTube'u uygulama kendi yöntemiyle indirir; orada kanca gereksiz ve yavaştır.
@@ -143,6 +161,19 @@ object Media {
  window.addEventListener('scroll',lay,true); window.addEventListener('resize',lay);
  ['playing','loadedmetadata','durationchange','emptied'].forEach(function(n){ document.addEventListener(n,lay,true); });
  setInterval(lay,700);
+
+ // ---- "Link ile indir": uygulama sayfadaki asıl videoyu kendisi başlatıp bulur ----
+ function autoOne(){ var vs=document.getElementsByTagName('video'), best=null, ba=0, i;
+  for(i=0;i<vs.length;i++){ var v=vs[i]; if(!alive(v)) continue;
+   var r=v.getBoundingClientRect(), a=r.width*r.height; if(a>ba){ ba=a; best=v; } }
+  if(!best||!qual(best)) return false;
+  try{ best.__ap=1; best.muted=true; }catch(e){}
+  pick(best); return true; }
+ window.__fpAutoAll=function(){ var ok=autoOne(), fr=document.getElementsByTagName('iframe'), i;
+  for(i=0;i<fr.length;i++){ try{ fr[i].contentWindow.postMessage('__fpAuto','*'); }catch(e){} }
+  return ok; };
+ window.addEventListener('message',function(e){
+  if(e.data==='__fpAuto'&&e.source===window.parent) window.__fpAutoAll(); });
 })();
 """
 
