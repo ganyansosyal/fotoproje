@@ -1,5 +1,6 @@
 package com.ganyansosyal.fotoproje
 
+import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
@@ -72,6 +73,7 @@ class BrowserActivity : Activity() {
     private lateinit var bar: LinearLayout
     private lateinit var urlBox: EditText
     private lateinit var starBtn: TextView
+    private lateinit var reloadBtn: TextView
     private lateinit var progress: ProgressBar
     private lateinit var fab: LinearLayout
     private lateinit var fabText: TextView
@@ -175,6 +177,7 @@ class BrowserActivity : Activity() {
     override fun onDestroy() {
         if (current === this) current = null
         Downloads.removeListener(dlListener)
+        fabGlow?.cancel()
         ui.removeCallbacks(saveRun)
         for (j in ArrayList(blobJobs.values)) finishBlob(j, false)
         for (tb in ArrayList(tabs)) destroyWeb(tb)
@@ -267,7 +270,17 @@ class BrowserActivity : Activity() {
                 false
             }
         }
-        row.addView(urlBox, LinearLayout.LayoutParams(0, dp(40), 1f))
+        urlBox.setPadding(dp(16), 0, dp(44), 0) // sağda yenile düğmesine yer
+        // Yenile düğmesi adres kutusunun içinde (sağda)
+        reloadBtn = button("⟳", 20f)
+        reloadBtn.setOnClickListener { onReloadTap() }
+        val urlWrap = FrameLayout(this)
+        urlWrap.addView(urlBox, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)))
+        urlWrap.addView(
+            reloadBtn,
+            FrameLayout.LayoutParams(dp(40), dp(40)).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
+        )
+        row.addView(urlWrap, LinearLayout.LayoutParams(0, dp(40), 1f))
 
         starBtn = button("☆", 22f)
         starBtn.setOnClickListener { toggleBookmark() }
@@ -1389,6 +1402,20 @@ class BrowserActivity : Activity() {
         val tb = cur ?: return
         progress.progress = tb.progress
         progress.visibility = if (tb.loading && tb.progress < 100) View.VISIBLE else View.GONE
+        if (::reloadBtn.isInitialized) {
+            // yüklenirken ✕ (durdur), bitince ⟳ (yenile)
+            reloadBtn.text = if (tb.loading && tb.progress < 100) "✕" else "⟳"
+        }
+    }
+
+    private fun onReloadTap() {
+        val tb = cur ?: return
+        if (tb.isHome) {
+            loadHome(tb)
+            return
+        }
+        val w = tb.web ?: return
+        if (tb.loading && tb.progress < 100) w.stopLoading() else w.reload()
     }
 
     private fun updateChrome() {
@@ -1933,7 +1960,42 @@ class BrowserActivity : Activity() {
         val tb = cur ?: return
         val on = tb.found.isNotEmpty() || isYoutube(tb.url)
         fabText.visibility = View.VISIBLE
+        val n = tb.found.size
+        fabText.text = if (n > 1 && !isYoutube(tb.url)) t("getVideo") + " ($n)" else t("getVideo")
         (fab.background as GradientDrawable).setColor(if (on) FAB_ON else FAB_OFF)
+        setFabGlow(on)
+    }
+
+    private var fabGlow: ValueAnimator? = null
+
+    /** Video bulununca düğme ışıklanır (nabız gibi yanıp söner); video yoksa söner. */
+    private fun setFabGlow(on: Boolean) {
+        val bg = fab.background as GradientDrawable
+        if (!on) {
+            if (fabGlow != null) {
+                fabGlow?.cancel()
+                fabGlow = null
+                bg.setStroke(0, Color.TRANSPARENT)
+                fab.scaleX = 1f
+                fab.scaleY = 1f
+            }
+            return
+        }
+        if (fabGlow != null) return // zaten yanıyor
+        fabGlow = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 900
+            repeatCount = ValueAnimator.INFINITE
+            repeatMode = ValueAnimator.REVERSE
+            addUpdateListener { a ->
+                val v = a.animatedValue as Float
+                // hale: açık yeşil, saydamlığı değişir
+                val alpha = (60 + 180 * v).toInt()
+                bg.setStroke(dp(4), (alpha shl 24) or 0x7CFC9A)
+                fab.scaleX = 1f + 0.06f * v
+                fab.scaleY = 1f + 0.06f * v
+            }
+            start()
+        }
     }
 
     // ---- indirme
@@ -2038,12 +2100,12 @@ class BrowserActivity : Activity() {
             return
         }
         if (tb.found.isNotEmpty()) {
-            startDownload(tb, tb.found[0].url, tb.found[0].kind)
+            showFound() // bulunan videoları seçenek olarak göster
             return
         }
         toast(t("checking"))
         runProbe(tb) { list ->
-            if (list.isEmpty()) toast(t("noVideo")) else startDownload(tb, list[0].url, list[0].kind)
+            if (list.isEmpty()) toast(t("noVideo")) else showFound()
         }
     }
 
