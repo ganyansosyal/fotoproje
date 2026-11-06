@@ -61,16 +61,13 @@ class MainActivity : FlutterActivity() {
     }
 
     /**
-     * "Yerel tarayıcıyı ana ekran yap" ayarı (Flutter tarafında, SharedPreferences'ta)
-     * açıksa, uygulama simgesinden başlatılınca Flutter beklenmeden yerel ekran açılır.
-     * Koruma: yerel ekran açılışta çökerse bir sonraki başlatmada otomatik açma atlanır,
-     * böylece kullanıcı Flutter ekranından ayarı kapatabilir.
+     * Tarayıcı artık yerel (Kotlin) ekran: uygulama simgesinden açılınca Flutter beklenmeden
+     * doğrudan o açılır. Flutter yalnızca İndirmeler ve Ayarlar için arkada durur.
+     * Koruma: yerel ekran açılışta çökerse bir sonraki başlatmada otomatik açma bir kez atlanır.
      */
     private fun maybeOpenNativeAtLaunch(saved: Bundle?) {
         try {
             if (saved != null || intent?.action != Intent.ACTION_MAIN) return
-            val fp = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
-            if (!fp.getBoolean("flutter.nativeDefault", false)) return
             val np = getSharedPreferences("fp_native", MODE_PRIVATE)
             if (np.getBoolean("boot_pending", false)) {
                 np.edit().putBoolean("boot_pending", false).apply()
