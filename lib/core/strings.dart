@@ -13,6 +13,9 @@ class S {
 
   static String t(String k) => (_m[code]?[k]) ?? (_m['tr']![k] ?? k);
 
+  /// Seçili dilin tüm metinleri (yerel Kotlin ekranına gönderilir).
+  static Map<String, String> get all => {..._m['tr']!, ...?_m[code]};
+
   static const _m = <String, Map<String, String>>{
     'tr': {
       'newTab': 'Yeni Sekme',
@@ -112,6 +115,27 @@ class S {
       'favEdit': 'Favorileri düzenle',
       'longPressHint': 'Silmek için basılı tut',
       'incognitoNote': '',
+      'reload': 'Yenile',
+      'fullScreen': 'Tam ekran',
+      'exitFull': 'Tam ekrandan çık',
+      'backToApp': 'Uygulamaya dön',
+      'downloads': 'İndirmeler',
+      'clear': 'Temizle',
+      'nativeBrowser': 'Yerel tarayıcı',
+      'nativeDefault': 'Yerel tarayıcıyı ana ekran yap',
+      'nativeDefaultInfo': 'Uygulama açılınca doğrudan yerel (akıcı) tarayıcı açılır',
+      'bookmarkAdded': 'Yer imi eklendi',
+      'bookmarkRemoved': 'Yer imi kaldırıldı',
+      'tabClosed': 'Sekme kapatıldı',
+      'noHome': 'Ana sayfa',
+      'perfPage': 'SAYFA (WebView)',
+      'perfScreen': 'EKRAN (yerel)',
+      'perfWorst': 'en kötü kare',
+      'perfJank': 'takılma',
+      'perfIdle': 'çizim yok (boşta)',
+      'fileChooser': 'Dosya seç',
+      'blobFail':
+          'Blob okunamadı (parçalı yayın olabilir, listedeki diğer bağlantıyı dene)',
     },
     'en': {
       'newTab': 'New Tab',
@@ -211,6 +235,27 @@ class S {
       'favEdit': 'Edit favorites',
       'longPressHint': 'Long-press to remove',
       'incognitoNote': '',
+      'reload': 'Reload',
+      'fullScreen': 'Full screen',
+      'exitFull': 'Exit full screen',
+      'backToApp': 'Back to app',
+      'downloads': 'Downloads',
+      'clear': 'Clear',
+      'nativeBrowser': 'Native browser',
+      'nativeDefault': 'Make native browser the home screen',
+      'nativeDefaultInfo': 'Opens the native (smooth) browser right at launch',
+      'bookmarkAdded': 'Bookmark added',
+      'bookmarkRemoved': 'Bookmark removed',
+      'tabClosed': 'Tab closed',
+      'noHome': 'Home',
+      'perfPage': 'PAGE (WebView)',
+      'perfScreen': 'SCREEN (native)',
+      'perfWorst': 'worst frame',
+      'perfJank': 'jank',
+      'perfIdle': 'no drawing (idle)',
+      'fileChooser': 'Choose file',
+      'blobFail':
+          'Could not read blob (may be a segmented stream, try another link in the list)',
     },
   };
 }

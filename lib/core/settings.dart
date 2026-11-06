@@ -42,6 +42,7 @@ class AppSettings extends ChangeNotifier {
   bool recentSites = true;
   bool syncGallery = true;
   bool publicFolder = false; // false: uygulama klasörü
+  bool nativeDefault = false; // açılışta yerel (Kotlin) tarayıcı açılsın
   String engine = 'Google';
   String lang = 'system';
   String theme = 'light'; // light | dark
@@ -59,6 +60,7 @@ class AppSettings extends ChangeNotifier {
     recentSites = _p.getBool('recentSites') ?? true;
     syncGallery = _p.getBool('syncGallery') ?? true;
     publicFolder = _p.getBool('publicFolder') ?? false;
+    nativeDefault = _p.getBool('nativeDefault') ?? false;
     engine = _p.getString('engine') ?? 'Google';
     lang = _p.getString('lang') ?? 'system';
     theme = _p.getString('theme') == 'dark' ? 'dark' : 'light';
@@ -102,6 +104,8 @@ class AppSettings extends ChangeNotifier {
         syncGallery = v;
       case 'publicFolder':
         publicFolder = v;
+      case 'nativeDefault':
+        nativeDefault = v;
     }
     _p.setBool(key, v);
     _save();
