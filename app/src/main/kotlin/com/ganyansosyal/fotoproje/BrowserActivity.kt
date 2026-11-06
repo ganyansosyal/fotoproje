@@ -76,6 +76,7 @@ class BrowserActivity : Activity() {
     private lateinit var reloadBtn: TextView
     private lateinit var progress: ProgressBar
     private lateinit var fab: LinearLayout
+    private lateinit var fabView: DlFabView
     private lateinit var fabText: TextView
     private lateinit var dlBadge: TextView
     private val dlListener: () -> Unit = { runOnUiThread { updateDlBadge() } }
@@ -177,7 +178,7 @@ class BrowserActivity : Activity() {
     override fun onDestroy() {
         if (current === this) current = null
         Downloads.removeListener(dlListener)
-        fabGlow?.cancel()
+        fabView.setOn(false)
         ui.removeCallbacks(saveRun)
         for (j in ArrayList(blobJobs.values)) finishBlob(j, false)
         for (tb in ArrayList(tabs)) destroyWeb(tb)
@@ -307,36 +308,22 @@ class BrowserActivity : Activity() {
             FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, barH)
         )
 
-        // ---- video indirme düğmesi (video bulununca yeşil)
+        // ---- video indirme düğmesi: yuvarlak; video yokken gri, bulununca kırmızı + yayılan halka
         fab = LinearLayout(this)
         fab.orientation = LinearLayout.HORIZONTAL
-        fab.gravity = Gravity.CENTER_VERTICAL
-        fab.setPadding(dp(13), 0, dp(15), 0)
-        fab.elevation = dpf(6)
-        fab.background = GradientDrawable().apply {
-            cornerRadius = dpf(22)
-            setColor(FAB_OFF)
-        }
-        val fabIcon = TextView(this)
-        fabIcon.text = "⬇"
-        fabIcon.textSize = 18f
-        fabIcon.setTextColor(Color.WHITE)
-        fab.addView(fabIcon)
-        fabText = TextView(this)
+        fab.gravity = Gravity.CENTER
+        fabView = DlFabView(this)
+        fab.addView(fabView, LinearLayout.LayoutParams(dp(68), dp(68)))
+        fabText = TextView(this) // eski kodla uyum için (ekranda görünmez)
         fabText.text = t("getVideo")
-        fabText.textSize = 14f
-        fabText.setTextColor(Color.WHITE)
-        fabText.setTypeface(fabText.typeface, Typeface.BOLD)
-        fabText.setPadding(dp(6), 0, 0, 0)
-        fabText.visibility = View.VISIBLE
-        fab.addView(fabText)
+        fab.contentDescription = t("getVideo")
         fab.setOnClickListener { onFabTap() }
         content.addView(
             fab,
-            FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(42)).apply {
+            FrameLayout.LayoutParams(dp(68), dp(68)).apply {
                 gravity = Gravity.END or Gravity.BOTTOM
-                rightMargin = dp(16)
-                bottomMargin = dp(16)
+                rightMargin = dp(10)
+                bottomMargin = dp(10)
             }
         )
         setupFabDrag()
@@ -1959,43 +1946,7 @@ class BrowserActivity : Activity() {
     private fun updateFab() {
         val tb = cur ?: return
         val on = tb.found.isNotEmpty() || isYoutube(tb.url)
-        fabText.visibility = View.VISIBLE
-        val n = tb.found.size
-        fabText.text = if (n > 1 && !isYoutube(tb.url)) t("getVideo") + " ($n)" else t("getVideo")
-        (fab.background as GradientDrawable).setColor(if (on) FAB_ON else FAB_OFF)
-        setFabGlow(on)
-    }
-
-    private var fabGlow: ValueAnimator? = null
-
-    /** Video bulununca düğme ışıklanır (nabız gibi yanıp söner); video yoksa söner. */
-    private fun setFabGlow(on: Boolean) {
-        val bg = fab.background as GradientDrawable
-        if (!on) {
-            if (fabGlow != null) {
-                fabGlow?.cancel()
-                fabGlow = null
-                bg.setStroke(0, Color.TRANSPARENT)
-                fab.scaleX = 1f
-                fab.scaleY = 1f
-            }
-            return
-        }
-        if (fabGlow != null) return // zaten yanıyor
-        fabGlow = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 900
-            repeatCount = ValueAnimator.INFINITE
-            repeatMode = ValueAnimator.REVERSE
-            addUpdateListener { a ->
-                val v = a.animatedValue as Float
-                // hale: açık yeşil, saydamlığı değişir
-                val alpha = (60 + 180 * v).toInt()
-                bg.setStroke(dp(4), (alpha shl 24) or 0x7CFC9A)
-                fab.scaleX = 1f + 0.06f * v
-                fab.scaleY = 1f + 0.06f * v
-            }
-            start()
-        }
+        fabView.setOn(on)
     }
 
     // ---- indirme
@@ -2306,5 +2257,84 @@ class BrowserActivity : Activity() {
             "bookmarkRemoved" to "Yer imi kaldırıldı", "shareAppText" to "Bu tarayıcıyı denemelisin!",
             "perfPage" to "SAYFA (WebView)", "perfWorst" to "en kötü kare", "perfJank" to "takılma"
         )
+    }
+}
+
+
+/** Yuvarlak indirme düğmesi: gri (video yok) / kırmızı (video var) + dışa yayılan halka. */
+class DlFabView(ctx: android.content.Context) : android.view.View(ctx) {
+    private val d = resources.displayMetrics.density
+    private val fill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    private val ringP = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        style = android.graphics.Paint.Style.STROKE
+        strokeWidth = 2f * d
+    }
+    private val ic = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE
+    }
+    private val icStroke = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE
+        style = android.graphics.Paint.Style.STROKE
+        strokeWidth = 2.6f * d
+        strokeCap = android.graphics.Paint.Cap.ROUND
+    }
+    private val head = android.graphics.Path()
+    private var on = false
+    private var ring = 0f
+    private var anim: ValueAnimator? = null
+
+    init {
+        setLayerType(LAYER_TYPE_SOFTWARE, null) // gölge için
+        fill.setShadowLayer(4f * d, 0f, 1.5f * d, 0x55000000)
+    }
+
+    fun setOn(v: Boolean) {
+        if (v == on) return
+        on = v
+        anim?.cancel()
+        anim = null
+        ring = 0f
+        if (v) {
+            anim = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 1500
+                repeatCount = ValueAnimator.INFINITE
+                interpolator = android.view.animation.DecelerateInterpolator()
+                addUpdateListener { ring = it.animatedValue as Float; invalidate() }
+                start()
+            }
+        }
+        invalidate()
+    }
+
+    override fun onDetachedFromWindow() {
+        anim?.cancel()
+        super.onDetachedFromWindow()
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        if (on && anim == null) { on = false; setOn(true) }
+    }
+
+    override fun onDraw(c: android.graphics.Canvas) {
+        val cx = width / 2f
+        val cy = height / 2f
+        val r = 22f * d
+        if (on && ring > 0f) {
+            val rr = r + ring * (width / 2f - r - 2f * d)
+            ringP.color = 0xF44336 or ((((1f - ring) * 150).toInt()) shl 24)
+            c.drawCircle(cx, cy, rr, ringP)
+        }
+        fill.color = if (on) 0xFFF23A3A.toInt() else 0xFF9E9E9E.toInt()
+        c.drawCircle(cx, cy, r, fill)
+        // simge: ok + tepsi
+        c.drawLine(cx, cy - 9f * d, cx, cy - 0.5f * d, icStroke)
+        head.reset()
+        head.moveTo(cx - 6f * d, cy - 1.5f * d)
+        head.lineTo(cx + 6f * d, cy - 1.5f * d)
+        head.lineTo(cx, cy + 5.5f * d)
+        head.close()
+        c.drawPath(head, ic)
+        c.drawLine(cx - 7.5f * d, cy + 9.5f * d, cx + 7.5f * d, cy + 9.5f * d, icStroke)
     }
 }
