@@ -36,6 +36,6 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.webkit:webkit:1.12.1")
     // YouTube çıkarımı (eski youtube_explode_dart yerine)
-    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.24.4")
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.5")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 }
