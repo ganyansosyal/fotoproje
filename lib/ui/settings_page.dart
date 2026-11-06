@@ -82,6 +82,8 @@ class SettingsPage extends StatelessWidget {
                   s.blockAds, (v) => s.setBool('blockAds', v)),
               _Switch(S.t('recentSites'), null, s.recentSites,
                   (v) => s.setBool('recentSites', v)),
+              _Switch(S.t('nativeDefault'), S.t('nativeDefaultInfo'),
+                  s.nativeDefault, (v) => s.setBool('nativeDefault', v)),
               ListTile(
                 title: Text(S.t('searchEngine')),
                 subtitle: Text(s.engine),
