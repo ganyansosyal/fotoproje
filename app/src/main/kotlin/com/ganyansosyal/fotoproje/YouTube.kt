@@ -55,10 +55,16 @@ object YouTube {
         }
     }
 
+    /** list=, start_radio=, pp= gibi parametreleri atıp sadece video kimliğini bırakır. */
+    private fun clean(url: String): String {
+        val m = Regex("(?:[?&]v=|youtu\\.be/|/shorts/|/embed/|/live/)([A-Za-z0-9_-]{11})").find(url)
+        return if (m != null) "https://www.youtube.com/watch?v=" + m.groupValues[1] else url
+    }
+
     /** En yüksek kaliteli ses+görüntü birleşik (muxed) akışın adresi. */
     fun pick(url: String): String {
         init()
-        val info = StreamInfo.getInfo(url)
+        val info = StreamInfo.getInfo(clean(url))
         val s = info.videoStreams
             .filter { !it.isVideoOnly && it.content.isNotEmpty() }
             .maxByOrNull { it.height * 10_000_000L + it.bitrate }
