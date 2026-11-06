@@ -210,7 +210,7 @@ class DownloadsActivity : Activity() {
         }
         thumb.clipToOutline = true
         val p = t.path
-        if (p != null && !p.endsWith(".m4a")) loadThumb(p, thumb)
+        if (p != null) loadThumb(p, thumb)
         top.addView(thumb, LinearLayout.LayoutParams(dp(88), dp(64)).apply { rightMargin = dp(12) })
 
         val col = LinearLayout(this)
@@ -244,24 +244,67 @@ class DownloadsActivity : Activity() {
         thumbCache[path]?.let { iv.setImageBitmap(it); return }
         Thread {
             var bmp: android.graphics.Bitmap? = null
+            // 1) MediaMetadataRetriever: birkaç farklı zamanı ve seçeneği dene
             val r = android.media.MediaMetadataRetriever()
             try {
                 r.setDataSource(path)
-                bmp = r.getFrameAtTime(1_000_000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                    ?: r.getFrameAtTime(0)
-                if (bmp != null) {
-                    val w = 320
-                    val h = (bmp.height * w.toFloat() / bmp.width).toInt().coerceAtLeast(1)
-                    bmp = android.graphics.Bitmap.createScaledBitmap(bmp, w, h, true)
+                val dur = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toLongOrNull() ?: 0L
+                val times = longArrayOf(1_000_000L, 0L, dur * 500L, 3_000_000L)
+                loop@ for (t in times) {
+                    for (opt in intArrayOf(
+                        android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                        android.media.MediaMetadataRetriever.OPTION_CLOSEST
+                    )) {
+                        try {
+                            bmp = r.getFrameAtTime(t, opt)
+                        } catch (_: Throwable) {
+                        }
+                        if (bmp != null) break@loop
+                    }
                 }
             } catch (_: Throwable) {
             } finally {
                 try { r.release() } catch (_: Throwable) {}
             }
-            val out = bmp ?: return@Thread
+            // 2) Olmadıysa sistemin küçük resim üreticisi
+            if (bmp == null && android.os.Build.VERSION.SDK_INT >= 29) {
+                try {
+                    bmp = android.media.ThumbnailUtils.createVideoThumbnail(
+                        File(path), android.util.Size(320, 240), null
+                    )
+                } catch (_: Throwable) {
+                }
+            }
+            if (bmp != null) {
+                val w = 320
+                val h = (bmp.height * w.toFloat() / bmp.width).toInt().coerceAtLeast(1)
+                bmp = android.graphics.Bitmap.createScaledBitmap(bmp, w, h, true)
+            } else {
+                bmp = placeholder()
+            }
+            val out = bmp!!
             thumbCache[path] = out
             runOnUiThread { iv.setImageBitmap(out) }
         }.start()
+    }
+
+    /** Kare alınamayan dosyalar için "oynat" simgeli gri kutu. */
+    private fun placeholder(): android.graphics.Bitmap {
+        val w = 320
+        val h = 240
+        val bm = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(bm)
+        c.drawColor(if (Store.dark) 0xFF3C4043.toInt() else 0xFFDADCE0.toInt())
+        val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        p.color = if (Store.dark) 0xFF9AA0A6.toInt() else 0xFF5F6368.toInt()
+        val path = android.graphics.Path()
+        path.moveTo(w * 0.4f, h * 0.3f)
+        path.lineTo(w * 0.4f, h * 0.7f)
+        path.lineTo(w * 0.68f, h * 0.5f)
+        path.close()
+        c.drawPath(path, p)
+        return bm
     }
 
     private fun uriOf(path: String): Uri =

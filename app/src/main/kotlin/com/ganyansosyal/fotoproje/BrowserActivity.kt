@@ -1977,6 +1977,7 @@ class BrowserActivity : Activity() {
         if (id != tb.playerId || Math.abs(dur - tb.pDur) > 1) tb.bannerDone = false
         tb.playerId = id
         tb.pDur = dur
+        if (m.optBoolean("show", false)) tb.autoShow = true
         tb.pLive = m.optBoolean("live", false)
         tb.pH = m.optInt("h", 0)
         tb.pSrc = m.optString("src", "")

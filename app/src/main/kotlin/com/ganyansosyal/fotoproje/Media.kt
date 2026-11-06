@@ -63,7 +63,7 @@ object Media {
   return p; };
 
  // ---- Oynatıcı takibi: yalnızca gerçekten oynayan video raporlanır ----
- var act=null, wd=0, ft=0, last='', t0=new WeakMap();
+ var act=null, wd=0, ft=0, last='', showFor=null, t0=new WeakMap();
  function alive(v){ if(!v||!v.isConnected) return false;
   var r=v.getBoundingClientRect(); if(r.width<=0||r.height<=0) return false;
   var cs=getComputedStyle(v); return cs.visibility!=='hidden'&&cs.display!=='none'; }
@@ -95,8 +95,8 @@ object Media {
    if(!urls.length&&/^blob:/i.test(src)) urls=[src];
   }
   var o={d:live?0:Math.round(d*10)/10, live:live, w:v.videoWidth||0, h:v.videoHeight||0,
-   src:direct?src:'', ref:location.href, urls:urls, hints:hints};
-  var s=JSON.stringify(o); if(s===last) return; last=s; send(o); }
+   src:direct?src:'', ref:location.href, urls:urls, hints:hints, show:showFor===v};
+  var s=JSON.stringify(o); if(s===last) return; last=s; send(o); if(showFor===v) showFor=null; }
  function onEv(e){ var v=e.target; if(!v||v.tagName!=='VIDEO') return; var t=e.type;
   if(t==='loadstart'){ t0.set(v,Date.now()); if(v===act) last=''; return; }
   if(t==='emptied'||t==='abort'){ if(v===act) stop(); return; }
@@ -109,6 +109,39 @@ object Media {
   setTimeout(function(){ if(act===v) sched(10); },6000); }
  ['loadstart','playing','durationchange','loadedmetadata','emptied','abort'].forEach(function(n){
   document.addEventListener(n,onEv,true); });
+
+ // ---- Her videonun üstünde kendi indirme düğmesi: hangi videoya basıldıysa o video bulunur ----
+ var btns=new Map(), lp=0;
+ function pick(v){ act=v; last=''; showFor=v;
+  if(!wd) wd=setInterval(function(){ if(act&&!alive(act)) stop(); },2000);
+  try{ if(v.paused&&v.readyState===0) v.play(); }catch(e){}
+  sched(10);
+  setTimeout(function(){ if(showFor===v) sched(10); },1500);
+  setTimeout(function(){ if(showFor===v) sched(10); },4000);
+  setTimeout(function(){ if(showFor===v) showFor=null; },9000); }
+ function mkBtn(v){ var b=document.createElement('div');
+  b.textContent='\u2193';
+  b.style.cssText='position:fixed;z-index:2147483647;width:38px;height:38px;border-radius:19px;'+
+   'background:rgba(229,57,53,.92);color:#fff;font:bold 22px/38px sans-serif;text-align:center;'+
+   'box-shadow:0 2px 8px rgba(0,0,0,.45);touch-action:manipulation;user-select:none;-webkit-user-select:none';
+  function eat(e){ e.stopPropagation(); }
+  b.addEventListener('pointerdown',eat,true); b.addEventListener('touchstart',eat,true);
+  b.addEventListener('touchend',eat,true); b.addEventListener('mousedown',eat,true);
+  b.addEventListener('click',function(e){ e.preventDefault(); e.stopPropagation(); pick(v); },true);
+  document.documentElement.appendChild(b); return b; }
+ function layout(){ lp=0;
+  var vs=document.getElementsByTagName('video'), seen=new Set(), i, vh=window.innerHeight, vw=window.innerWidth;
+  for(i=0;i<vs.length;i++){ var v=vs[i]; if(!qual(v)) continue;
+   var r=v.getBoundingClientRect();
+   if(r.bottom<56||r.top>vh-56||r.right<56||r.left>vw-8) continue;
+   var b=btns.get(v); if(!b){ b=mkBtn(v); btns.set(v,b); }
+   var top=Math.max(r.top,0)+8; if(top>r.bottom-46) top=Math.max(r.bottom-46,0);
+   b.style.top=top+'px'; b.style.left=(Math.min(r.right,vw)-46)+'px'; seen.add(v); }
+  btns.forEach(function(b,v){ if(!seen.has(v)){ try{b.remove();}catch(e){} btns.delete(v); } }); }
+ function lay(){ if(!lp) lp=requestAnimationFrame(layout); }
+ window.addEventListener('scroll',lay,true); window.addEventListener('resize',lay);
+ ['playing','loadedmetadata','durationchange','emptied'].forEach(function(n){ document.addEventListener(n,lay,true); });
+ setInterval(lay,700);
 })();
 """
 
