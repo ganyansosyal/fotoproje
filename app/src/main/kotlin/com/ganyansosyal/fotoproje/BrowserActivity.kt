@@ -79,6 +79,9 @@ class BrowserActivity : Activity() {
     private lateinit var fabView: DlFabView
     private lateinit var fabText: TextView
     private lateinit var dlBadge: TextView
+    private lateinit var dlIcon: VecIcon
+    private var dlBlink: ValueAnimator? = null
+    private var themeFg = Color.BLACK
     private val dlListener: () -> Unit = { runOnUiThread { updateDlBadge() } }
     private lateinit var line: View
     private lateinit var bottom: LinearLayout
@@ -429,7 +432,7 @@ class BrowserActivity : Activity() {
             tabBox,
             FrameLayout.LayoutParams(dp(26), dp(26), Gravity.CENTER)
         )
-        val dlIcon = VecIcon(this, VecIcon.DOWNLOAD, 26f).apply {
+        dlIcon = VecIcon(this, VecIcon.DOWNLOAD, 26f).apply {
             gravity = Gravity.CENTER
             isClickable = true
             tintViews.add(this)
@@ -478,12 +481,26 @@ class BrowserActivity : Activity() {
         updateDlBadge()
     }
 
-    /** Alt çubuktaki indirme simgesinin kırmızı sayacı: sürenler + yeni biten indirmeler. */
+    /** Alt çubuktaki indirme simgesi: indirme sürerken kırmızı yanıp söner, bitince normale döner. */
     private fun updateDlBadge() {
-        if (!::dlBadge.isInitialized) return
-        val n = Downloads.active.size + Downloads.unseen
-        dlBadge.text = if (n > 9) "9+" else n.toString()
-        dlBadge.visibility = if (n > 0) View.VISIBLE else View.GONE
+        if (!::dlIcon.isInitialized) return
+        dlBadge.visibility = View.GONE
+        val busy = Downloads.active.isNotEmpty()
+        if (busy && dlBlink == null) {
+            dlIcon.setTextColor(0xFFE53935.toInt())
+            dlBlink = ValueAnimator.ofFloat(1f, 0.3f).apply {
+                duration = 700
+                repeatCount = ValueAnimator.INFINITE
+                repeatMode = ValueAnimator.REVERSE
+                addUpdateListener { dlIcon.alpha = it.animatedValue as Float }
+                start()
+            }
+        } else if (!busy && dlBlink != null) {
+            dlBlink?.cancel()
+            dlBlink = null
+            dlIcon.alpha = 1f
+            dlIcon.setTextColor(themeFg)
+        }
     }
 
     private fun button(txt: String, size: Float): TextView {
@@ -520,7 +537,9 @@ class BrowserActivity : Activity() {
         urlBox.setTextColor(p.fg)
         urlBox.setHintTextColor(p.sub)
         (urlBox.background as GradientDrawable).setColor(p.field)
+        themeFg = p.fg
         for (b in tintViews) b.setTextColor(p.fg)
+        if (dlBlink != null) dlIcon.setTextColor(0xFFE53935.toInt())
         tabBox.setTextColor(p.fg)
         (tabBox.background as GradientDrawable).setStroke(dp(2), p.fg)
         updateStar()
