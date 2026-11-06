@@ -400,11 +400,23 @@ class BrowserActivity : Activity() {
         root.addView(line, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1))
         bottom = LinearLayout(this)
         bottom.orientation = LinearLayout.HORIZONTAL
-        backBtn = button("‹", 30f)
+        backBtn = VecIcon(this, VecIcon.BACK, 26f).apply {
+            gravity = Gravity.CENTER
+            isClickable = true
+            tintViews.add(this)
+        }
         backBtn.setOnClickListener { cur?.web?.let { if (it.canGoBack()) it.goBack() } }
-        fwdBtn = button("›", 30f)
+        fwdBtn = VecIcon(this, VecIcon.FORWARD, 26f).apply {
+            gravity = Gravity.CENTER
+            isClickable = true
+            tintViews.add(this)
+        }
         fwdBtn.setOnClickListener { cur?.web?.let { if (it.canGoForward()) it.goForward() } }
-        val homeBtn = button("⌂", 24f)
+        val homeBtn = VecIcon(this, VecIcon.HOME, 26f).apply {
+            gravity = Gravity.CENTER
+            isClickable = true
+            tintViews.add(this)
+        }
         homeBtn.setOnClickListener { goHome() }
         tabBox = TextView(this)
         tabBox.gravity = Gravity.CENTER
@@ -417,7 +429,11 @@ class BrowserActivity : Activity() {
             tabBox,
             FrameLayout.LayoutParams(dp(26), dp(26), Gravity.CENTER)
         )
-        val dlIcon = button("⬇", 26f)
+        val dlIcon = VecIcon(this, VecIcon.DOWNLOAD, 26f).apply {
+            gravity = Gravity.CENTER
+            isClickable = true
+            tintViews.add(this)
+        }
         dlIcon.setOnClickListener { openApp(1) }
         dlBadge = TextView(this)
         dlBadge.textSize = 11f
@@ -445,7 +461,11 @@ class BrowserActivity : Activity() {
         bottom.addView(homeBtn, LinearLayout.LayoutParams(0, dp(48), 1f))
         bottom.addView(tabCell, LinearLayout.LayoutParams(0, dp(48), 1f))
         bottom.addView(closeBtn, LinearLayout.LayoutParams(0, dp(48), 1f))
-        val settingsBtn = button("⚙", 24f)
+        val settingsBtn = VecIcon(this, VecIcon.SETTINGS, 26f).apply {
+            gravity = Gravity.CENTER
+            isClickable = true
+            tintViews.add(this)
+        }
         settingsBtn.setOnClickListener { openApp(3) }
         bottom.addView(settingsBtn, LinearLayout.LayoutParams(0, dp(48), 1f))
         root.addView(
