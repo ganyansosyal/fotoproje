@@ -313,9 +313,9 @@ class DownloadsActivity : Activity() {
     private fun openFile(t: DownloadTask) {
         val p = t.path ?: return
         try {
-            val i = Intent(Intent.ACTION_VIEW)
-            i.setDataAndType(uriOf(p), if (p.endsWith(".m4a")) "audio/*" else "video/*")
-            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            val i = Intent(this, PlayerActivity::class.java)
+            i.putExtra("path", p)
+            i.putExtra("title", t.title)
             startActivity(i)
         } catch (_: Throwable) {
         }
