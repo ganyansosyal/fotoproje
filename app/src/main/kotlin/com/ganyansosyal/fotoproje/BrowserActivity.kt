@@ -807,6 +807,8 @@ class BrowserActivity : Activity() {
 
     private fun showTabs() {
         menuWin?.dismiss()
+        setBar(true) // adres çubuğu gizliyse geri getir
+        tabsPanel.setPadding(0, if (fullMode) 0 else barH, 0, 0) // çubuğun altından başla
         buildTabsList()
         tabsShown = true
         tabsLayer.animate().cancel()
