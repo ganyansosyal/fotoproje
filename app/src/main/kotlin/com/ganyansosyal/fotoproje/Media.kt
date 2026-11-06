@@ -122,7 +122,7 @@ object Media {
  function mkBtn(v){ var b=document.createElement('div');
   b.textContent='\u2193';
   b.style.cssText='position:fixed;z-index:2147483647;width:38px;height:38px;border-radius:19px;'+
-   'background:rgba(229,57,53,.92);color:#fff;font:bold 22px/38px sans-serif;text-align:center;'+
+   'background:rgba(229,57,53,.80);color:#fff;font:bold 22px/38px sans-serif;text-align:center;'+
    'box-shadow:0 2px 8px rgba(0,0,0,.45);touch-action:manipulation;user-select:none;-webkit-user-select:none';
   function eat(e){ e.stopPropagation(); }
   b.addEventListener('pointerdown',eat,true); b.addEventListener('touchstart',eat,true);
@@ -135,8 +135,9 @@ object Media {
    var r=v.getBoundingClientRect();
    if(r.bottom<56||r.top>vh-56||r.right<56||r.left>vw-8) continue;
    var b=btns.get(v); if(!b){ b=mkBtn(v); btns.set(v,b); }
-   var top=Math.max(r.top,0)+8; if(top>r.bottom-46) top=Math.max(r.bottom-46,0);
-   b.style.top=top+'px'; b.style.left=(Math.min(r.right,vw)-46)+'px'; seen.add(v); }
+   // Yatayda orta, dikeyde üst çeyrek: ortadaki oynat/duraklat alanını engellemez
+   var vt=Math.max(r.top,0), vb=Math.min(r.bottom,vh), vl=Math.max(r.left,0), vr=Math.min(r.right,vw);
+   b.style.top=Math.round(vt+(vb-vt)*0.22-19)+'px'; b.style.left=Math.round((vl+vr)/2-19)+'px'; seen.add(v); }
   btns.forEach(function(b,v){ if(!seen.has(v)){ try{b.remove();}catch(e){} btns.delete(v); } }); }
  function lay(){ if(!lp) lp=requestAnimationFrame(layout); }
  window.addEventListener('scroll',lay,true); window.addEventListener('resize',lay);
