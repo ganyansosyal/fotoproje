@@ -388,8 +388,8 @@ class BrowserActivity : Activity() {
             tabBox,
             FrameLayout.LayoutParams(dp(26), dp(26), Gravity.CENTER)
         )
-        val closeBtn = button("✕", 20f)
-        closeBtn.setOnClickListener { leave() }
+        val closeBtn = button("⬇", 20f)
+        closeBtn.setOnClickListener { openApp(1) }
         bottom.addView(backBtn, LinearLayout.LayoutParams(0, dp(48), 1f))
         bottom.addView(fwdBtn, LinearLayout.LayoutParams(0, dp(48), 1f))
         bottom.addView(homeBtn, LinearLayout.LayoutParams(0, dp(48), 1f))
@@ -1501,7 +1501,6 @@ class BrowserActivity : Activity() {
         item(t("downloads")) { openApp(1) }
         item(t("settings")) { openApp(3) }
         item(t("shareApp")) { shareText(t("shareAppText")) }
-        item(t("backToApp")) { leave() }
 
         col.measure(
             View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
