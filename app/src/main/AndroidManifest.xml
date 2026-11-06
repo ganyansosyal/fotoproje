@@ -10,7 +10,7 @@
 
     <application
         android:name=".App"
-        android:label="Tarayıcı"
+        android:label="Video İndir"
         android:icon="@drawable/ic_launcher"
         android:usesCleartextTraffic="true"
         android:hardwareAccelerated="true"
