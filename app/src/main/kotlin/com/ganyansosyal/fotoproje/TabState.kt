@@ -39,6 +39,7 @@ class Tab(val id: Int, var url: String) {
     var found: List<FoundItem> = emptyList()
     var probeGen = 0
     var bannerDone = false
+    var autoShow = false // Link ile indir'den açıldı: video bulununca seçenekleri kendiliğinden göster
     val netCands = ArrayList<NetCand>()
     var probeRun: Runnable? = null
 }

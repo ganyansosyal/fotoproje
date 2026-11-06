@@ -1343,7 +1343,7 @@ class BrowserActivity : Activity() {
             "perf" -> if (tb === cur) onPerf(arr.optInt(0), arr.optInt(1), arr.optInt(2))
             // Ana sayfa düğmeleri yalnızca ana sayfada geçerlidir
             "addFav" -> if (tb.isHome) showAddFav()
-            "linkDl" -> if (tb.isHome) LinkSheet.show(this, dark, { loadInCurrent(it) })
+            "linkDl" -> if (tb.isHome) LinkSheet.show(this, dark, { openForAutoDownload(it) })
             "favMenu" -> if (tb.isHome) confirmRemoveFav(arr.optString(0), arr.optString(1))
         }
     }
@@ -1473,6 +1473,24 @@ class BrowserActivity : Activity() {
         val tb = cur ?: return
         tb.homeGen++
         tb.web?.loadUrl(url)
+    }
+
+    /** Link ile indir: sayfayı aç, video bulunur bulunmaz indirme seçeneklerini kendiliğinden göster. */
+    private fun openForAutoDownload(url: String) {
+        loadInCurrent(url)
+        val tb = cur ?: return
+        tb.autoShow = true
+        ui.postDelayed({
+            if (tb.autoShow) {
+                tb.autoShow = false
+                if (tb === cur && tb.found.isEmpty()) {
+                    toast(
+                        if (L.code == "tr") "Video bulunamadı. Videoyu oynatmayı dene."
+                        else "No video found. Try playing the video."
+                    )
+                }
+            }
+        }, 25_000)
     }
 
     private fun updateStar() {
@@ -2041,6 +2059,10 @@ class BrowserActivity : Activity() {
                 if (list.isNotEmpty() && !tb.bannerDone) {
                     tb.bannerDone = true
                     if (tb === cur) toast(t("videoFound"))
+                }
+                if (list.isNotEmpty() && tb.autoShow && tb === cur) {
+                    tb.autoShow = false
+                    showFound()
                 }
                 onDone?.invoke(list)
             }

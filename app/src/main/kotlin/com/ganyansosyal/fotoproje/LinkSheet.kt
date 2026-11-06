@@ -208,8 +208,8 @@ object LinkSheet {
             box.addView(gap(12))
             val hint = label(
                 tr(
-                    "Link tarayıcıda açılır. Sayfada video bulunursa indirme düğmesi yanar.",
-                    "The link opens in the browser. The download button lights up when a video is found."
+                    "TikTok, Instagram, X ve diğer sitelerin linklerini yapıştır. Video bulununca seçenekler açılır.",
+                    "Paste links from TikTok, Instagram, X and other sites. Options open when a video is found."
                 ), 12f, sub
             )
             hint.gravity = Gravity.CENTER
@@ -246,7 +246,7 @@ object LinkSheet {
             openOther(url)
             Toast.makeText(
                 act,
-                tr("Sayfa açıldı. Video bulununca indirme düğmesi yanar.", "Page opened. The download button lights up when a video is found."),
+                tr("Sayfa açıldı, video aranıyor…", "Page opened, looking for the video…"),
                 Toast.LENGTH_LONG
             ).show()
         }
