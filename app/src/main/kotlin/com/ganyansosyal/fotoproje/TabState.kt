@@ -48,6 +48,8 @@ class Tab(val id: Int, var url: String) {
     val stale = HashMap<String, Long>()
     /** Sonraki probe oynatıcı süresine bakmadan tüm ağ adaylarını tarar (reklam oynarken yanlış eşleşmeyi önler). */
     var deepProbe = false
+    /** "URL ayrıştırılıyor" bekleme penceresi */
+    var parsing: android.app.Dialog? = null
     /** Sayfa taraması (PageScan) en son hangi adrese yapıldı */
     var scannedUrl = ""
     var probeRun: Runnable? = null

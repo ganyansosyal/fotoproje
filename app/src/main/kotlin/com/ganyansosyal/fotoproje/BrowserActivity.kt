@@ -1574,7 +1574,7 @@ class BrowserActivity : Activity() {
                 tb.netCands.filter { now - it.t < 120_000 }.forEach { urls.add(it.url); netHints[it.url] = it.kind }
             }
             val candidates = urls.distinct().take(100)
-            if (candidates.isEmpty() || !tb.autoShow || tb.found.isNotEmpty()) return@evaluateJavascript
+            if (candidates.isEmpty() || !tb.autoShow || tb.found.isNotEmpty()) { dismissParsing(tb); return@evaluateJavascript }
             val ref = tb.web?.url ?: tb.url
             Thread {
                 val list = try {
@@ -1585,6 +1585,7 @@ class BrowserActivity : Activity() {
                     emptyList()
                 }
                 ui.post {
+                    dismissParsing(tb)
                     if (list.isNotEmpty() && tb.autoShow && tb.found.isEmpty()) {
                         tb.found = list
                         tb.autoShow = false
@@ -2135,7 +2136,7 @@ class BrowserActivity : Activity() {
             }
         }
         // Kırmızı ↓ düğmesine basıldıysa: önce sayfayı (HTML/iframe/script) tara, sonra incele
-        if (showNow) deepScan(tb) { scheduleProbe(tb) } else scheduleProbe(tb)
+        if (showNow) { showParsing(tb); deepScan(tb) { scheduleProbe(tb) } } else scheduleProbe(tb)
     }
 
     private fun clearMedia(tb: Tab) {
@@ -2461,6 +2462,7 @@ class BrowserActivity : Activity() {
             }
             tb.autoShow = true
             toast(t("checking"))
+            showParsing(tb)
             deepScan(tb) { scanPage(tb) }
             return
         }
@@ -2470,11 +2472,49 @@ class BrowserActivity : Activity() {
         }
         toast(t("checking"))
         if (tb.pDur in 1.0..90.0) tb.deepProbe = true // kısa oynatma reklam olabilir: tüm adayları yeniden tara
+        showParsing(tb)
         deepScan(tb) {
             runProbe(tb) { list ->
+                dismissParsing(tb)
                 if (list.isEmpty()) toast(t("noVideo")) else showFound()
             }
         }
+    }
+
+    /** "URL ayrıştırılıyor…" bekleme penceresi: tarama/inceleme sürerken ne olduğunu gösterir. */
+    private fun showParsing(tb: Tab) {
+        dismissParsing(tb)
+        if (isFinishing) return
+        val p = pal
+        val d = Dialog(this)
+        d.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
+        col.gravity = Gravity.CENTER_HORIZONTAL
+        col.setPadding(dp(28), dp(24), dp(28), dp(24))
+        col.background = GradientDrawable().apply { setColor(p.bg); cornerRadius = dpf(20) }
+        val txt = TextView(this)
+        txt.text = if (L.code == "tr") "URL ayrıştırılıyor…" else "Parsing URL…"
+        txt.textSize = 16f
+        txt.setTextColor(p.fg)
+        txt.typeface = Typeface.DEFAULT_BOLD
+        col.addView(txt)
+        val pb = ProgressBar(this)
+        val lp = LinearLayout.LayoutParams(dp(40), dp(40))
+        lp.topMargin = dp(16)
+        col.addView(pb, lp)
+        d.setContentView(col)
+        d.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+        d.setCancelable(true)
+        d.setOnCancelListener { tb.autoShow = false }
+        try { d.show() } catch (_: Throwable) { return }
+        tb.parsing = d
+        ui.postDelayed({ if (tb.parsing === d) dismissParsing(tb) }, 20_000)
+    }
+
+    private fun dismissParsing(tb: Tab) {
+        try { tb.parsing?.dismiss() } catch (_: Throwable) {}
+        tb.parsing = null
     }
 
     /** Yeşil düğmeye uzun basınca: teşhis raporu (kopyala/paylaş). */
@@ -2553,6 +2593,7 @@ class BrowserActivity : Activity() {
 
     /** Bulunan videoları alttan açılan sayfada gösterir; en yüksek kalite hazır seçili gelir. */
     private fun showFoundSheet(tb: Tab, found: List<FoundItem>) {
+        dismissParsing(tb)
         val p = pal
         val tr = L.code == "tr"
         val acc = if (dark) 0xFF8AB4F8.toInt() else 0xFF1A73E8.toInt()
@@ -2647,12 +2688,12 @@ class BrowserActivity : Activity() {
         root.addView(head, hlp)
 
         // Kalite kutucukları (3'lü ızgara)
-        var sel = 0
+        val sel = java.util.TreeSet<Int>().apply { add(0) } // çoklu seçim: dokununca ekle/çıkar
         val chips = ArrayList<FrameLayout>()
         val ticks = ArrayList<TextView>()
         fun paint() {
             for (i in chips.indices) {
-                val on = i == sel
+                val on = i in sel
                 chips[i].background = if (on) rounded(chipBg, 14, acc, 2) else rounded(chipBg, 14, p.line, 2)
                 ticks[i].visibility = if (on) View.VISIBLE else View.GONE
             }
@@ -2701,6 +2742,12 @@ class BrowserActivity : Activity() {
             val s = tv(sz, 14f, p.sub)
             s.gravity = Gravity.CENTER
             inner.addView(s)
+            if (f.duration > 0) {
+                val adMark = if (f.duration < 90 && maxDur >= 180) (if (tr) " · reklam?" else " · ad?") else ""
+                val dtv = tv(Media.fmtDuration(f.duration) + adMark, 12f, p.sub)
+                dtv.gravity = Gravity.CENTER
+                inner.addView(dtv)
+            }
             chip.addView(inner, FrameLayout.LayoutParams(-1, -2))
             val tick = tv("✓", 13f, onAcc, true)
             tick.gravity = Gravity.CENTER
@@ -2710,7 +2757,7 @@ class BrowserActivity : Activity() {
             tp.rightMargin = -dp(2)
             chip.addView(tick, tp)
             chip.setOnClickListener {
-                sel = idx
+                if (idx in sel) { if (sel.size > 1) sel.remove(idx) } else sel.add(idx)
                 paint()
             }
             chips.add(chip)
@@ -2775,9 +2822,9 @@ class BrowserActivity : Activity() {
                 .show()
         }
         val dl = action("⤓", t("download"), acc) {
-            val f = items[sel]
+            val picked = sel.map { items[it] }
             dlg.dismiss()
-            startDownload(tb, f.url, f.kind, name)
+            picked.forEachIndexed { n, f -> startDownload(tb, f.url, f.kind, if (n == 0) name else "$name (${n + 1})") }
         }
         for (a in listOf(cl, rn, dl)) bar.addView(a, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         val bp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
