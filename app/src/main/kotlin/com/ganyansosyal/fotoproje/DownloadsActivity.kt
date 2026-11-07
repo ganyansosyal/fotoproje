@@ -65,6 +65,8 @@ class DownloadsActivity : Activity() {
             else android.R.style.Theme_DeviceDefault_Light_NoActionBar
         )
         super.onCreate(b)
+        window.statusBarColor = bg
+        window.navigationBarColor = bg
         showDone = intent.getBooleanExtra("done", false)
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL

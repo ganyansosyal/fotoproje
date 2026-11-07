@@ -40,6 +40,8 @@ class SettingsActivity : Activity() {
             else android.R.style.Theme_DeviceDefault_Light_NoActionBar
         )
         super.onCreate(b)
+        window.statusBarColor = bg
+        window.navigationBarColor = bg
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
         root.setBackgroundColor(bg)
@@ -131,6 +133,14 @@ class SettingsActivity : Activity() {
         r.addView(left, LinearLayout.LayoutParams(0, -2, 1f))
         val sw = Switch(this)
         sw.isChecked = value
+        // Açıkken mavi, kapalıyken sönük gri (cihazın kahverengi varsayılanı yerine)
+        val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
+        sw.thumbTintList = android.content.res.ColorStateList(
+            states, intArrayOf(accent, if (Store.dark) 0xFF80868B.toInt() else 0xFFBDC1C6.toInt())
+        )
+        sw.trackTintList = android.content.res.ColorStateList(
+            states, intArrayOf((accent and 0x00FFFFFF) or 0x66000000, line)
+        )
         sw.setOnCheckedChangeListener { _, v -> on(v) }
         r.addView(sw)
         r.setOnClickListener { sw.toggle() }

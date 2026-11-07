@@ -150,8 +150,8 @@ class BrowserActivity : Activity() {
         prefs = getSharedPreferences("fp_native", MODE_PRIVATE)
         loadCachedCfg()
         setTheme(
-            if (dark) R.style.AppTheme_Dark
-            else R.style.AppTheme_Light
+            if (dark) android.R.style.Theme_DeviceDefault_NoActionBar
+            else android.R.style.Theme_DeviceDefault_Light_NoActionBar
         )
         super.onCreate(savedInstanceState)
         current = this
@@ -1642,8 +1642,8 @@ class BrowserActivity : Activity() {
     //  Menü
     // =====================================================================
     private fun dlgTheme(): Int =
-        if (dark) R.style.AppDialog_Dark
-        else R.style.AppDialog_Light
+        if (dark) android.R.style.Theme_DeviceDefault_Dialog_Alert
+        else android.R.style.Theme_DeviceDefault_Light_Dialog_Alert
 
     private fun showMenu(anchor: View) {
         val tb = cur ?: return
