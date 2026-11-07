@@ -2458,7 +2458,7 @@ class BrowserActivity : Activity() {
             }
             tb.autoShow = true
             toast(t("checking"))
-            scanPage(tb)
+            deepScan(tb) { scanPage(tb) }
             return
         }
         if (tb.found.isNotEmpty() && !(tb.pDur in 1.0..90.0)) {
@@ -2467,9 +2467,37 @@ class BrowserActivity : Activity() {
         }
         toast(t("checking"))
         if (tb.pDur in 1.0..90.0) tb.deepProbe = true // kısa oynatma reklam olabilir: tüm adayları yeniden tara
-        runProbe(tb) { list ->
-            if (list.isEmpty()) toast(t("noVideo")) else showFound()
+        deepScan(tb) {
+            runProbe(tb) { list ->
+                if (list.isEmpty()) toast(t("noVideo")) else showFound()
+            }
         }
+    }
+
+    /** Sayfayı (HTML + iframe + script) kendimiz tarar; bulunan adresleri ağ adaylarına ekler, sonra [then] çalışır. */
+    private fun deepScan(tb: Tab, then: () -> Unit) {
+        val page = tb.web?.url ?: tb.url
+        if (!page.startsWith("http") || tb.scannedUrl == page) {
+            then()
+            return
+        }
+        try { tb.web?.settings?.userAgentString?.takeIf { it.isNotBlank() }?.let { Net.ua = it } } catch (_: Throwable) {}
+        Thread {
+            val hits = try { PageScan.scan(page) { isFinishing } } catch (_: Throwable) { emptyList() }
+            ui.post {
+                if (isFinishing) return@post
+                if (hits.isNotEmpty()) tb.scannedUrl = page // boş sonuç saklanmaz: sayfa tam yüklenince yeniden denenir
+                val now = System.currentTimeMillis()
+                synchronized(tb.netCands) {
+                    for (h in hits) {
+                        if (tb.netCands.any { it.url == h.url }) continue
+                        tb.netCands.add(NetCand(h.url, Media.kind(h.url) ?: "sniff", now))
+                    }
+                    while (tb.netCands.size > 120) tb.netCands.removeAt(0)
+                }
+                then()
+            }
+        }.start()
     }
 
     private fun showFound() {
