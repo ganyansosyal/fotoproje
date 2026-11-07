@@ -187,6 +187,16 @@ object Media {
   if(!best||!qual(best)) return false;
   try{ best.__ap=1; best.muted=true; }catch(e){}
   pick(best); return true; }
+ // Önizleme: oynayan videodan bir kare (JPEG, data adresi). Çapraz kaynak yüzünden olmazsa boş döner.
+ window.__fpSnap=function(){ try{
+  var v=act||showFor, vs=document.getElementsByTagName('video'), i;
+  if(!v||!v.videoWidth){ for(i=0;i<vs.length;i++){ if(vs[i].videoWidth&&alive(vs[i])){ v=vs[i]; break; } } }
+  if(!v||!v.videoWidth) return '';
+  var w=Math.min(360,v.videoWidth), h=Math.round(w*v.videoHeight/v.videoWidth);
+  var c=document.createElement('canvas'); c.width=w; c.height=h;
+  c.getContext('2d').drawImage(v,0,0,w,h);
+  return c.toDataURL('image/jpeg',0.75);
+ }catch(e){ return ''; } };
  window.__fpAutoAll=function(){ var ok=autoOne(), fr=document.getElementsByTagName('iframe'), i;
   for(i=0;i<fr.length;i++){ try{ fr[i].contentWindow.postMessage('__fpAuto','*'); }catch(e){} }
   return ok; };

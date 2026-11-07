@@ -2512,6 +2512,12 @@ class BrowserActivity : Activity() {
         head.gravity = Gravity.CENTER_VERTICAL
         val thumb = FrameLayout(this)
         thumb.background = rounded(thumbBg, 14)
+        thumb.clipToOutline = true
+        // Önizleme resmi: seçili videonun gerçek karesi (alınamazsa mavi kutu + ▶ kalır)
+        val thumbImg = android.widget.ImageView(this)
+        thumbImg.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+        thumbImg.visibility = View.GONE
+        thumb.addView(thumbImg, FrameLayout.LayoutParams(-1, -1))
         val clap = tv("▶", 34f, Color.WHITE, true)
         clap.gravity = Gravity.CENTER
         thumb.addView(clap, FrameLayout.LayoutParams(-1, -1))
@@ -2536,6 +2542,63 @@ class BrowserActivity : Activity() {
 
         // Kalite kutucukları (3'lü ızgara)
         var sel = 0
+        val thumbCache = HashMap<String, Bitmap>()
+        val thumbRef = tb.pRef ?: tb.web?.url ?: tb.url
+        fun showThumb(bm: Bitmap?) {
+            if (bm == null) return
+            thumbImg.setImageBitmap(bm)
+            thumbImg.visibility = View.VISIBLE
+            clap.visibility = View.GONE
+        }
+        // Seçili videonun karesini alır: önce dosyadan, olmazsa sayfada oynayan videodan
+        fun loadThumb(f: FoundItem) {
+            thumbCache[f.url]?.let { showThumb(it); return }
+            val key = f.url
+            Thread {
+                var bm: Bitmap? = null
+                if (f.kind != "blob" && f.kind != "mpd") {
+                    val r = android.media.MediaMetadataRetriever()
+                    try {
+                        val u = key.substringBefore("#")
+                        r.setDataSource(u, Net.headers(u, thumbRef))
+                        val d = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                        val src = r.getFrameAtTime(minOf(d * 100L, 2_000_000L), android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                        if (src != null) {
+                            val w = 360
+                            bm = if (src.width > w) Bitmap.createScaledBitmap(src, w, src.height * w / src.width, true) else src
+                        }
+                    } catch (_: Throwable) {
+                    } finally {
+                        try { r.release() } catch (_: Throwable) {}
+                    }
+                }
+                ui.post {
+                    if (!dlg.isShowing || items.getOrNull(sel)?.url != key) {
+                        bm?.let { thumbCache[key] = it }
+                        return@post
+                    }
+                    if (bm != null) {
+                        thumbCache[key] = bm!!
+                        showThumb(bm)
+                    } else {
+                        tb.web?.evaluateJavascript("window.__fpSnap&&window.__fpSnap()") { raw ->
+                            try {
+                                val str = org.json.JSONTokener(raw ?: "null").nextValue() as? String
+                                if (!str.isNullOrEmpty() && str.contains("base64,")) {
+                                    val bytes = android.util.Base64.decode(str.substringAfter("base64,"), android.util.Base64.DEFAULT)
+                                    val sn = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                                    if (sn != null && dlg.isShowing && items.getOrNull(sel)?.url == key) {
+                                        thumbCache[key] = sn
+                                        showThumb(sn)
+                                    }
+                                }
+                            } catch (_: Throwable) {
+                            }
+                        }
+                    }
+                }
+            }.start()
+        }
         val chips = ArrayList<FrameLayout>()
         val ticks = ArrayList<TextView>()
         fun paint() {
@@ -2600,6 +2663,7 @@ class BrowserActivity : Activity() {
             chip.setOnClickListener {
                 sel = idx
                 paint()
+                loadThumb(items[idx])
             }
             chips.add(chip)
             ticks.add(tick)
@@ -2679,6 +2743,7 @@ class BrowserActivity : Activity() {
             setGravity(Gravity.BOTTOM)
         }
         dlg.show()
+        loadThumb(items[sel])
     }
 
     // =====================================================================
