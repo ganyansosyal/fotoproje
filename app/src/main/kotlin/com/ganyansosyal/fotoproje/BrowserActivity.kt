@@ -2223,7 +2223,12 @@ class BrowserActivity : Activity() {
                 val width = resolution.groupValues[1].toIntOrNull() ?: continue
                 val height = resolution.groupValues[2].toIntOrNull() ?: continue
                 if (height <= 0 || width <= 0) continue
-                val bandwidth = bandwidthRegex.find(info)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+                // Ortalama bitrate varsa onu tercih et; yoksa BANDWIDTH kullan.
+                val averageBandwidth = Regex("AVERAGE-BANDWIDTH=(\\d+)", RegexOption.IGNORE_CASE)
+                    .find(info)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                val bandwidth = averageBandwidth
+                    ?: bandwidthRegex.find(info)?.groupValues?.getOrNull(1)?.toIntOrNull()
+                    ?: 0
 
                 // EXT-X-STREAM-INF sonrasındaki ilk boş olmayan, yorum olmayan satır URI'dir.
                 val variantPath = lines.drop(index + 1).firstOrNull {
@@ -2522,8 +2527,21 @@ class BrowserActivity : Activity() {
             val q = tv(label, 21f, p.fg, true)
             q.gravity = Gravity.CENTER
             inner.addView(q)
-            val sz = if (f.size > 0) Media.fmtBytes(f.size)
-                else if (f.kind == "m3u8" || f.kind == "mpd") (if (tr) "Yayın" else "Stream") else f.kind.uppercase()
+            // HLS dosyaları tek parça olmadığı için sunucu genellikle Content-Length vermez.
+            // Bitrate (bit/sn) × süre (sn) / 8 ile yaklaşık boyut hesaplanır.
+            val estimatedHlsBytes = if (
+                f.size <= 0L && f.kind.equals("m3u8", ignoreCase = true) &&
+                f.bw > 0 && f.duration > 0.0
+            ) {
+                (f.bw.toDouble() * f.duration / 8.0).toLong().coerceAtLeast(1L)
+            } else 0L
+            val sz = when {
+                f.size > 0L -> Media.fmtBytes(f.size)
+                estimatedHlsBytes > 0L -> "≈ ${Media.fmtBytes(estimatedHlsBytes)}"
+                f.kind.equals("m3u8", ignoreCase = true) || f.kind.equals("mpd", ignoreCase = true) ->
+                    if (tr) "Boyut bilinmiyor" else "Size unknown"
+                else -> f.kind.uppercase()
+            }
             val s = tv(sz, 14f, p.sub)
             s.gravity = Gravity.CENTER
             inner.addView(s)
