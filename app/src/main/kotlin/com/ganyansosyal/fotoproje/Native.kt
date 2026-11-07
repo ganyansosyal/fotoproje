@@ -13,7 +13,6 @@ import android.os.IBinder
 import android.webkit.CookieManager
 import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
-import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.RandomAccessFile
@@ -249,7 +248,7 @@ object Native {
 
     // ------------------------------------------------ 1) HLS / DASH parçaları
     fun segments(
-        urls: List<String>, init: String?, path: String, headerVariants: List<Map<String, String>>,
+        urls: List<String>, init: String?, path: String, headers: Map<String, String>,
         keys: List<String?>?, ivs: List<ByteArray?>?, seq: Long, conns: Int,
         cancel: CancelFlag, progress: (Long, Long) -> Unit
     ) {
@@ -272,27 +271,21 @@ object Native {
         }
 
         fun fetch(url: String): ByteArray {
-            var last: Throwable? = null
-            val variants = Net.variants(url, headerVariants.firstOrNull()?.get("Referer") ?: "")
-            for (headers in (variants + headerVariants).distinctBy { it.toSortedMap().toString() }) {
-                var k = 0
-                while (true) {
-                    try {
-                        return Http.bytes(url, headers, cancel)
-                    } catch (e: CanceledEx) {
-                        throw e
-                    } catch (e: Exception) {
-                        if (cancel.on) throw CanceledEx()
-                        last = e
-                        if (isThrottle(e) && lim.limit > 4) {
-                            lim.limit -= 2
-                            Thread.sleep(400)
-                        }
-                        if (k++ >= 2) break
+            var k = 0
+            while (true) {
+                try {
+                    return Http.bytes(url, headers, cancel)
+                } catch (e: CanceledEx) {
+                    throw e
+                } catch (e: Exception) {
+                    if (cancel.on) throw CanceledEx()
+                    if (isThrottle(e) && lim.limit > 4) {
+                        lim.limit -= 2
+                        Thread.sleep(400)
                     }
+                    if (k++ >= 3) throw e
                 }
             }
-            throw last ?: IOException("Video parçası indirilemedi")
         }
 
         fun keyOf(url: String): ByteArray =
@@ -365,26 +358,6 @@ object Native {
 
     // ------------------------------------------------ 3) normal dosya (Range ile paralel)
     fun direct(
-        url: String, path: String, headerVariants: List<Map<String, String>>, conns: Int, strict: Boolean,
-        cancel: CancelFlag, progress: (Long, Long) -> Unit
-    ) {
-        var last: Throwable? = null
-        val variants = headerVariants.distinctBy { it.toSortedMap().toString() }
-        for (headers in variants) {
-            if (cancel.on) throw CanceledEx()
-            try {
-                directOnce(url, path, headers, conns, strict, cancel, progress)
-                return
-            } catch (e: Throwable) {
-                if (e is CanceledEx || cancel.on) throw CanceledEx()
-                last = e
-                try { File(path).delete() } catch (_: Throwable) {}
-            }
-        }
-        throw last ?: IOException("İndirme başarısız: uygun bağlantı başlığı bulunamadı")
-    }
-
-    private fun directOnce(
         url: String, path: String, headers: Map<String, String>, conns: Int, strict: Boolean,
         cancel: CancelFlag, progress: (Long, Long) -> Unit
     ) {
@@ -482,13 +455,16 @@ object Native {
                             return
                         } catch (e: Exception) {
                             got.addAndGet(-part)
-                            if (isThrottle(e) && lim.limit > 2) {
-                                lim.limit -= 2
+                            if (isThrottle(e) && lim.limit > 1) {
+                                // Sunucu eşzamanlı bağlantıyı kısıyor: bağlantıyı yarıya indir,
+                                // deneme hakkını harcamadan yeniden dene (en az 1 bağlantıya kadar).
+                                lim.limit = maxOf(1, lim.limit / 2)
                                 if (id >= lim.limit) {
                                     retry.add(i)
                                     return
                                 }
-                                Thread.sleep(400)
+                                Thread.sleep(600)
+                                continue
                             }
                             if (k++ >= 3) {
                                 err.compareAndSet(null, e)

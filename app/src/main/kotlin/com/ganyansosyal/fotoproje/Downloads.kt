@@ -216,7 +216,7 @@ object Downloads {
                     err?.let { throw IOException(it) }
                 }
                 else -> Streams.direct(
-                    url, path, Net.variants(url, referer),
+                    url, path, Net.smartHeaders(url, referer, task.cancel),
                     task.cancel, report
                 )
             }
@@ -247,7 +247,21 @@ object Downloads {
         Native.fgStart(ctx)
         exec.execute {
             try {
-                body()
+                // İlk istekte geçici 403/429/503 gelirse birkaç kez otomatik yeniden dene
+                var attempt = 0
+                while (true) {
+                    try {
+                        body()
+                        break
+                    } catch (e: Throwable) {
+                        val canceled = e is CanceledEx || task.cancel.on
+                        if (canceled || e !is HttpErr || attempt >= 2) throw e
+                        attempt++
+                        task.label = "Yeniden deneniyor…"
+                        notifyUi(false)
+                        Thread.sleep(1500L * attempt)
+                    }
+                }
                 task.status = DlStatus.DONE
                 task.progress = 1.0
                 active.remove(task)
