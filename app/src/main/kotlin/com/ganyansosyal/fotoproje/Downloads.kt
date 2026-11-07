@@ -184,8 +184,39 @@ object Downloads {
         task: DownloadTask, blobReader: ((String, String, BlobRes) -> Unit)?
     ): () -> Unit {
         val referer = task.referer
-        return {
+        return body@{
             val kind = task.kind ?: "mp4"
+            // YouTube indirmesi desteklenmiyor (Google Play politikası)
+            if (Ytdlp.isYoutube(task.url, referer)) {
+                throw IOException(if (L.code == "tr") "YouTube videoları indirilemez." else "YouTube downloads are not supported.")
+            }
+            // Ana yol: yt-dlp + ffmpeg (ses/görüntü birleştirme, HLS/DASH, kodek uyumu)
+            if (kind != "blob") {
+                val social = Ytdlp.isSocial(task.url, referer)
+                val src = if (social && referer.startsWith("http")) referer.substringBefore("#")
+                          else task.url.substringBefore("#fpq=").substringBefore("#fpa=")
+                val useYt = social || kind == "m3u8" || kind == "mpd"
+                if (useYt && src.startsWith("http")) {
+                    try {
+                        task.label = if (L.code == "tr") "Hazırlanıyor…" else "Preparing…"
+                        notifyUi(true)
+                        val out = Ytdlp.download(ctx, task, src, referer) { p, l ->
+                            task.progress = p
+                            task.label = l
+                            notifyUi()
+                        }
+                        finish(task, out, null)
+                        return@body
+                    } catch (e: CanceledEx) {
+                        throw e
+                    } catch (e: Throwable) {
+                        if (task.cancel.on) throw CanceledEx()
+                        // Instagram/Facebook: eski yöntem sessiz video üretiyordu, net hata göster
+                        if (social) throw e
+                        task.note = e.message
+                    }
+                }
+            }
             // "#fpa=" ile gelen ayrı ses adresini ayır (adres tazelenirken kaybolmasın)
             if (kind != "blob" && task.url.contains("#fpa=")) {
                 task.audio = try {
