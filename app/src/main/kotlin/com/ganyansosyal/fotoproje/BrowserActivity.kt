@@ -356,6 +356,7 @@ class BrowserActivity : Activity() {
         fabText.text = t("getVideo")
         fab.contentDescription = t("getVideo")
         fab.setOnClickListener { onFabTap() }
+        fab.setOnLongClickListener { showDiag(); true }
         content.addView(
             fab,
             FrameLayout.LayoutParams(dp(84), dp(84)).apply {
@@ -2114,7 +2115,8 @@ class BrowserActivity : Activity() {
         if (id != tb.playerId || Math.abs(dur - tb.pDur) > 1) tb.bannerDone = false
         tb.playerId = id
         tb.pDur = dur
-        if (m.optBoolean("show", false)) tb.autoShow = true
+        val showNow = m.optBoolean("show", false)
+        if (showNow) tb.autoShow = true
         tb.pLive = m.optBoolean("live", false)
         tb.pH = m.optInt("h", 0)
         tb.pSrc = m.optString("src", "")
@@ -2132,7 +2134,8 @@ class BrowserActivity : Activity() {
                 tb.pHints[k] = h.optString(k)
             }
         }
-        scheduleProbe(tb)
+        // Kırmızı ↓ düğmesine basıldıysa: önce sayfayı (HTML/iframe/script) tara, sonra incele
+        if (showNow) deepScan(tb) { scheduleProbe(tb) } else scheduleProbe(tb)
     }
 
     private fun clearMedia(tb: Tab) {
@@ -2472,6 +2475,40 @@ class BrowserActivity : Activity() {
                 if (list.isEmpty()) toast(t("noVideo")) else showFound()
             }
         }
+    }
+
+    /** Yeşil düğmeye uzun basınca: teşhis raporu (kopyala/paylaş). */
+    private fun showDiag() {
+        val tb = cur ?: return
+        toast(if (L.code == "tr") "Rapor hazırlanıyor…" else "Building report…")
+        val page = tb.web?.url ?: tb.url
+        val ref = tb.pRef ?: page
+        val pdur = tb.pDur; val ph = tb.pH; val psrc = tb.pSrc
+        val purls = ArrayList(tb.pUrls)
+        val cands = synchronized(tb.netCands) { ArrayList(tb.netCands) }
+        try { tb.web?.settings?.userAgentString?.takeIf { it.isNotBlank() }?.let { Net.ua = it } } catch (_: Throwable) {}
+        Thread {
+            val extra = try { PageScan.scan(page) { isFinishing } } catch (_: Throwable) { emptyList() }
+            val now = System.currentTimeMillis()
+            for (h in extra) if (cands.none { it.url == h.url }) cands.add(NetCand(h.url, Media.kind(h.url) ?: "sniff", now))
+            val text = try { Diag.report(page, ref, pdur, ph, psrc, purls, cands) } catch (e: Throwable) { "Rapor hatası: " + e }
+            ui.post {
+                if (isFinishing) return@post
+                val tv = TextView(this)
+                tv.text = text
+                tv.textSize = 11f
+                tv.setTextIsSelectable(true)
+                tv.setPadding(32, 16, 32, 16)
+                val sv = android.widget.ScrollView(this)
+                sv.addView(tv)
+                AlertDialog.Builder(this, dlgTheme()).setTitle("Rapor").setView(sv)
+                    .setPositiveButton(if (L.code == "tr") "Paylaş" else "Share") { _, _ ->
+                        val i = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
+                        startActivity(Intent.createChooser(i, null))
+                    }
+                    .setNegativeButton(if (L.code == "tr") "Kapat" else "Close", null).show()
+            }
+        }.start()
     }
 
     /** Sayfayı (HTML + iframe + script) kendimiz tarar; bulunan adresleri ağ adaylarına ekler, sonra [then] çalışır. */
