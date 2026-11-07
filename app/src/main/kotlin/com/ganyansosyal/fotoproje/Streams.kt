@@ -11,6 +11,34 @@ typealias Report = (Double, String) -> Unit
 object Streams {
     private fun lines(body: String) = body.split('\n').map { it.trim() }
 
+    private fun fileOf(u: String): String = try {
+        java.net.URI(u.substringBefore("#")).path.orEmpty().substringAfterLast('/')
+    } catch (_: Throwable) {
+        ""
+    }
+
+    /**
+     * Süresi dolmuş (token/timestamp) bir adres için taze adres bulur; bulamazsa null.
+     * 1) Ucuz yol: WebView'in aynı host+yol için en son istediği adres (oynatıcı token'ı yenilemiştir).
+     * 2) [network] true ise: bulunduğu sayfa yeniden taranır ve aynı dosya adlı farklı adres aranır.
+     * Token üretimi sunucu/sayfa tarafındadır; bu fonksiyon yalnızca sayfanın kendi verdiği adresi kullanır.
+     * "#fpq=" kalite parçası korunur.
+     */
+    fun refresh(oldUrl: String, referer: String, cancel: CancelFlag, network: Boolean): String? {
+        val frag = oldUrl.substringAfter("#fpq=", "")
+        val base = oldUrl.substringBefore("#fpq=").substringBefore("#")
+        fun withFrag(u: String) = if (frag.isEmpty()) u else "$u#fpq=$frag"
+
+        Net.newestFor(base)?.takeIf { it != base }?.let { return withFrag(it) }
+        if (!network || referer.isBlank()) return null
+
+        val name = fileOf(base)
+        if (name.isEmpty()) return null
+        val hits = try { PageScan.scan(referer) { cancel.on } } catch (_: Throwable) { return null }
+        val fresh = hits.firstOrNull { it.url != base && fileOf(it.url) == name } ?: return null
+        return withFrag(fresh.url)
+    }
+
     private fun saveSegments(
         init: String?, urls: List<String>, path: String, report: Report, label: String,
         headers: Map<String, String>, cancel: CancelFlag, start: Double, span: Double,

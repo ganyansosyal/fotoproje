@@ -24,7 +24,7 @@ import java.util.concurrent.Executors
 
 enum class DlStatus { RUNNING, PAUSED, DONE, FAILED, CANCELED }
 
-class DownloadTask(val id: String, val url: String, val referer: String, var title: String) {
+class DownloadTask(val id: String, @Volatile var url: String, val referer: String, var title: String) {
     var createdAt = System.currentTimeMillis()
     @Volatile var status = DlStatus.RUNNING
     @Volatile var path: String? = null
@@ -181,10 +181,14 @@ object Downloads {
     private fun bodyFor(
         task: DownloadTask, blobReader: ((String, String, BlobRes) -> Unit)?
     ): () -> Unit {
-        val url = task.url
         val referer = task.referer
         val kind = task.kind ?: "mp4"
         return {
+            // Düğmeye basıldığı/Devam edildiği anda: WebView'in gördüğü daha taze adres varsa onu kullan
+            if (kind != "blob") {
+                Streams.refresh(task.url, referer, task.cancel, false)?.let { task.url = it }
+            }
+            val url = task.url
             val ts = task.createdAt
             val stream = kind == "m3u8" || kind == "mpd" || kind == "blob"
             val tmp = ctx.cacheDir
@@ -258,6 +262,16 @@ object Downloads {
                     } catch (e: Throwable) {
                         val canceled = e is CanceledEx || task.cancel.on
                         if (canceled || e !is HttpErr || attempt >= 2) throw e
+                        // Adres bayatlamış olabilir (401/403/410): sayfadan taze adres almayı dene
+                        if ((e.code == 401 || e.code == 403 || e.code == 410) && task.kind != "blob") {
+                            task.label = "Adres yenileniyor…"
+                            notifyUi(false)
+                            val fresh = Streams.refresh(task.url, task.referer, task.cancel, true)
+                            if (fresh != null && fresh != task.url) {
+                                task.url = fresh
+                                persist()
+                            }
+                        }
                         attempt++
                         task.label = "Yeniden deneniyor…"
                         notifyUi(false)

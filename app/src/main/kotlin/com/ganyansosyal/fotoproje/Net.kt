@@ -17,11 +17,17 @@ object Net {
     class TextGot(val headers: Map<String, String>, val body: String)
 
     private val hdrIdx = ConcurrentHashMap<String, Int>()
-    private val capturedHeaders = ConcurrentHashMap<String, Map<String, String>>()
+    // Ekleme sırasını koruyan, en eski kaydı atan sınırlı önbellek
+    private val capturedHeaders = object : LinkedHashMap<String, Map<String, String>>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Map<String, String>>?) =
+            size > 300
+    }
 
     /** WebView'in medya isteğinde kullandığı oturum/kimlik doğrulama başlıklarını sakla. */
     fun rememberRequestHeaders(url: String, source: Map<String, String>?) {
-        if (url.isBlank() || source.isNullOrEmpty()) return
+        if (url.isBlank()) return
+        noteMediaUrl(url)
+        if (source.isNullOrEmpty()) return
         val keep = linkedMapOf<String, String>()
         for ((rawName, rawValue) in source) {
             val name = rawName.trim()
@@ -40,12 +46,36 @@ object Net {
             }
         }
         if (keep.isNotEmpty()) {
-            capturedHeaders[url] = keep
-            if (capturedHeaders.size > 300) {
-                val first = capturedHeaders.keys.firstOrNull()
-                if (first != null) capturedHeaders.remove(first)
-            }
+            synchronized(capturedHeaders) { capturedHeaders[url] = keep }
         }
+    }
+
+    // ---- Taze adres takibi: WebView'in en son istediği .mp4/.m3u8 adresi (token yenilenmiş olabilir)
+    private val seenMedia = object : LinkedHashMap<String, String>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > 200
+    }
+
+    /** Host + yol (sorgu/fragment olmadan): token yalnızca sorguda değişen adresleri eşleştirir. */
+    private fun pathKey(u: String): String = try {
+        val p = URI(u.substringBefore("#"))
+        (p.host ?: "") + p.path.orEmpty()
+    } catch (_: Throwable) {
+        ""
+    }
+
+    private fun noteMediaUrl(u: String) {
+        if (!u.startsWith("http")) return
+        val key = pathKey(u)
+        val ext = key.substringAfterLast('.', "").lowercase()
+        if (key.isEmpty() || (ext != "mp4" && ext != "m3u8")) return
+        synchronized(seenMedia) { seenMedia[key] = u.substringBefore("#") }
+    }
+
+    /** Aynı host+yol için WebView'in gördüğü en yeni adres (yoksa null). */
+    fun newestFor(u: String): String? {
+        val key = pathKey(u)
+        if (key.isEmpty()) return null
+        return synchronized(seenMedia) { seenMedia[key] }
     }
 
     fun origin(u: String): String = try {
@@ -68,7 +98,8 @@ object Net {
             if (o.isNotEmpty()) h["Origin"] = o
         }
         // Önce WebView'in o medya URL'si için gerçekten gönderdiği başlıkları uygula.
-        capturedHeaders[url]?.forEach { (k, v) ->
+        val cap = synchronized(capturedHeaders) { capturedHeaders[url] }
+        cap?.forEach { (k, v) ->
             if (!k.equals("Cookie", true) && !k.equals("Range", true)) h[k] = v
         }
         try {
