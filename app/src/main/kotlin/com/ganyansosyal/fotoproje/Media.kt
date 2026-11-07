@@ -196,7 +196,9 @@ object Media {
   b.addEventListener('touchend',eat,true); b.addEventListener('mousedown',eat,true);
   b.addEventListener('click',function(e){ e.preventDefault(); e.stopPropagation(); pick(v); },true);
   document.documentElement.appendChild(b); return b; }
+ var SHOW_BTN=false; // true yapılırsa her videonun üstünde kırmızı indirme düğmesi çıkar
  function layout(){ lp=0;
+  if(!SHOW_BTN){ btns.forEach(function(b){ try{b.remove();}catch(e){} }); btns.clear(); return; }
   var vs=document.getElementsByTagName('video'), seen=new Set(), i, vh=window.innerHeight, vw=window.innerWidth;
   for(i=0;i<vs.length;i++){ var v=vs[i]; if(!qual(v)) continue;
    var r=v.getBoundingClientRect();
