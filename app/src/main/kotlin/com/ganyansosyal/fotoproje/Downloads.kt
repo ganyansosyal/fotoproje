@@ -234,9 +234,14 @@ object Downloads {
         blobReader: ((String, String, BlobRes) -> Unit)?
     ): String? {
         if (!wifiOk()) return L.t("wifiBlocked")
-        val kind = Media.kind(url) ?: hint ?: "mp4"
-        // Yalnızca gerçek video adresleri (.mp4 / .m3u8, yol üzerinden); blob: sayfadan okunur
-        if (kind != "blob" && pathExt(url) !in ALLOWED_EXT) return L.t("failed")
+        var kind = Media.kind(url) ?: hint ?: "mp4"
+        // Yalnızca gerçek video adresleri; blob: sayfadan okunur
+        if (kind != "blob" && pathExt(url) !in ALLOWED_EXT) {
+            // Uzantısız adres: Content-Type / ilk baytlarla gerçek türü bul (start() arka plan iş parçacığında çalışır)
+            val sk = try { Net.sniffKind(url, referer) } catch (_: Throwable) { null }
+            if (sk == null || sk !in ALLOWED_EXT) return L.t("failed")
+            kind = sk
+        }
         val name = pickName(title, url)
         val task = DownloadTask(System.nanoTime().toString(), url, referer, name)
         task.canPause = kind != "blob"

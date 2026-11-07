@@ -78,6 +78,71 @@ object Net {
         return synchronized(seenMedia) { seenMedia[key] }
     }
 
+    // ---- Protokol seviyesinde tür algılama (uzantı gerekmez, platformdan bağımsız)
+
+    /** Content-Type başlığından akış türü: m3u8 / mpd / mp4 / webm; tanınmazsa null. */
+    fun kindFromContentType(ct: String?): String? {
+        val t = ct?.substringBefore(';')?.trim()?.lowercase().orEmpty()
+        return when {
+            t.isEmpty() -> null
+            t == "video/mp2t" || t.contains("mpeg2") -> null // TS parçası: video değil, parça
+            t.contains("mpegurl") -> "m3u8"                    // application/vnd.apple.mpegurl, x-mpegurl
+            t.contains("dash+xml") -> "mpd"
+            t == "video/mp4" || t == "video/x-m4v" -> "mp4"
+            t == "video/webm" -> "webm"
+            else -> null // octet-stream, text/plain vb.: ilk baytlara bakılır
+        }
+    }
+
+    /** İlk baytlardaki imzadan tür (başlık yanıltıcı/genel olduğunda). */
+    private fun kindFromMagic(d: ByteArray, n: Int): String? {
+        if (n < 8) return null
+        val head = String(d, 0, minOf(n, 600), Charsets.ISO_8859_1)
+        if (head.trimStart().startsWith("#EXTM3U")) return "m3u8"
+        if (head.contains("<MPD")) return "mpd"
+        val box = String(d, 4, 4, Charsets.ISO_8859_1)
+        if (box == "ftyp" || box == "moov" || box == "mdat" || box == "free" || box == "wide") return "mp4"
+        if (d[0] == 0x1A.toByte() && d[1] == 0x45.toByte() && d[2] == 0xDF.toByte() && d[3] == 0xA3.toByte()) {
+            return "webm"
+        }
+        return null
+    }
+
+    /**
+     * Uzantısız bir adresin gerçek akış türünü bulur: önce yanıtın Content-Type'ına, belirsizse
+     * (octet-stream, text/plain...) ilk 1 KB'ın imzasına bakar. Ağ isteği yapar; ana iş parçacığında çağırma.
+     * Tanınmazsa ya da istek başarısızsa null.
+     */
+    fun sniffKind(url: String, referer: String, cancel: CancelFlag = CancelFlag()): String? {
+        val clean = url.substringBefore("#")
+        return try {
+            Http.get(clean, headers(clean, referer), "bytes=0-1023", cancel) { c ->
+                val ctype = c.contentType
+                val ct = ctype?.lowercase().orEmpty()
+                if (ct.contains("mp2t") || ct.contains("mpeg2")) {
+                    c.disconnect()
+                    null
+                } else {
+                    val fromType = kindFromContentType(ctype)
+                    val buf = ByteArray(1024)
+                    var n = 0
+                    c.inputStream.use { ins ->
+                        while (n < buf.size) {
+                            val r = ins.read(buf, n, buf.size - n)
+                            if (r < 0) break
+                            n += r
+                        }
+                    }
+                    fromType ?: kindFromMagic(buf, n)
+                }
+            }
+        } catch (e: CanceledEx) {
+            throw e
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
     fun origin(u: String): String = try {
         val p = URI(u)
         if (p.host == null || p.scheme?.startsWith("http") != true) ""
