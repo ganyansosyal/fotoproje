@@ -50,6 +50,18 @@ class MediaInfo(val url: String, var kind: String) {
 object Probe {
     private val pool = Executors.newCachedThreadPool()
 
+    /** Teşhis günlüğü: <uygulama dosyaları>/probe_log.txt (yalnızca host+yol yazılır, sorgu/token yazılmaz). */
+    private fun short(u: String): String =
+        u.substringBefore('?').substringBefore('#').let { if (it.length > 140) it.take(140) + "…" else it }
+
+    private fun dbg(lines: List<String>) {
+        try {
+            val dir = Store.app.getExternalFilesDir(null) ?: return
+            java.io.File(dir, "probe_log.txt").writeText(lines.joinToString("\n"))
+        } catch (_: Throwable) {
+        }
+    }
+
     /** Düz dosya (mp4/webm) için eşikler. MIN_FILE altı kesin çöp; kısa+küçük olanlar parça/önizlemedir. */
     private const val MIN_FILE = 1L * 1024 * 1024
     private const val MIN_FILE_SHORT = 4L * 1024 * 1024
@@ -335,6 +347,16 @@ object Probe {
             pool.submit(Callable { probeOne(u, hints[u] ?: "", referer, children) })
         }
         val list = futures.map { try { it.get() } catch (_: Throwable) { null } }.filterNotNull()
+        val log = ArrayList<String>()
+        log.add("referer=" + short(referer) + " expectDur=" + expectDur + " exactSrc=" + short(exactSrc))
+        log.add("aday=" + urls.distinct().take(40).size + " incelenen=" + list.size)
+        for (e in list) {
+            log.add(
+                "ADAY " + e.kind + " ipucu=" + (hints[e.url] ?: "-") + " kullanilabilir=" + e.usable +
+                    " boyut=" + e.size + " sure=" + e.duration + " yukseklik=" + e.height +
+                    " ses=" + e.audio + " " + short(e.url)
+            )
+        }
         // Oynayan videonun süresi biliniyorsa (kısa klipler dâhil) eşleşmeyenleri ele
         // Reklam oynarken oynayan videonun süresi kısadır (15-60 sn); gerçek video (uzun) adayı bu süreyle
         // elenmesin diye, uzun aday varken kısa süreli bir oynatmayı reklam sayıp katı eşleştirmeyi bırak.
@@ -424,6 +446,8 @@ object Probe {
                 }
             } else res.add(e)
         }
+        for (r in res) log.add("SONUC " + r.kind + " boyut=" + r.size + " sure=" + r.duration + " " + short(r.url))
+        dbg(log)
         return res
     }
 }
