@@ -1162,9 +1162,12 @@ class BrowserActivity : Activity() {
                 if (blockAds && !req.isForMainFrame && AdBlock.isAd(u, req.url.host)) {
                     return AdBlock.empty()
                 }
-                // Medya öğesi istekleri "Range" başlığı taşır: uzantısız adresler de aday olur
+                // Medya öğesinin ilk isteği "Range: bytes=0-" taşır; yalnızca bu uzantısız adresler aday olur
+                // (parça/segment istekleri kapalı aralık ya da farklı başlangıç kullanır, onlar aday olmaz)
                 val ranged = try {
-                    req.requestHeaders?.keys?.any { it.equals("Range", true) } == true
+                    req.requestHeaders?.entries?.any {
+                        it.key.equals("Range", true) && it.value.trim().equals("bytes=0-", true)
+                    } == true
                 } catch (_: Throwable) { false }
                 noteNet(tb, u, ranged, req.requestHeaders)
                 return null

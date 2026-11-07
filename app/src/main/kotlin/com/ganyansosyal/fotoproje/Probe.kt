@@ -75,6 +75,8 @@ object Probe {
                     buf.copyOf(n)
                 }
             }
+            // TS / MPEG parçaları video değil, yalnızca parçadır
+            if (ctype.contains("mp2t") || ctype.contains("mpeg2")) return null
             if (ctype.contains("mpegurl")) return "m3u8"
             if (ctype.contains("dash+xml")) return "mpd"
             if (d.size < 8) return null
@@ -86,7 +88,6 @@ object Probe {
             val box = String(d, 4, 4, Charsets.ISO_8859_1)
             if (box == "moov" || box == "mdat" || box == "free" || box == "wide") return "mp4"
             if (ctype.startsWith("video/webm")) return "webm"
-            if (ctype.startsWith("video/")) return "mp4"
             if (d[0] == 0x1A.toByte() && d[1] == 0x45.toByte() && d[2] == 0xDF.toByte() && d[3] == 0xA3.toByte()) return "webm"
         } catch (_: Throwable) {
         }
@@ -263,6 +264,8 @@ object Probe {
                 if (ct.startsWith("image/") || ct.startsWith("text/") || ct.contains("json")) info.usable = false
                 info.size = len
                 if (len in 1 until 150 * 1024) info.usable = false
+                // Ağdan uzantısız yakalanan adres: küçük dosya parçadır, gerçek video sayılmaz
+                if (hint == "sniff" && len < 8L * 1024 * 1024) info.usable = false
                 Unit
             }
             if (info.usable && kind != "blob") {
