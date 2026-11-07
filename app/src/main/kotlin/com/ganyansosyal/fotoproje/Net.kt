@@ -17,6 +17,36 @@ object Net {
     class TextGot(val headers: Map<String, String>, val body: String)
 
     private val hdrIdx = ConcurrentHashMap<String, Int>()
+    private val capturedHeaders = ConcurrentHashMap<String, Map<String, String>>()
+
+    /** WebView'in medya isteğinde kullandığı oturum/kimlik doğrulama başlıklarını sakla. */
+    fun rememberRequestHeaders(url: String, source: Map<String, String>?) {
+        if (url.isBlank() || source.isNullOrEmpty()) return
+        val keep = linkedMapOf<String, String>()
+        for ((rawName, rawValue) in source) {
+            val name = rawName.trim()
+            val value = rawValue.trim()
+            if (name.isEmpty() || value.isEmpty()) continue
+            val lower = name.lowercase()
+            if (lower in setOf(
+                "host", "connection", "content-length", "cookie", "range",
+                "accept-encoding", "proxy-authorization", "proxy-connection"
+            )) continue
+            if (lower == "authorization" || lower == "referer" || lower == "origin" ||
+                lower == "user-agent" || lower == "accept" || lower == "accept-language" ||
+                lower.startsWith("x-") || lower.startsWith("sec-fetch-") ||
+                lower.startsWith("x-csrf-")) {
+                keep[name] = value
+            }
+        }
+        if (keep.isNotEmpty()) {
+            capturedHeaders[url] = keep
+            if (capturedHeaders.size > 300) {
+                val first = capturedHeaders.keys.firstOrNull()
+                if (first != null) capturedHeaders.remove(first)
+            }
+        }
+    }
 
     fun origin(u: String): String = try {
         val p = URI(u)
@@ -36,6 +66,10 @@ object Net {
             h["Referer"] = referer
             val o = origin(referer)
             if (o.isNotEmpty()) h["Origin"] = o
+        }
+        // Önce WebView'in o medya URL'si için gerçekten gönderdiği başlıkları uygula.
+        capturedHeaders[url]?.forEach { (k, v) ->
+            if (!k.equals("Cookie", true) && !k.equals("Range", true)) h[k] = v
         }
         try {
             if (url.startsWith("http")) {

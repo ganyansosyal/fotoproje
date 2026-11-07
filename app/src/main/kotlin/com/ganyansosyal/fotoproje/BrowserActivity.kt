@@ -1166,7 +1166,7 @@ class BrowserActivity : Activity() {
                 val ranged = try {
                     req.requestHeaders?.keys?.any { it.equals("Range", true) } == true
                 } catch (_: Throwable) { false }
-                noteNet(tb, u, ranged)
+                noteNet(tb, u, ranged, req.requestHeaders)
                 return null
             }
 
@@ -2007,8 +2007,12 @@ class BrowserActivity : Activity() {
         RegexOption.IGNORE_CASE
     )
 
-    private fun noteNet(tb: Tab, u: String, ranged: Boolean = false) {
+    private fun noteNet(
+        tb: Tab, u: String, ranged: Boolean = false,
+        requestHeaders: Map<String, String>? = null
+    ) {
         if (u.length > 2500) return
+        Net.rememberRequestHeaders(u, requestHeaders)
         if (BAD_RE.containsMatchIn(u) || SEG_RE.containsMatchIn(u)) return
         val match = MEDIA_RE.find(u)
         val lower = u.lowercase()
