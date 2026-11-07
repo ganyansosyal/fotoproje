@@ -175,6 +175,13 @@ object Streams {
         val got = Net.fetchText(url, referer, cancel)
         val h = got.headers
         val mpd = parseXml(got.body)
+        // Widevine / PlayReady / CENC gibi DRM korumaları bu indirici tarafından çözülemez.
+        val nodes = mpd.getElementsByTagName("*")
+        for (i in 0 until nodes.length) {
+            if (nodes.item(i).nodeName.substringAfter(':') == "ContentProtection") {
+                throw IOException("Bu DASH yayını DRM korumalı. DRM korumalı yayınlar indirilemez.")
+            }
+        }
         val period = mpd.kid("Period") ?: throw IOException("Geçersiz DASH")
         val pdur = Media.isoSeconds(period.attr("duration"))
             ?: Media.isoSeconds(mpd.attr("mediaPresentationDuration")) ?: 0.0

@@ -154,6 +154,15 @@ object Probe {
             }
             if (kind == "mpd") {
                 val mpd = Streams.parseXml(text(url, referer))
+                // DRM ile şifrelenmiş DASH akışlarını indirilebilir medya gibi listeleme.
+                val allNodes = mpd.getElementsByTagName("*")
+                for (i in 0 until allNodes.length) {
+                    val node = allNodes.item(i)
+                    if (node.nodeName.substringAfter(':') == "ContentProtection") {
+                        info.usable = false
+                        return info
+                    }
+                }
                 val period = mpd.getElementsByTagName("Period").item(0) as? org.w3c.dom.Element
                 info.duration = Media.isoSeconds(mpd.getAttribute("mediaPresentationDuration").ifEmpty { null })
                     ?: Media.isoSeconds(period?.getAttribute("duration")?.ifEmpty { null }) ?: 0.0
@@ -191,7 +200,16 @@ object Probe {
         expectDur: Double = 0.0, exactSrc: String = "", height: Int = 0
     ): List<MediaInfo> {
         val children = HashSet<String>()
-        val futures = urls.take(14).map { u ->
+        // Sayfadaki reklam/analitik istekleri video bağlantılarının önüne geçebiliyor.
+        // Bilinen medya URL'lerini önce incele ve daha geniş bir aday kümesi kullan.
+        val candidates = urls.distinct().sortedBy { u ->
+            val hint = hints[u].orEmpty().lowercase()
+            val kind = Media.kind(u).orEmpty().lowercase()
+            if (kind in setOf("m3u8", "mpd", "mp4", "webm", "mov", "m4v", "mkv") ||
+                hint in setOf("m3u8", "mpd", "mp4", "webm", "mov", "m4v", "mkv")
+            ) 0 else 1
+        }.take(40)
+        val futures = candidates.map { u ->
             pool.submit(Callable { probeOne(u, hints[u] ?: "", referer, children) })
         }
         val list = futures.map { try { it.get() } catch (_: Throwable) { null } }.filterNotNull()
