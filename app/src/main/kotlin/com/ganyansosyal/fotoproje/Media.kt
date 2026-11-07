@@ -75,6 +75,22 @@ object Media {
  function sniff(t,u){ if(!t||!u) return; t=String(t).replace(/^\uFEFF/,'');
   if(/^\s*#EXTM3U/.test(t)) note(u,'m3u8'); else if(/<MPD[\s>]/.test(t)) note(u,'mpd'); }
  function head(buf){ try{ return String.fromCharCode.apply(null,new Uint8Array(buf,0,Math.min(512,buf.byteLength))); }catch(e){ return ''; } }
+ // Instagram/Facebook: sessiz akışta ses dosyası hiç istenmez; adresi sayfanın JSON verisinde (video_versions,
+ // video_dash_manifest) bulunur. Yanıtlardaki ve sayfa içindeki JSON taranır, tüm .mp4 / DASH BaseURL adresleri aday olur.
+ function igHost(){ try{ return /(^|\.)(instagram|facebook)\.com${'$'}/i.test(location.hostname); }catch(e){ return false; } }
+ function igWalk(o,d){ if(o==null||d>16) return;
+  if(typeof o==='string'){
+   if(o.length<20) return;
+   if(o.indexOf('<MPD')>-1){ var re=/<BaseURL[^>]*>([^<]+)<\/BaseURL>/g, m; while((m=re.exec(o))) note(m[1].replace(/&amp;/g,'&'),'mp4'); }
+   else if(/^https?:\/\/[^\s]+\.mp4(\?|${'$'})/i.test(o)) note(o,'mp4');
+   return; }
+  if(typeof o==='object'){ for(var k in o){ try{ igWalk(o[k],d+1); }catch(e){} } } }
+ function igScan(t){ try{ if(!t||t.length<200||t.length>4000000||t.indexOf('.mp4')<0) return;
+   var i=t.indexOf('{'), j=t.indexOf('['); if(i<0||(j>=0&&j<i)) i=j; if(i<0) return;
+   igWalk(JSON.parse(t.slice(i)),0); }catch(e){} }
+ function igPage(){ if(!igHost()) return; try{ var ss=document.querySelectorAll('script[type="application/json"]');
+   for(var i=0;i<ss.length;i++) igScan(ss[i].textContent); }catch(e){} }
+ if(igHost()){ window.addEventListener('load',function(){ setTimeout(igPage,800); setTimeout(igPage,3000); }); }
  var xo=XMLHttpRequest.prototype.open;
  XMLHttpRequest.prototype.open=function(m,u){ var x=this;
   try{ if(RE.test(String(u))) note(u);
@@ -82,6 +98,7 @@ object Media {
     var c=x.getResponseHeader('content-type')||'', ru=x.responseURL||u;
     var cl=parseInt(x.getResponseHeader('content-length')||'0',10)||0;
     ctype(c,ru,x.getResponseHeader('content-range'),x.getResponseHeader('content-length'));
+    if(igHost()&&/json|javascript|text/i.test(c)){ var rt0=x.responseType; if(rt0===''||rt0==='text') igScan(x.responseText); }
     if(!sniffOK(c)||cl>1500000) return;
     var rt=x.responseType;
     if(rt===''||rt==='text') sniff((x.responseText||'').slice(0,512),ru);
@@ -96,6 +113,7 @@ object Media {
    var c=r.headers.get('content-type')||'', ru=r.url||u;
    var cl=parseInt(r.headers.get('content-length')||'0',10)||0;
    ctype(c,ru,r.headers.get('content-range'),r.headers.get('content-length'));
+   if(igHost()&&/json|javascript|text/i.test(c)){ try{ r.clone().text().then(igScan).catch(function(){}); }catch(e){} }
    if(!sniffOK(c)||cl>1500000||!r.body) return;
    var rd=r.clone().body.getReader();
    rd.read().then(function(s){ try{rd.cancel();}catch(e){}
