@@ -53,7 +53,7 @@ class MediaInfo(val url: String, var kind: String) {
 }
 
 object Probe {
-    private val pool = Executors.newCachedThreadPool()
+    private val pool = Executors.newFixedThreadPool(6) // aynı anda en çok 6 istek
 
     /** Teşhis günlüğü: <uygulama dosyaları>/probe_log.txt (yalnızca host+yol yazılır, sorgu/token yazılmaz). */
     private fun short(u: String): String =
@@ -550,7 +550,7 @@ object Probe {
         expectDur: Double = 0.0, exactSrc: String = "", height: Int = 0
     ): List<MediaInfo> {
         val children = HashSet<String>()
-        val futures = urls.distinct().take(100).map { u ->
+        val futures = urls.distinct().take(30).map { u ->
             pool.submit(Callable { probeOne(u, hints[u] ?: "", referer, children) })
         }
         val list = futures.map { try { it.get() } catch (_: Throwable) { null } }.filterNotNull()

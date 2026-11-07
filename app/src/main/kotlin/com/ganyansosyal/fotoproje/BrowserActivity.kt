@@ -98,7 +98,7 @@ class BrowserActivity : Activity() {
                     val e = t.error ?: ""
                     if (e.startsWith("HTTP 403") || e.startsWith("HTTP 410") || e.startsWith("HTTP 401")) {
                         val c = cur
-                        if (c != null && (c.playerId != null || hasNet(c))) {
+                        if (c != null && c.playerId != null) {
                             val bare = t.url.substringBefore("#fpq=")
                             synchronized(c.netCands) { c.netCands.removeAll { it.url == bare } }
                             scheduleProbe(c)
@@ -207,7 +207,7 @@ class BrowserActivity : Activity() {
         val c = cur
         if (c != null && c.isHome && c.web != null && !c.loading) loadHome(c)
         // Arka plandayken süre/boyut alınamamış (bilinmiyor) yayınlar varsa geri dönünce yeniden incele
-        if (c != null && (c.playerId != null || hasNet(c)) && c.found.any {
+        if (c != null && c.playerId != null && c.found.any {
                 (it.kind == "m3u8" || it.kind == "mpd") && (it.duration <= 0.0 || (it.size <= 0L && it.bw <= 0))
             }) scheduleProbe(c)
     }
@@ -1164,10 +1164,7 @@ class BrowserActivity : Activity() {
                     updateNav()
                 }
                 scheduleSave()
-                // Sayfa açılır açılmaz sessizce tara: sayfa kaynağındaki videolar da hemen bulunsun
-                if (!tb.isHome && u != null && u.startsWith("http")) {
-                    ui.postDelayed({ if (tb.found.isEmpty() && tb.web === view) scanPage(tb, silent = true) }, 1200)
-                }
+                // Otomatik tarama kapalı: video yalnızca gerçekten oynarken ya da butona basılınca aranır
             }
 
             override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
@@ -2063,7 +2060,7 @@ class BrowserActivity : Activity() {
                 if (tb.netCands.size > 120) tb.netCands.removeAt(0)
             }
         }
-        if (isNew) ui.post { scheduleProbe(tb) }
+        if (isNew && tb.playerId != null) ui.post { scheduleProbe(tb) }
     }
 
     // ---- oynatıcı bildirimi (hookJs'ten)
@@ -2077,8 +2074,7 @@ class BrowserActivity : Activity() {
         if (m.optBoolean("stop", false)) {
             if (id != tb.playerId) return
             tb.pAd = false
-            clearMedia(tb, keepNet = hasNet(tb))
-            if (hasNet(tb)) scheduleProbe(tb)
+            clearMedia(tb)
             return
         }
         val dur = m.optDouble("d", 0.0)
@@ -2132,11 +2128,7 @@ class BrowserActivity : Activity() {
     private fun scheduleProbe(tb: Tab) {
         val r = tb.probeRun ?: Runnable { runProbe(tb, null) }.also { tb.probeRun = it }
         ui.removeCallbacks(r)
-        if (tb.playerId == null && !hasNet(tb)) {
-            tb.found = emptyList()
-            if (tb === cur) updateFab()
-            return
-        }
+        if (tb.playerId == null) return
         // Video açılır açılmaz bulunsun: oynatıcı beklenmez, ağdan gelen adaylar hemen incelenir
         ui.postDelayed(r, if (tb.playerId == null) 400 else 600)
     }
@@ -2161,14 +2153,14 @@ class BrowserActivity : Activity() {
     }
 
     private fun runProbe(tb: Tab, onDone: ((List<FoundItem>) -> Unit)?) {
-        if (tb.playerId == null && !hasNet(tb)) {
+        if (tb.playerId == null) {
             onDone?.invoke(emptyList())
             return
         }
 
         val gen = ++tb.probeGen
         dart("probe", probeArgs(tb), { r ->
-            if (gen != tb.probeGen || (tb.playerId == null && !hasNet(tb))) {
+            if (gen != tb.probeGen || tb.playerId == null) {
                 onDone?.invoke(tb.found)
                 return@dart
             }
@@ -2206,7 +2198,7 @@ class BrowserActivity : Activity() {
                 // Reklam oynarken bulunan akışlar reklamdır: liste boş kalır, reklam bitince yeniden incelenir
                 val result = if (tb.pAd) emptyList() else expanded.distinctBy { it.url }
                 runOnUiThread {
-                    if (isFinishing || gen != tb.probeGen || (tb.playerId == null && !hasNet(tb))) {
+                    if (isFinishing || gen != tb.probeGen || tb.playerId == null) {
                         onDone?.invoke(tb.found)
                         return@runOnUiThread
                     }
