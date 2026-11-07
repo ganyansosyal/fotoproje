@@ -555,6 +555,7 @@ class BrowserActivity : Activity() {
         val p = pal
         window.statusBarColor = p.bg
         window.navigationBarColor = p.bg
+        window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(p.bg))
         if (customView == null && !fullMode) window.decorView.systemUiVisibility = sysFlags()
         root.setBackgroundColor(p.bg)
         content.setBackgroundColor(p.bg)
@@ -2222,6 +2223,9 @@ class BrowserActivity : Activity() {
             if (sp.contains("fab2X") || sp.contains("fab2Y")) {
                 fab.translationX = clampTx(sp.getFloat("fab2X", 0f))
                 fab.translationY = clampTy(sp.getFloat("fab2Y", 0f))
+            } else {
+                // Ortadan biraz aşağıda başla
+                fab.translationY = clampTy(content.height * 0.10f)
             }
         }
     }

@@ -67,6 +67,7 @@ class DownloadsActivity : Activity() {
         super.onCreate(b)
         window.statusBarColor = bg
         window.navigationBarColor = bg
+        window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(bg))
         showDone = intent.getBooleanExtra("done", false)
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL

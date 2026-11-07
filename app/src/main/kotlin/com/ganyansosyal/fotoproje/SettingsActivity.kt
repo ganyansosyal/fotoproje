@@ -42,6 +42,7 @@ class SettingsActivity : Activity() {
         super.onCreate(b)
         window.statusBarColor = bg
         window.navigationBarColor = bg
+        window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(bg))
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
         root.setBackgroundColor(bg)
