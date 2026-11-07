@@ -1531,11 +1531,16 @@ class BrowserActivity : Activity() {
                 }
             } catch (_: Throwable) {
             }
-            if (urls.isEmpty() || !tb.autoShow || tb.found.isNotEmpty()) return@evaluateJavascript
+            synchronized(tb.netCands) {
+                val now = System.currentTimeMillis()
+                tb.netCands.filter { now - it.t < 120_000 }.forEach { urls.add(it.url) }
+            }
+            val candidates = urls.distinct().take(100)
+            if (candidates.isEmpty() || !tb.autoShow || tb.found.isNotEmpty()) return@evaluateJavascript
             val ref = tb.web?.url ?: tb.url
             Thread {
                 val list = try {
-                    Probe.probeAll(urls, emptyMap(), ref).map {
+                    Probe.probeAll(candidates, emptyMap(), ref).map {
                         FoundItem(it.url, it.kind, it.title, it.subtitle, it.height, it.duration, it.size, it.bw)
                     }
                 } catch (_: Throwable) {
@@ -1994,8 +1999,21 @@ class BrowserActivity : Activity() {
     // ---- ağ seviyesinde aday adresler
     private fun noteNet(tb: Tab, u: String) {
         if (u.length > 2500) return
-        val k = MEDIA_RE.find(u) ?: return
         if (BAD_RE.containsMatchIn(u) || SEG_RE.containsMatchIn(u)) return
+        val match = MEDIA_RE.find(u)
+        val lower = u.lowercase()
+        // Uzantısı olmayan CDN adresleri: URL'nin bilinen medya parametrelerinden aday çıkar.
+        val inferred = when {
+            lower.contains("mime_type=video_mp4") -> "mp4"
+            lower.contains("mime_type=video_webm") -> "webm"
+            lower.contains(".m3u8") || lower.contains("format=hls") -> "m3u8"
+            lower.contains(".mpd") || lower.contains("format=dash") -> "mpd"
+            lower.contains("videoplayback") || lower.contains("/video/") || lower.contains("/videos/") -> "mp4"
+            else -> ""
+        }
+        val kind = match?.groupValues?.get(1)?.ifEmpty { match.groupValues.getOrElse(2) { "" } }?.lowercase()
+            ?.ifEmpty { inferred } ?: inferred
+        if (kind.isEmpty()) return
         val now = System.currentTimeMillis()
         var isNew = true
         synchronized(tb.netCands) {
@@ -2007,8 +2025,8 @@ class BrowserActivity : Activity() {
                 }
             }
             if (isNew) {
-                tb.netCands.add(NetCand(u, k.groupValues[1].ifEmpty { k.groupValues[2] }.lowercase(), now))
-                if (tb.netCands.size > 40) tb.netCands.removeAt(0)
+                tb.netCands.add(NetCand(u, kind, now))
+                if (tb.netCands.size > 120) tb.netCands.removeAt(0)
             }
         }
         if (isNew) ui.post { if (tb.playerId != null) scheduleProbe(tb) }
@@ -2368,7 +2386,14 @@ class BrowserActivity : Activity() {
             return
         }
         if (tb.playerId == null) {
-            toast(t("noVideo"))
+            // Oynatıcı DOM'da görünmese bile sayfa kaynaklarını ve ağ isteklerini tara.
+            if (tb.found.isNotEmpty()) {
+                showFound()
+                return
+            }
+            tb.autoShow = true
+            toast(t("checking"))
+            scanPage(tb)
             return
         }
         if (tb.found.isNotEmpty()) {
@@ -2784,7 +2809,7 @@ class BrowserActivity : Activity() {
         private const val PERF_STOP = "window.__pg=(window.__pg||0)+1;"
 
         private val MEDIA_RE = Regex(
-            "\\.(m3u8|mpd|mp4|webm|m4v|mov|mkv|flv)(?:\$|[?#/])|[?&]mime_type=video_(mp4|webm)", RegexOption.IGNORE_CASE
+            "\\.(m3u8|mpd|mp4|webm|m4v|mov|mkv|flv|3gp|ogv|avi|wmv)(?:\$|[?#/])|[?&]mime_type=video_(mp4|webm)", RegexOption.IGNORE_CASE
         )
         private val EXT_RE = Regex("\\.(mp4|webm|mov|m4v|mkv|flv|3gp|ogv|avi|wmv)\$")
         private val BAD_RE = Regex(

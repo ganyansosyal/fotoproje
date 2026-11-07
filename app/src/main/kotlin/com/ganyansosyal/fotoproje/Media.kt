@@ -7,18 +7,40 @@ object Media {
     /** Sayfanın kendisinde (kaynak, meta, video öğeleri) video adresi arar; TikTok/Instagram/X için yedek yol. */
     val SCAN_JS = """
 (function(){
- var h=document.documentElement.outerHTML, out=[], seen={}, m, i, j;
- function fix(u){ return u.replace(/\\u002F/gi,'/').replace(/\\u0026/gi,'&').replace(/\\\//g,'/').replace(/&amp;/g,'&'); }
- function add(u){ u=fix(String(u)); if(!/^https?:\/\//i.test(u)||seen[u]||u.length>2500) return; seen[u]=1; out.push(u); }
- var re=/https?:(?:\\u002F|\\\/|\/){2}(?:[^"'\s<>\\]|\\u002F|\\u0026|\\\/)+/gi;
- while((m=re.exec(h))&&out.length<80){ var f=fix(m[0]);
-  if(/\.(mp4|m3u8|mpd|webm)\b|mime_type=video_|\/video\/tos\/|video\.twimg\.com/i.test(f)) add(m[0]); }
- var mv=document.querySelectorAll('meta[property="og:video"],meta[property="og:video:url"],meta[property="og:video:secure_url"],meta[name="twitter:player:stream"]');
- for(i=0;i<mv.length;i++){ var c=mv[i].getAttribute('content'); if(c) add(c); }
- var vs=document.getElementsByTagName('video');
- for(i=0;i<vs.length;i++){ if(vs[i].currentSrc) add(vs[i].currentSrc); if(vs[i].src) add(vs[i].src);
-  var ss=vs[i].getElementsByTagName('source'); for(j=0;j<ss.length;j++) if(ss[j].src) add(ss[j].src); }
- return JSON.stringify(out.slice(0,20));
+ var out=[], seen=Object.create(null), h='';
+ function fix(u){ return String(u||'').replace(/\\u002F/gi,'/').replace(/\\u0026/gi,'&').replace(/\\\//g,'/').replace(/&amp;/g,'&'); }
+ function add(u){
+  u=fix(u); if(!/^https?:\/\//i.test(u)||seen[u]||u.length>2500) return;
+  if(/(doubleclick|googlesyndication|googleadservices|imasdk|adservice|analytics|tracking|beacon|thumbnail|storyboard|sprite)/i.test(u)) return;
+  if(/\.(m4s|ts|m4v|mp4|m3u8|mpd|webm|mov|mkv|flv)(?:[?#]|$)/i.test(u)||
+     /[?&](?:mime_type=video_|format=(?:mp4|hls|dash)|type=(?:video|mp4)|response-content-type=video)/i.test(u)||
+     /\/(?:video|videos|videoplayback|manifest|master\.m3u8|playlist\.m3u8)(?:[/?]|$)/i.test(u)){
+    seen[u]=1; out.push(u);
+  }
+ }
+ // DOM kaynakları ve meta etiketleri
+ try { var vs=document.querySelectorAll('video,source'); for(var i=0;i<vs.length;i++){add(vs[i].currentSrc);add(vs[i].src);add(vs[i].getAttribute('src'));} }catch(e){}
+ try { var ms=document.querySelectorAll('meta[property^="og:video"],meta[name="twitter:player:stream"]');
+  for(var i=0;i<ms.length;i++) add(ms[i].content); }catch(e){}
+ // Sayfa HTML'inde gömülü JSON / player config adresleri
+ try { h=document.documentElement?document.documentElement.outerHTML:'';
+  h=h.replace(/\\u002F/gi,'/').replace(/\\\//g,'/');
+  var re=/https?:\/\/[^"'\s<>\\]+/gi, m, n=0;
+  while((m=re.exec(h))&&n++<500&&out.length<100) add(m[0]);
+ }catch(e){}
+ // WebView performans kaydı, DOM'da görünmeyen ama istenmiş medya kaynakları
+ try { var es=performance.getEntriesByType('resource');
+  for(var i=Math.max(0,es.length-500);i<es.length&&out.length<100;i++) add(es[i].name);
+ }catch(e){}
+ // Erişilebilen iframe'ler; cross-origin çerçevelere tarayıcı güvenliği gereği girilmez
+ try { var fr=document.querySelectorAll('iframe'); for(var i=0;i<fr.length;i++){
+  try { var d=fr[i].contentDocument; if(!d) continue;
+   var vs2=d.querySelectorAll('video,source'); for(var j=0;j<vs2.length;j++){add(vs2[j].currentSrc);add(vs2[j].src);add(vs2[j].getAttribute('src'));}
+   var es2=fr[i].contentWindow.performance.getEntriesByType('resource');
+   for(var j=Math.max(0,es2.length-200);j<es2.length&&out.length<100;j++) add(es2[j].name);
+  }catch(e){}
+ }}catch(e){}
+ return JSON.stringify(out.slice(0,100));
 })()
 """
 
