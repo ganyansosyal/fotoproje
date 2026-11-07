@@ -46,7 +46,7 @@ val searchEngines = linkedMapOf(
     "Yandex" to "https://yandex.com.tr/search/?text="
 )
 
-const val APP_VERSION = "3.0.0"
+const val APP_VERSION = "1.0.0"
 
 /** Tüm kalıcı ayarlar, geçmiş, yer imleri ve favoriler (eski Dart `AppSettings`). */
 object Store {
