@@ -186,34 +186,75 @@ object Downloads {
         val referer = task.referer
         return body@{
             val kind = task.kind ?: "mp4"
-            // YouTube indirmesi desteklenmiyor (Google Play politikası)
-            if (Ytdlp.isYoutube(task.url, referer)) {
-                throw IOException(if (L.code == "tr") "YouTube videoları indirilemez." else "YouTube downloads are not supported.")
-            }
             // Ana yol: yt-dlp + ffmpeg (ses/görüntü birleştirme, HLS/DASH, kodek uyumu)
-            if (kind != "blob") {
-                val social = Ytdlp.isSocial(task.url, referer)
-                val src = if (social && referer.startsWith("http")) referer.substringBefore("#")
-                          else task.url.substringBefore("#fpq=").substringBefore("#fpa=")
-                val useYt = social || kind == "m3u8" || kind == "mpd"
-                if (useYt && src.startsWith("http")) {
+            val yt = Ytdlp.isYoutube(task.url, referer)
+            val social = Ytdlp.isSocial(task.url, referer)
+            // blob: (MSE) videolar adresten indirilemez; Instagram/Facebook/YouTube'da sayfa adresi kullanılır
+            if (kind != "blob" || yt || social) {
+                val post = if (social) Ytdlp.postUrl(referer, task.page) else null
+                val ytPage = if (yt) Ytdlp.youtubePage(referer, task.page) else null
+                if ((social && post == null) || (yt && ytPage == null)) {
+                    throw IOException(
+                        if (L.code == "tr") "Video sayfası adresi bulunamadı. Videoyu kendi sayfasında açıp yeniden indir."
+                        else "Video page link not found. Open the video on its own page and try again."
+                    )
+                }
+                val src = ytPage ?: post ?: task.url.substringBefore("#fpq=").substringBefore("#fpa=")
+                var ytNote: String? = null
+                // YouTube: önce NewPipeExtractor (kendi JavaScript motoru var), olmazsa yt-dlp
+                if (ytPage != null) {
                     try {
-                        task.label = if (L.code == "tr") "Hazırlanıyor…" else "Preparing…"
+                        task.label = if (L.code == "tr") "YouTube çözülüyor…" else "Resolving YouTube…"
                         notifyUi(true)
-                        val out = Ytdlp.download(ctx, task, src, referer) { p, l ->
+                        val pk = NewPipeYt.pick(ytPage)
+                        val tmpDir = ctx.cacheDir
+                        val vp = File(tmpDir, "video_${task.createdAt}.mp4").path
+                        val ap = File(tmpDir, "ses_${task.createdAt}.m4a").path
+                        Streams.direct(pk.videoUrl, vp, NewPipeYt.headers, task.cancel, { p, l ->
                             task.progress = p
                             task.label = l
                             notifyUi()
+                        })
+                        if (pk.audioUrl != null) {
+                            task.label = if (L.code == "tr") "Ses indiriliyor…" else "Downloading audio…"
+                            notifyUi(true)
+                            Streams.direct(pk.audioUrl, ap, NewPipeYt.headers, task.cancel, { _, _ -> })
+                            task.note = "NewPipe · " + pk.desc
+                            finish(task, vp, ap)
+                        } else {
+                            task.note = "NewPipe · " + pk.desc
+                            finish(task, vp, null)
                         }
-                        finish(task, out, null)
                         return@body
                     } catch (e: CanceledEx) {
                         throw e
                     } catch (e: Throwable) {
                         if (task.cancel.on) throw CanceledEx()
-                        // Instagram/Facebook: eski yöntem sessiz video üretiyordu, net hata göster
-                        if (social) throw e
-                        task.note = e.message
+                        ytNote = (e.message ?: e.javaClass.simpleName).take(120)
+                    }
+                }
+                if (src.startsWith("http")) {
+                    try {
+                        task.label = if (L.code == "tr") "Hazırlanıyor…" else "Preparing…"
+                        notifyUi(true)
+                        val r = Ytdlp.download(ctx, task, src, referer) { p, l ->
+                            task.progress = p
+                            task.label = l
+                            notifyUi()
+                        }
+                        task.note = r.info
+                        finish(task, r.path, null)
+                        return@body
+                    } catch (e: CanceledEx) {
+                        throw e
+                    } catch (e: Throwable) {
+                        if (task.cancel.on) throw CanceledEx()
+                        // Instagram/Facebook/YouTube: eski yöntem sessiz/bozuk video üretiyordu, net hata göster
+                        if (social || yt || kind == "blob") {
+                            if (ytNote != null) throw IOException("NewPipe: " + ytNote + " | " + (e.message ?: "?"))
+                            throw e
+                        }
+                        task.note = "yt-dlp olmadı (" + (e.message ?: "?").take(80) + "), eski yöntem"
                     }
                 }
             }

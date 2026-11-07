@@ -23,6 +23,6 @@ class App : Application() {
         FavIcons.load()
         FavIcons.ensure(HomeHtml.hosts())
         // yt-dlp / ffmpeg'i arka planda hazırla (ilk açılışta birkaç sn sürer)
-        Thread { Ytdlp.ensure(this) }.start()
+        Thread { Ytdlp.ensure(this); Ytdlp.updateIfDue(this) }.start()
     }
 }

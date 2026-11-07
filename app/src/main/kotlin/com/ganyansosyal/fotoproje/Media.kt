@@ -131,6 +131,17 @@ object Media {
  function stop(){ if(!act) return; act=null; last=''; if(wd){clearInterval(wd);wd=0;} send({stop:true}); }
  function sched(ms){ if(ft) return; ft=setTimeout(report,ms||500); }
  function poke(){ if(act) sched(700); }
+ // Instagram/Facebook akışında sayfa adresi gönderi adresi değildir: videonun kendi gönderi bağlantısını bul
+ function permalink(v){ try{
+  if(!igHost()) return location.href;
+  var RX=/\/(reels?|p|tv)\/[A-Za-z0-9_-]+/;
+  if(RX.test(location.pathname)) return location.href;
+  var n=v, i, a, h;
+  for(i=0;n&&i<14;i++,n=n.parentElement){
+   a=n.querySelector&&n.querySelector('a[href*="/reel/"],a[href*="/reels/"],a[href*="/p/"],a[href*="/tv/"]');
+   if(a){ h=a.getAttribute('href')||''; if(RX.test(h)) return new URL(h,location.href).href; }
+  }
+ }catch(e){} return location.href; }
  function report(){ ft=0; var v=act; if(!v) return;
   if(!alive(v)){ stop(); return; }
   var d=v.duration; if(isNaN(d)){ sched(600); return; }
@@ -150,7 +161,7 @@ object Media {
    if(!urls.length&&/^blob:/i.test(src)) urls=[src];
   }
   var o={d:live?0:Math.round(d*10)/10, live:live, w:v.videoWidth||0, h:v.videoHeight||0,
-   src:direct?src:'', ref:location.href, urls:urls, hints:hints, show:showFor===v};
+   src:direct?src:'', ref:permalink(v), urls:urls, hints:hints, show:showFor===v};
   var s=JSON.stringify(o); if(s===last) return; last=s; send(o); if(showFor===v) showFor=null; }
  function onEv(e){ var v=e.target; if(!v||v.tagName!=='VIDEO') return; var t=e.type;
   if(t==='loadstart'){ t0.set(v,Date.now()); if(v===act) last=''; return; }
