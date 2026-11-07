@@ -135,11 +135,12 @@ object Media {
  function permalink(v){ try{
   if(!igHost()) return location.href;
   var RX=/\/(reels?|p|tv)\/[A-Za-z0-9_-]+/;
-  if(RX.test(location.pathname)) return location.href;
-  var n=v, i, a, h;
+  if(RX.test(location.pathname)&&location.pathname.indexOf('/audio')<0) return location.href;
+  var n=v, i, a, h, k;
   for(i=0;n&&i<30;i++,n=n.parentElement){
-   a=n.querySelector&&n.querySelector('a[href*="/reel/"],a[href*="/reels/"],a[href*="/p/"],a[href*="/tv/"]');
-   if(a){ h=a.getAttribute('href')||''; if(RX.test(h)) return new URL(h,location.href).href; }
+   a=n.querySelectorAll&&n.querySelectorAll('a[href*="/reel/"],a[href*="/reels/"],a[href*="/p/"],a[href*="/tv/"]');
+   // "Orijinal ses" bağlantısı (/reels/audio/...) gönderi adresi değildir, atlanır
+   if(a){ for(k=0;k<a.length;k++){ h=a[k].getAttribute('href')||''; if(RX.test(h)&&h.indexOf('/audio')<0) return new URL(h,location.href).href; } }
   }
  }catch(e){} return location.href; }
  function report(){ ft=0; var v=act; if(!v) return;
