@@ -356,7 +356,6 @@ class BrowserActivity : Activity() {
         fabText.text = t("getVideo")
         fab.contentDescription = t("getVideo")
         fab.setOnClickListener { onFabTap() }
-        fab.setOnLongClickListener { showDiag(); true }
         content.addView(
             fab,
             FrameLayout.LayoutParams(dp(84), dp(84)).apply {
@@ -1574,7 +1573,7 @@ class BrowserActivity : Activity() {
                 tb.netCands.filter { now - it.t < 120_000 }.forEach { urls.add(it.url); netHints[it.url] = it.kind }
             }
             val candidates = urls.distinct().take(100)
-            if (candidates.isEmpty() || !tb.autoShow || tb.found.isNotEmpty()) { dismissParsing(tb); return@evaluateJavascript }
+            if (candidates.isEmpty() || !tb.autoShow || tb.found.isNotEmpty()) return@evaluateJavascript
             val ref = tb.web?.url ?: tb.url
             Thread {
                 val list = try {
@@ -1585,7 +1584,6 @@ class BrowserActivity : Activity() {
                     emptyList()
                 }
                 ui.post {
-                    dismissParsing(tb)
                     if (list.isNotEmpty() && tb.autoShow && tb.found.isEmpty()) {
                         tb.found = list
                         tb.autoShow = false
@@ -2098,26 +2096,10 @@ class BrowserActivity : Activity() {
             return
         }
         val dur = m.optDouble("d", 0.0)
-        // Aynı oynatıcıda süre/kaynak değiştiyse (reklam bitti, asıl video başladı) önceki oynatmaya
-        // ait adaylar bayat sayılır; yoksa reklam adresi ~90 sn aday listesinde kalıp asıl videoyu gizler.
-        val srcNew = m.optString("src", "")
-        if (id == tb.playerId && tb.pDur > 0 &&
-            (Math.abs(dur - tb.pDur) > 1 || (srcNew.isNotEmpty() && tb.pSrc.isNotEmpty() && srcNew != tb.pSrc))
-        ) {
-            val now = System.currentTimeMillis()
-            val tol = maxOf(2.5, tb.pDur * 0.04)
-            for (f in tb.found) {
-                if (f.duration > 0 && Math.abs(f.duration - tb.pDur) <= tol) tb.stale[f.url.substringBefore("#fpq=")] = now
-            }
-            if (tb.pSrc.isNotEmpty()) tb.stale[tb.pSrc] = now
-            tb.found = emptyList()
-            if (tb === cur) updateFab()
-        }
         if (id != tb.playerId || Math.abs(dur - tb.pDur) > 1) tb.bannerDone = false
         tb.playerId = id
         tb.pDur = dur
-        val showNow = m.optBoolean("show", false)
-        if (showNow) tb.autoShow = true
+        if (m.optBoolean("show", false)) tb.autoShow = true
         tb.pLive = m.optBoolean("live", false)
         tb.pH = m.optInt("h", 0)
         tb.pSrc = m.optString("src", "")
@@ -2135,15 +2117,13 @@ class BrowserActivity : Activity() {
                 tb.pHints[k] = h.optString(k)
             }
         }
-        // Kırmızı ↓ düğmesine basıldıysa: önce sayfayı (HTML/iframe/script) tara, sonra incele
-        if (showNow) { showParsing(tb); deepScan(tb) { scheduleProbe(tb) } } else scheduleProbe(tb)
+        scheduleProbe(tb)
     }
 
     private fun clearMedia(tb: Tab) {
         tb.probeRun?.let { ui.removeCallbacks(it) }
         tb.probeGen++
         synchronized(tb.netCands) { tb.netCands.clear() }
-        tb.stale.clear()
         tb.pUrls.clear()
         tb.pHints.clear()
         tb.playerId = null
@@ -2171,14 +2151,7 @@ class BrowserActivity : Activity() {
     private fun probeArgs(tb: Tab): Map<String, Any?> {
         try { tb.web?.settings?.userAgentString?.takeIf { it.isNotBlank() }?.let { Net.ua = it } } catch (_: Throwable) {}
         val now = System.currentTimeMillis()
-        // Derin tarama: oynayan süre kısaysa (reklam olabilir) süreye göre eşleştirme yapma, tüm adayları en uzun önde sırala.
-        val deep = tb.deepProbe
-        tb.deepProbe = false
-        val adLike = deep || (!tb.pLive && tb.pDur in 1.0..90.0)
-        val win = if (deep) 300_000L else 90_000L
-        val net = synchronized(tb.netCands) {
-            tb.netCands.filter { now - it.t < win && it.t > (tb.stale[it.url] ?: 0L) }
-        }
+        val net = synchronized(tb.netCands) { tb.netCands.filter { now - it.t < 90_000 } }
         val urls = LinkedHashSet<String>()
         urls.addAll(tb.pUrls)
         for (c in net) urls.add(c.url)
@@ -2188,8 +2161,8 @@ class BrowserActivity : Activity() {
             "urls" to urls.filter { it.startsWith("http") || it.startsWith("blob:") },
             "hints" to hints,
             "ref" to (tb.pRef ?: tb.web?.url ?: ""),
-            "dur" to (if (tb.pLive || deep) 0.0 else tb.pDur),
-            "src" to (if (adLike) "" else tb.pSrc),
+            "dur" to (if (tb.pLive) 0.0 else tb.pDur),
+            "src" to tb.pSrc,
             "h" to tb.pH
         )
     }
@@ -2462,119 +2435,17 @@ class BrowserActivity : Activity() {
             }
             tb.autoShow = true
             toast(t("checking"))
-            showParsing(tb)
-            deepScan(tb) { scanPage(tb) }
+            scanPage(tb)
             return
         }
-        if (tb.found.isNotEmpty() && !(tb.pDur in 1.0..90.0)) {
+        if (tb.found.isNotEmpty()) {
             showFound() // bulunan videoları seçenek olarak göster
             return
         }
         toast(t("checking"))
-        if (tb.pDur in 1.0..90.0) tb.deepProbe = true // kısa oynatma reklam olabilir: tüm adayları yeniden tara
-        showParsing(tb)
-        deepScan(tb) {
-            runProbe(tb) { list ->
-                dismissParsing(tb)
-                if (list.isEmpty()) toast(t("noVideo")) else showFound()
-            }
+        runProbe(tb) { list ->
+            if (list.isEmpty()) toast(t("noVideo")) else showFound()
         }
-    }
-
-    /** "URL ayrıştırılıyor…" bekleme penceresi: tarama/inceleme sürerken ne olduğunu gösterir. */
-    private fun showParsing(tb: Tab) {
-        dismissParsing(tb)
-        if (isFinishing) return
-        val p = pal
-        val d = Dialog(this)
-        d.requestWindowFeature(Window.FEATURE_NO_TITLE)
-        val col = LinearLayout(this)
-        col.orientation = LinearLayout.VERTICAL
-        col.gravity = Gravity.CENTER_HORIZONTAL
-        col.setPadding(dp(28), dp(24), dp(28), dp(24))
-        col.background = GradientDrawable().apply { setColor(p.bg); cornerRadius = dpf(20) }
-        val txt = TextView(this)
-        txt.text = if (L.code == "tr") "URL ayrıştırılıyor…" else "Parsing URL…"
-        txt.textSize = 16f
-        txt.setTextColor(p.fg)
-        txt.typeface = Typeface.DEFAULT_BOLD
-        col.addView(txt)
-        val pb = ProgressBar(this)
-        val lp = LinearLayout.LayoutParams(dp(40), dp(40))
-        lp.topMargin = dp(16)
-        col.addView(pb, lp)
-        d.setContentView(col)
-        d.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
-        d.setCancelable(true)
-        d.setOnCancelListener { tb.autoShow = false }
-        try { d.show() } catch (_: Throwable) { return }
-        tb.parsing = d
-        ui.postDelayed({ if (tb.parsing === d) dismissParsing(tb) }, 20_000)
-    }
-
-    private fun dismissParsing(tb: Tab) {
-        try { tb.parsing?.dismiss() } catch (_: Throwable) {}
-        tb.parsing = null
-    }
-
-    /** Yeşil düğmeye uzun basınca: teşhis raporu (kopyala/paylaş). */
-    private fun showDiag() {
-        val tb = cur ?: return
-        toast(if (L.code == "tr") "Rapor hazırlanıyor…" else "Building report…")
-        val page = tb.web?.url ?: tb.url
-        val ref = tb.pRef ?: page
-        val pdur = tb.pDur; val ph = tb.pH; val psrc = tb.pSrc
-        val purls = ArrayList(tb.pUrls)
-        val cands = synchronized(tb.netCands) { ArrayList(tb.netCands) }
-        try { tb.web?.settings?.userAgentString?.takeIf { it.isNotBlank() }?.let { Net.ua = it } } catch (_: Throwable) {}
-        Thread {
-            val extra = try { PageScan.scan(page) { isFinishing } } catch (_: Throwable) { emptyList() }
-            val now = System.currentTimeMillis()
-            for (h in extra) if (cands.none { it.url == h.url }) cands.add(NetCand(h.url, Media.kind(h.url) ?: "sniff", now))
-            val text = try { Diag.report(page, ref, pdur, ph, psrc, purls, cands) } catch (e: Throwable) { "Rapor hatası: " + e }
-            ui.post {
-                if (isFinishing) return@post
-                val tv = TextView(this)
-                tv.text = text
-                tv.textSize = 11f
-                tv.setTextIsSelectable(true)
-                tv.setPadding(32, 16, 32, 16)
-                val sv = android.widget.ScrollView(this)
-                sv.addView(tv)
-                AlertDialog.Builder(this, dlgTheme()).setTitle("Rapor").setView(sv)
-                    .setPositiveButton(if (L.code == "tr") "Paylaş" else "Share") { _, _ ->
-                        val i = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
-                        startActivity(Intent.createChooser(i, null))
-                    }
-                    .setNegativeButton(if (L.code == "tr") "Kapat" else "Close", null).show()
-            }
-        }.start()
-    }
-
-    /** Sayfayı (HTML + iframe + script) kendimiz tarar; bulunan adresleri ağ adaylarına ekler, sonra [then] çalışır. */
-    private fun deepScan(tb: Tab, then: () -> Unit) {
-        val page = tb.web?.url ?: tb.url
-        if (!page.startsWith("http") || tb.scannedUrl == page) {
-            then()
-            return
-        }
-        try { tb.web?.settings?.userAgentString?.takeIf { it.isNotBlank() }?.let { Net.ua = it } } catch (_: Throwable) {}
-        Thread {
-            val hits = try { PageScan.scan(page) { isFinishing } } catch (_: Throwable) { emptyList() }
-            ui.post {
-                if (isFinishing) return@post
-                if (hits.isNotEmpty()) tb.scannedUrl = page // boş sonuç saklanmaz: sayfa tam yüklenince yeniden denenir
-                val now = System.currentTimeMillis()
-                synchronized(tb.netCands) {
-                    for (h in hits) {
-                        if (tb.netCands.any { it.url == h.url }) continue
-                        tb.netCands.add(NetCand(h.url, Media.kind(h.url) ?: "sniff", now))
-                    }
-                    while (tb.netCands.size > 120) tb.netCands.removeAt(0)
-                }
-                then()
-            }
-        }.start()
     }
 
     private fun showFound() {
@@ -2593,7 +2464,6 @@ class BrowserActivity : Activity() {
 
     /** Bulunan videoları alttan açılan sayfada gösterir; en yüksek kalite hazır seçili gelir. */
     private fun showFoundSheet(tb: Tab, found: List<FoundItem>) {
-        dismissParsing(tb)
         val p = pal
         val tr = L.code == "tr"
         val acc = if (dark) 0xFF8AB4F8.toInt() else 0xFF1A73E8.toInt()
@@ -2688,12 +2558,12 @@ class BrowserActivity : Activity() {
         root.addView(head, hlp)
 
         // Kalite kutucukları (3'lü ızgara)
-        val sel = java.util.TreeSet<Int>().apply { add(0) } // çoklu seçim: dokununca ekle/çıkar
+        var sel = 0
         val chips = ArrayList<FrameLayout>()
         val ticks = ArrayList<TextView>()
         fun paint() {
             for (i in chips.indices) {
-                val on = i in sel
+                val on = i == sel
                 chips[i].background = if (on) rounded(chipBg, 14, acc, 2) else rounded(chipBg, 14, p.line, 2)
                 ticks[i].visibility = if (on) View.VISIBLE else View.GONE
             }
@@ -2742,12 +2612,6 @@ class BrowserActivity : Activity() {
             val s = tv(sz, 14f, p.sub)
             s.gravity = Gravity.CENTER
             inner.addView(s)
-            if (f.duration > 0) {
-                val adMark = if (f.duration < 90 && maxDur >= 180) (if (tr) " · reklam?" else " · ad?") else ""
-                val dtv = tv(Media.fmtDuration(f.duration) + adMark, 12f, p.sub)
-                dtv.gravity = Gravity.CENTER
-                inner.addView(dtv)
-            }
             chip.addView(inner, FrameLayout.LayoutParams(-1, -2))
             val tick = tv("✓", 13f, onAcc, true)
             tick.gravity = Gravity.CENTER
@@ -2757,7 +2621,7 @@ class BrowserActivity : Activity() {
             tp.rightMargin = -dp(2)
             chip.addView(tick, tp)
             chip.setOnClickListener {
-                if (idx in sel) { if (sel.size > 1) sel.remove(idx) } else sel.add(idx)
+                sel = idx
                 paint()
             }
             chips.add(chip)
@@ -2822,9 +2686,9 @@ class BrowserActivity : Activity() {
                 .show()
         }
         val dl = action("⤓", t("download"), acc) {
-            val picked = sel.map { items[it] }
+            val f = items[sel]
             dlg.dismiss()
-            picked.forEachIndexed { n, f -> startDownload(tb, f.url, f.kind, if (n == 0) name else "$name (${n + 1})") }
+            startDownload(tb, f.url, f.kind, name)
         }
         for (a in listOf(cl, rn, dl)) bar.addView(a, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         val bp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)

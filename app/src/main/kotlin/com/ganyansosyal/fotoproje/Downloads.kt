@@ -25,8 +25,6 @@ import java.util.concurrent.Executors
 enum class DlStatus { RUNNING, PAUSED, DONE, FAILED, CANCELED }
 
 class DownloadTask(val id: String, val url: String, val referer: String, var title: String) {
-    /** Hata teşhisi (adres, Referer, çerez) */
-    @Volatile var diag: String? = null
     var createdAt = System.currentTimeMillis()
     @Volatile var status = DlStatus.RUNNING
     @Volatile var path: String? = null
@@ -217,17 +215,10 @@ object Downloads {
                     }
                     err?.let { throw IOException(it) }
                 }
-                else -> {
-                    val hdr = Net.smartHeaders(url, referer, task.cancel)
-                    try {
-                        Streams.direct(url, path, hdr, task.cancel, report)
-                    } catch (e: HttpErr) {
-                        // Teşhis: hangi adres, hangi Referer/Cookie ile reddedildi
-                        task.diag = "Adres: ${url.take(160)}\nReferer: ${hdr["Referer"] ?: "yok"}\n" +
-                            "Cookie: ${if (hdr.containsKey("Cookie")) "var" else "yok"}"
-                        throw e
-                    }
-                }
+                else -> Streams.direct(
+                    url, path, Net.smartHeaders(url, referer, task.cancel),
+                    task.cancel, report
+                )
             }
             finish(task, path, if (sepAudio) apath else null)
         }
@@ -285,7 +276,7 @@ object Downloads {
                     task.label = L.t("paused")
                 } else {
                     task.status = if (canceled) DlStatus.CANCELED else DlStatus.FAILED
-                    task.error = if (canceled) L.t("canceled") else ((e.message ?: e.toString()) + (task.diag?.let { "\n$it" } ?: ""))
+                    task.error = if (canceled) L.t("canceled") else (e.message ?: e.toString())
                     if (canceled) active.remove(task)
                 }
                 persist()
