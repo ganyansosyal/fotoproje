@@ -236,19 +236,28 @@ object Downloads {
                     // Bozuk / video olmayan dosya "indi" sayılmaz: hata verir, yedek kaynak denenir
                     checkPlayable(path, kind)
                     if (task.audio.isNotEmpty()) {
-                        try {
-                            task.label = "Ses indiriliyor…"
-                            notifyUi()
-                            Streams.direct(
-                                task.audio, apath, Net.smartHeaders(task.audio, referer, task.cancel),
-                                task.cancel, { _, _ -> }
-                            )
-                            sepAudio = true
-                        } catch (e: CanceledEx) {
-                            throw e
-                        } catch (_: Throwable) {
-                            File(apath).delete()
+                        // Ses kesin gelmeli: 3 deneme, olmazsa sessiz video kaydetmek yerine hata ver
+                        var ok = false
+                        var lastErr: Throwable? = null
+                        for (k in 0 until 3) {
+                            try {
+                                task.label = if (L.code == "tr") "Ses indiriliyor…" else "Downloading audio…"
+                                notifyUi()
+                                File(apath).delete()
+                                Streams.direct(
+                                    task.audio, apath, Net.smartHeaders(task.audio, referer, task.cancel),
+                                    task.cancel, { _, _ -> }
+                                )
+                                if (File(apath).length() > 0L) { ok = true; break }
+                            } catch (e: CanceledEx) {
+                                throw e
+                            } catch (e: Throwable) {
+                                lastErr = e
+                                File(apath).delete()
+                            }
                         }
+                        if (!ok) throw IOException(lastErr?.message ?: (if (L.code == "tr") "Ses indirilemedi" else "Audio download failed"))
+                        sepAudio = true
                     }
                 }
             }
@@ -522,8 +531,10 @@ object Downloads {
                 dest = d
                 sepAudio = null
             } catch (e: Throwable) {
-                task.note = L.t("mergeFail") + " (" + (e.message ?: e.javaClass.simpleName) + ")"
                 d.delete()
+                // Ayrı sesle gelen indirmede sessiz video kaydetme: hata ver
+                if (task.audio.isNotEmpty()) throw IOException(L.t("mergeFail") + " (" + (e.message ?: e.javaClass.simpleName) + ")")
+                task.note = L.t("mergeFail") + " (" + (e.message ?: e.javaClass.simpleName) + ")"
             }
         }
         if (dest == null) {

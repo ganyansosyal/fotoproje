@@ -255,6 +255,19 @@ object Probe {
     private fun isAudioCodec(c: String) =
         listOf("mp4a", "ac-3", "ec-3", "opus", "flac", "mp3", "vorbis").any { c.contains(it) }
 
+    /** Instagram/Facebook adreslerindeki "efg" parametresinden kodlama etiketi (örn. "..._audio"). */
+    private fun efgTag(url: String): String {
+        return try {
+            val raw = android.net.Uri.parse(url.substringBefore("#")).getQueryParameter("efg") ?: return ""
+            var b = raw.replace('-', '+').replace('_', '/')
+            while (b.length % 4 != 0) b += "="
+            val json = String(android.util.Base64.decode(b, android.util.Base64.DEFAULT), Charsets.UTF_8)
+            org.json.JSONObject(json).optString("vencode_tag").lowercase()
+        } catch (_: Throwable) {
+            ""
+        }
+    }
+
     private fun probeOne(url: String, hint: String, referer: String, children: MutableSet<String>): MediaInfo {
         if (FRAGMENT_EXT.containsMatchIn(url.substringBefore('?').substringBefore('#'))) {
             return MediaInfo(url, "mp4").also { it.usable = false }
@@ -393,7 +406,9 @@ object Probe {
                 val ct = (c.contentType ?: "").lowercase()
                 val cr = c.getHeaderField("Content-Range") ?: ""
                 val total = Regex("/(\\d+)\\s*$").find(cr)?.groupValues?.get(1)?.toLongOrNull()
-                val len = total ?: c.getHeaderField("Content-Length")?.toLongOrNull() ?: 0L
+                val code = try { c.responseCode } catch (_: Throwable) { 200 }
+                val cl = c.getHeaderField("Content-Length")?.toLongOrNull() ?: 0L
+                val len = total ?: (if (code == 206 || cl <= 1L) 0L else cl)
                 c.disconnect()
                 if (ct.startsWith("image/") || ct.startsWith("text/") || ct.contains("json")) info.usable = false
                 info.size = len
@@ -432,10 +447,54 @@ object Probe {
                 }
                 if (info.usable && info.duration <= 0) info.duration = retrieverDuration(url, referer)
             }
+            // Instagram/Facebook: etiket kesin söyler (sessiz DASH görüntüsü / ayrı ses dosyası)
+            val tag = efgTag(url)
+            if (tag.isNotEmpty() && kind != "m3u8" && kind != "mpd") {
+                if (tag.contains("audio")) {
+                    info.usable = false
+                    info.audioOnly = true
+                } else if (tag.contains("dash")) {
+                    info.audio = false
+                }
+            }
         } catch (_: Throwable) {
             info.duration = 0.0
         }
         return info
+    }
+
+    /**
+     * Listeyi sadeleştirir: sessiz / boyutu bilinmeyen / parça boyutundaki adaylar atılır,
+     * aynı videonun kopyalarından yalnızca en iyisi kalır. Hiç aday kalmazsa eldeki liste korunur.
+     */
+    private fun pick(res: List<MediaInfo>): List<MediaInfo> {
+        if (res.size <= 1) return res
+        var l: List<MediaInfo> = res
+        fun narrow(f: (MediaInfo) -> Boolean) {
+            val n = l.filter(f)
+            if (n.isNotEmpty()) l = n
+        }
+        // Sesli olanlar (ayrı ses dosyasıyla eşleşen de sesli sayılır)
+        narrow { it.audio != false }
+        // Boyutu bilinen (KB/MB yazan) olanlar; akışlar ve korumalı olanlar kalır
+        narrow { it.isStream || it.kind == "blob" || it.size > 0 }
+        // Parça boyutundaki (<100 KB) dosyalar gerçek video değildir
+        narrow { it.isStream || it.kind == "blob" || it.size <= 0 || it.size >= 100 * 1024 }
+        // Aynı videonun kopyaları: en yüksek çözünürlük, sonra en büyük dosya
+        val out = ArrayList<MediaInfo>()
+        val direct = l.filter { !it.isStream && it.kind != "blob" }
+        val others = l.filter { it.isStream || it.kind == "blob" }
+        val used = ArrayList<MediaInfo>()
+        for (e in direct.sortedWith(compareByDescending<MediaInfo> { it.height }.thenByDescending { it.size })) {
+            val dup = used.any {
+                it.duration <= 0 || e.duration <= 0 ||
+                    Math.abs(it.duration - e.duration) <= maxOf(1.5, e.duration * 0.03)
+            }
+            if (!dup) used.add(e)
+        }
+        out.addAll(used)
+        out.addAll(others)
+        return if (out.isEmpty()) l else out
     }
 
     /** Adayları paralel inceler; oynayan videonun süresiyle eşleşenleri doğrulanmış sayar. */
@@ -486,13 +545,17 @@ object Probe {
         val audios = list.filter { it.audioOnly }
         if (audios.isNotEmpty()) {
             for (e in cands) {
-                if (e.isStream || e.kind == "blob" || e.audio != false) continue
-                val best = (if (e.duration > 0) audios.minByOrNull { Math.abs(it.duration - e.duration) }
-                    else audios.singleOrNull()) ?: continue
-                // Süreler biliniyorsa aynı videoya ait olmalı (başka videonun sesi karışmasın)
-                if (e.duration > 0 && best.duration > 0 &&
-                    Math.abs(best.duration - e.duration) > maxOf(1.5, e.duration * 0.03)) continue
+                if (e.isStream || e.kind == "blob" || e.audio == true) continue
+                val tol = maxOf(1.5, e.duration * 0.03)
+                val pool2 = if (e.duration > 0) {
+                    audios.filter { it.duration <= 0 || Math.abs(it.duration - e.duration) <= tol }
+                } else audios
+                val best = pool2.sortedWith(
+                    compareBy<MediaInfo> { if (e.duration > 0 && it.duration > 0) Math.abs(it.duration - e.duration) else 0.0 }
+                        .thenByDescending { it.size }
+                ).firstOrNull() ?: continue
                 e.audioUrl = best.url
+                e.audio = true
             }
         }
         // HLS ana listesi / DASH kalite seçeneklerine aç.
@@ -522,6 +585,9 @@ object Probe {
                 res.add(m)
             } else res.add(e)
         }
+        val picked = pick(res)
+        res.clear()
+        res.addAll(picked)
         for (r in res) log.add("SONUC " + r.kind + " boyut=" + r.size + " sure=" + r.duration + " " + short(r.url))
         dbg(log)
         return res

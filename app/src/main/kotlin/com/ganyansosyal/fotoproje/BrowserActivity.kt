@@ -2450,7 +2450,10 @@ class BrowserActivity : Activity() {
 
         // Kısa klipleri (fragman/reklam) geride tut, kalan içinde en yüksek çözünürlük + en büyük dosya önce gelir
         val maxDur = found.maxOfOrNull { it.duration } ?: 0.0
-        val items = found.sortedWith(
+        val sizedFound = found.filter {
+            it.size > 0L || it.kind.equals("m3u8", true) || it.kind.equals("mpd", true) || it.kind == "blob"
+        }.ifEmpty { found }
+        val items = sizedFound.sortedWith(
             compareByDescending<FoundItem> { if (maxDur > 0 && it.duration > 0 && it.duration < maxDur * 0.5) 0 else 1 }
                 .thenByDescending { it.height }
                 .thenByDescending { it.bw }
@@ -2647,9 +2650,9 @@ class BrowserActivity : Activity() {
                 estimatedHlsBytes > 0L -> "≈ ${Media.fmtBytes(estimatedHlsBytes)}"
                 f.kind.equals("m3u8", ignoreCase = true) || f.kind.equals("mpd", ignoreCase = true) ->
                     if (tr) "Boyut bilinmiyor" else "Size unknown"
-                else -> f.kind.uppercase()
+                else -> ""
             }
-            val s = tv(if (f.duration > 0) sz + " · " + Media.fmtDuration(f.duration) else sz, 14f, p.sub)
+            val s = tv(if (f.duration > 0) (if (sz.isEmpty()) "" else "$sz · ") + Media.fmtDuration(f.duration) else sz, 14f, p.sub)
             s.gravity = Gravity.CENTER
             inner.addView(s)
             chip.addView(inner, FrameLayout.LayoutParams(-1, -2))
