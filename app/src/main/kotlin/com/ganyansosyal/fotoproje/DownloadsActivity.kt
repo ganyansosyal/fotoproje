@@ -263,15 +263,9 @@ class DownloadsActivity : Activity() {
             pb.isIndeterminate = true
             c.addView(pb, LinearLayout.LayoutParams(-1, dp(6)).apply { topMargin = dp(12) })
         } else {
-            val barBox = LinearLayout(this)
-            barBox.orientation = LinearLayout.HORIZONTAL
-            barBox.background = rounded(track, 3)
-            val w = if (failed) 1000 else (p.coerceIn(0.0, 1.0) * 1000).toInt()
-            val fill = View(this)
-            fill.background = rounded(if (failed) danger else if (paused) sub else accent, 3)
-            barBox.addView(fill, LinearLayout.LayoutParams(0, -1, w.toFloat().coerceAtLeast(0f)))
-            barBox.addView(View(this), LinearLayout.LayoutParams(0, -1, (1000 - w).toFloat().coerceAtLeast(0f)))
-            c.addView(barBox, LinearLayout.LayoutParams(-1, dp(6)).apply { topMargin = dp(12) })
+            val col2 = if (failed) danger else if (paused) sub else accent
+            val frac = if (failed) 1f else p.coerceIn(0.0, 1.0).toFloat()
+            c.addView(SegBar(this, track, col2, frac), LinearLayout.LayoutParams(-1, dp(14)).apply { topMargin = dp(10) })
         }
 
         val row = actionRow()
@@ -436,5 +430,28 @@ class DownloadsActivity : Activity() {
 
     companion object {
         private val thumbCache = java.util.concurrent.ConcurrentHashMap<String, android.graphics.Bitmap>()
+    }
+}
+
+/** Bölümlü ilerleme çubuğu: dolgu + 4 eşit parçanın sınırında küçük işaretler. */
+private class SegBar(
+    ctx: android.content.Context, val trackC: Int, val fillC: Int, val frac: Float
+) : View(ctx) {
+    private val pt = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+
+    override fun onDraw(c: android.graphics.Canvas) {
+        val d = resources.displayMetrics.density
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val bh = 8f * d
+        val top = (h - bh) / 2f
+        pt.color = trackC
+        c.drawRoundRect(0f, top, w, top + bh, bh / 2, bh / 2, pt)
+        pt.color = fillC
+        c.drawRoundRect(0f, top, maxOf(w * frac, bh), top + bh, bh / 2, bh / 2, pt)
+        for (i in 1..3) {
+            val x = w * i / 4f
+            c.drawRect(x - 2f * d, h / 2 - 5f * d, x + 2f * d, h / 2 + 5f * d, pt)
+        }
     }
 }

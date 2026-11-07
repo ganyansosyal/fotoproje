@@ -2142,14 +2142,14 @@ class BrowserActivity : Activity() {
     }
 
     // ---- indirme
-    private fun startDownload(tb: Tab, url: String, kind: String) {
+    private fun startDownload(tb: Tab, url: String, kind: String, name: String? = null) {
         dart(
             "download",
             mapOf(
                 "url" to url,
                 "kind" to kind,
                 "ref" to (tb.pRef ?: tb.web?.url ?: ""),
-                "title" to (tb.title),
+                "title" to (name ?: tb.title),
                 "tab" to tb.id
             ),
             { r -> toast(if (r is String) r else t("downloadStarted")) },
@@ -2264,14 +2264,23 @@ class BrowserActivity : Activity() {
         showFoundSheet(tb, tb.found)
     }
 
-    /** Bulunan videoları alttan açılan şık bir sayfada gösterir; en iyisi hazır seçili gelir. */
-    private fun showFoundSheet(tb: Tab, items: List<FoundItem>) {
+    /** Bulunan videoları alttan açılan sayfada gösterir; en yüksek kalite hazır seçili gelir. */
+    private fun showFoundSheet(tb: Tab, found: List<FoundItem>) {
         val p = pal
         val tr = L.code == "tr"
         val acc = if (dark) 0xFF8AB4F8.toInt() else 0xFF1A73E8.toInt()
-        val accBg = if (dark) 0xFF2B3A55.toInt() else 0xFFE8F0FE.toInt()
         val onAcc = if (dark) 0xFF202124.toInt() else 0xFFFFFFFF.toInt()
-        val cardBg = if (dark) 0xFF3C4043.toInt() else 0xFFF1F3F4.toInt()
+        val chipBg = if (dark) 0xFF3C4043.toInt() else 0xFFFFFFFF.toInt()
+        val thumbBg = if (dark) 0xFF4C6EA8.toInt() else 0xFF82AAFF.toInt()
+
+        // Kısa klipleri (fragman/reklam) geride tut, kalan içinde en yüksek çözünürlük + en büyük dosya önce gelir
+        val maxDur = found.maxOfOrNull { it.duration } ?: 0.0
+        val items = found.sortedWith(
+            compareByDescending<FoundItem> { if (maxDur > 0 && it.duration > 0 && it.duration < maxDur * 0.5) 0 else 1 }
+                .thenByDescending { it.height }
+                .thenByDescending { it.size }
+                .thenByDescending { it.duration }
+        )
 
         fun rounded(fill: Int, r: Int, stroke: Int = 0, sw: Int = 0): GradientDrawable =
             GradientDrawable().apply {
@@ -2292,115 +2301,186 @@ class BrowserActivity : Activity() {
         dlg.requestWindowFeature(Window.FEATURE_NO_TITLE)
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
-        root.setPadding(dp(20), dp(10), dp(20), dp(20))
+        root.setPadding(dp(18), dp(10), dp(18), dp(14))
         root.background = GradientDrawable().apply {
             setColor(p.bg)
-            val r = dpf(22)
+            val r = dpf(24)
             cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
         }
         val handle = View(this)
         handle.background = rounded(p.line, 2)
         val hp = LinearLayout.LayoutParams(dp(36), dp(4))
         hp.gravity = Gravity.CENTER_HORIZONTAL
-        hp.bottomMargin = dp(14)
+        hp.bottomMargin = dp(12)
         root.addView(handle, hp)
 
-        root.addView(tv(if (tr) "Video bulundu" else "Video found", 22f, p.fg, true))
-        val page = tv(tb.title.ifEmpty { shownUrl(tb) }, 13f, p.sub)
-        page.maxLines = 1
-        page.ellipsize = TextUtils.TruncateAt.END
-        val pp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-        pp.topMargin = dp(4)
-        pp.bottomMargin = dp(16)
-        root.addView(page, pp)
+        // Ağ durumu (Wi-Fi / mobil)
+        val net = try {
+            val cm = getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+            val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+            when {
+                caps == null -> if (tr) "Bağlantı yok" else "Offline"
+                caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
+                caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> if (tr) "Mobil veri" else "Mobile data"
+                else -> if (tr) "Ağ" else "Network"
+            }
+        } catch (_: Throwable) {
+            if (tr) "Ağ" else "Network"
+        }
+        root.addView(tv("${if (tr) "Ağ" else "Network"} · $net", 14f, p.sub, true))
 
+        // Küçük resim + ad
+        var name = tb.title.ifEmpty { shownUrl(tb) }
+        val head = LinearLayout(this)
+        head.orientation = LinearLayout.HORIZONTAL
+        head.gravity = Gravity.CENTER_VERTICAL
+        val thumb = FrameLayout(this)
+        thumb.background = rounded(thumbBg, 14)
+        val clap = tv("▶", 34f, Color.WHITE, true)
+        clap.gravity = Gravity.CENTER
+        thumb.addView(clap, FrameLayout.LayoutParams(-1, -1))
+        val durText = items.firstOrNull { it.duration > 0 }?.let { Media.fmtDuration(it.duration) }
+        if (durText != null) {
+            val badge = tv(durText, 12f, Color.WHITE, true)
+            badge.background = rounded(0xCC1F2A44.toInt(), 8)
+            badge.setPadding(dp(8), dp(2), dp(8), dp(2))
+            thumb.addView(badge, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END))
+        }
+        head.addView(thumb, LinearLayout.LayoutParams(dp(130), dp(86)))
+        val nameTv = tv(name, 17f, p.fg, true)
+        nameTv.maxLines = 3
+        nameTv.ellipsize = TextUtils.TruncateAt.END
+        val np = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        np.leftMargin = dp(14)
+        head.addView(nameTv, np)
+        val hlp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        hlp.topMargin = dp(12)
+        hlp.bottomMargin = dp(16)
+        root.addView(head, hlp)
+
+        // Kalite kutucukları (3'lü ızgara)
         var sel = 0
-        val cards = ArrayList<LinearLayout>()
-        val dots = ArrayList<TextView>()
+        val chips = ArrayList<FrameLayout>()
+        val ticks = ArrayList<TextView>()
         fun paint() {
-            for (i in cards.indices) {
+            for (i in chips.indices) {
                 val on = i == sel
-                cards[i].background = if (on) rounded(accBg, 16, acc, 2) else rounded(cardBg, 16)
-                dots[i].text = if (on) "\u25CF" else "\u25CB"
-                dots[i].setTextColor(if (on) acc else p.sub)
+                chips[i].background = if (on) rounded(chipBg, 14, acc, 2) else rounded(chipBg, 14, p.line, 2)
+                ticks[i].visibility = if (on) View.VISIBLE else View.GONE
             }
         }
-
-        val list = LinearLayout(this)
-        list.orientation = LinearLayout.VERTICAL
+        val grid = LinearLayout(this)
+        grid.orientation = LinearLayout.VERTICAL
+        var row: LinearLayout? = null
         for ((idx, f) in items.withIndex()) {
-            val card = LinearLayout(this)
-            card.orientation = LinearLayout.HORIZONTAL
-            card.gravity = Gravity.CENTER_VERTICAL
-            card.setPadding(dp(16), dp(14), dp(16), dp(14))
-
-            val left = LinearLayout(this)
-            left.orientation = LinearLayout.VERTICAL
-            val top = LinearLayout(this)
-            top.orientation = LinearLayout.HORIZONTAL
-            top.gravity = Gravity.CENTER_VERTICAL
-            val quality = when {
-                f.height > 0 -> "${f.height}p"
-                f.kind == "blob" -> if (tr) "Korumalı video" else "Protected video"
-                else -> "Video"
+            if (idx % 3 == 0) {
+                row = LinearLayout(this)
+                row.orientation = LinearLayout.HORIZONTAL
+                val rp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                rp.bottomMargin = dp(10)
+                grid.addView(row, rp)
             }
-            top.addView(tv(quality, 18f, p.fg, true))
-            if (idx == 0 && items.size > 1) {
-                val badge = tv(if (tr) "Önerilen" else "Best", 11f, acc, true)
-                badge.background = rounded(accBg, 10)
-                badge.setPadding(dp(8), dp(2), dp(8), dp(2))
-                val bp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-                bp.leftMargin = dp(10)
-                top.addView(badge, bp)
+            val label = when {
+                f.height > 0 -> "${f.height}P"
+                f.kind == "blob" -> if (tr) "KORUMALI" else "PROTECTED"
+                f.kind == "m4a" || f.kind == "mp3" || f.kind == "aac" || f.kind == "ogg" -> if (tr) "SES" else "AUDIO"
+                else -> if (tr) "VİDEO" else "VIDEO"
             }
-            left.addView(top)
-            val meta = ArrayList<String>()
-            if (f.duration > 0) meta.add(Media.fmtDuration(f.duration))
-            if (f.size > 0) meta.add(Media.fmtBytes(f.size))
-            if (meta.isEmpty()) meta.add(if (f.kind == "m3u8" || f.kind == "mpd") (if (tr) "Yayın" else "Stream") else f.kind.uppercase())
-            val mp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            mp.topMargin = dp(2)
-            left.addView(tv(meta.joinToString("  ·  "), 13f, p.sub), mp)
-            card.addView(left, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-
-            val dot = tv("\u25CB", 22f, p.sub)
-            card.addView(dot)
-            card.setOnClickListener {
+            val chip = FrameLayout(this)
+            val inner = LinearLayout(this)
+            inner.orientation = LinearLayout.VERTICAL
+            inner.gravity = Gravity.CENTER
+            inner.setPadding(dp(6), dp(14), dp(6), dp(14))
+            val q = tv(label, 21f, p.fg, true)
+            q.gravity = Gravity.CENTER
+            inner.addView(q)
+            val sz = if (f.size > 0) Media.fmtBytes(f.size)
+                else if (f.kind == "m3u8" || f.kind == "mpd") (if (tr) "Yayın" else "Stream") else f.kind.uppercase()
+            val s = tv(sz, 14f, p.sub)
+            s.gravity = Gravity.CENTER
+            inner.addView(s)
+            chip.addView(inner, FrameLayout.LayoutParams(-1, -2))
+            val tick = tv("✓", 13f, onAcc, true)
+            tick.gravity = Gravity.CENTER
+            tick.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(acc) }
+            val tp = FrameLayout.LayoutParams(dp(24), dp(24), Gravity.TOP or Gravity.END)
+            tp.topMargin = -dp(4)
+            tp.rightMargin = -dp(2)
+            chip.addView(tick, tp)
+            chip.setOnClickListener {
                 sel = idx
                 paint()
             }
-            cards.add(card)
-            dots.add(dot)
-            val cp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            cp.bottomMargin = dp(10)
-            list.addView(card, cp)
+            chips.add(chip)
+            ticks.add(tick)
+            val cp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            cp.leftMargin = if (idx % 3 == 0) 0 else dp(10)
+            row!!.addView(chip, cp)
+            if (idx == items.size - 1) {
+                // Son satırı boş kutularla doldur ki genişlikler eşit kalsın
+                var k = idx % 3 + 1
+                while (k < 3) {
+                    val sp = View(this)
+                    val spp = LinearLayout.LayoutParams(0, 1, 1f)
+                    spp.leftMargin = dp(10)
+                    row.addView(sp, spp)
+                    k++
+                }
+            }
         }
         paint()
-        if (items.size > 3) {
+        if (items.size > 9) {
             val sv = ScrollView(this)
-            sv.addView(list)
-            root.addView(
-                sv,
-                LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    (resources.displayMetrics.heightPixels * 0.42).toInt()
-                )
-            )
+            sv.addView(grid)
+            root.addView(sv, LinearLayout.LayoutParams(-1, (resources.displayMetrics.heightPixels * 0.34).toInt()))
         } else {
-            root.addView(list)
+            root.addView(grid)
         }
 
-        val btn = tv(t("download"), 16f, onAcc, true)
-        btn.gravity = Gravity.CENTER
-        btn.background = rounded(acc, 26)
-        btn.setOnClickListener {
+        // Alt eylemler: Kapat · Tekrar adlandır · İndir
+        fun action(glyph: String, text: String, color: Int, onClick: () -> Unit): LinearLayout {
+            val c = LinearLayout(this)
+            c.orientation = LinearLayout.VERTICAL
+            c.gravity = Gravity.CENTER
+            c.setPadding(0, dp(8), 0, dp(8))
+            val g = tv(glyph, 26f, color, true)
+            g.gravity = Gravity.CENTER
+            val t = tv(text, 14f, color)
+            t.gravity = Gravity.CENTER
+            c.addView(g)
+            c.addView(t)
+            c.setOnClickListener { onClick() }
+            return c
+        }
+        val bar = LinearLayout(this)
+        bar.orientation = LinearLayout.HORIZONTAL
+        val cl = action("✕", if (tr) "Kapat" else "Close", p.fg) { dlg.dismiss() }
+        val rn = action("✎", if (tr) "Yeniden adlandır" else "Rename", p.fg) {
+            val et = EditText(this)
+            et.setText(name)
+            et.setSelection(et.text.length)
+            AlertDialog.Builder(this)
+                .setTitle(if (tr) "Yeniden adlandır" else "Rename")
+                .setView(et)
+                .setPositiveButton(if (tr) "Tamam" else "OK") { _, _ ->
+                    val n = et.text.toString().trim()
+                    if (n.isNotEmpty()) {
+                        name = n
+                        nameTv.text = n
+                    }
+                }
+                .setNegativeButton(if (tr) "Vazgeç" else "Cancel", null)
+                .show()
+        }
+        val dl = action("⤓", t("download"), acc) {
             val f = items[sel]
             dlg.dismiss()
-            startDownload(tb, f.url, f.kind)
+            startDownload(tb, f.url, f.kind, name)
         }
-        val bp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(52))
-        bp.topMargin = dp(6)
-        root.addView(btn, bp)
+        for (a in listOf(cl, rn, dl)) bar.addView(a, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        val bp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        bp.topMargin = dp(8)
+        root.addView(bar, bp)
 
         dlg.setContentView(root)
         dlg.window?.apply {
