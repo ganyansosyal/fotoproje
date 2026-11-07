@@ -2185,6 +2185,7 @@ class BrowserActivity : Activity() {
                         return@runOnUiThread
                     }
                     tb.found = result
+                    prefetchThumb(tb, result)
                     if (tb === cur) updateFab()
                     if (result.isNotEmpty() && !tb.bannerDone) {
                         tb.bannerDone = true
@@ -2439,6 +2440,58 @@ class BrowserActivity : Activity() {
         showFoundSheet(tb, tb.found)
     }
 
+    // ---- Önizleme: kare önbelleği (liste hazır olunca arka planda önceden alınır)
+    private val thumbMem = HashMap<String, Bitmap>()
+    private val thumbBusy = HashSet<String>()
+
+    private fun grabFrame(f: FoundItem, ref: String): Bitmap? {
+        if (f.kind == "blob" || f.kind == "mpd") return null
+        val r = android.media.MediaMetadataRetriever()
+        return try {
+            val u = f.url.substringBefore("#")
+            r.setDataSource(u, Net.headers(u, ref))
+            val src = r.getFrameAtTime(1_000_000L, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                ?: r.getFrameAtTime(0L, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+            if (src != null) {
+                val w = 360
+                if (src.width > w) Bitmap.createScaledBitmap(src, w, src.height * w / src.width, true) else src
+            } else null
+        } catch (_: Throwable) {
+            null
+        } finally {
+            try { r.release() } catch (_: Throwable) {}
+        }
+    }
+
+    private fun sortedFound(all: List<FoundItem>): List<FoundItem> {
+        val found = all.filter {
+            it.size > 0L || it.kind.equals("m3u8", true) || it.kind.equals("mpd", true) || it.kind == "blob"
+        }.ifEmpty { all }
+        val maxDur = found.maxOfOrNull { it.duration } ?: 0.0
+        return found.sortedWith(
+            compareByDescending<FoundItem> { if (maxDur > 0 && it.duration > 0 && it.duration < maxDur * 0.5) 0 else 1 }
+                .thenByDescending { it.height }
+                .thenByDescending { it.bw }
+                .thenByDescending { it.size }
+                .thenByDescending { it.duration }
+        )
+    }
+
+    /** Video bulunur bulunmaz en iyi seçeneğin karesini arka planda alır: sayfa açılınca hazır olur. */
+    private fun prefetchThumb(tb: Tab, found: List<FoundItem>) {
+        val f = sortedFound(found).firstOrNull() ?: return
+        val key = f.url
+        if (thumbMem.containsKey(key) || !thumbBusy.add(key)) return
+        val ref = tb.pRef ?: tb.web?.url ?: tb.url
+        Thread {
+            val bm = grabFrame(f, ref)
+            ui.post {
+                thumbBusy.remove(key)
+                if (bm != null) thumbMem[key] = bm
+            }
+        }.start()
+    }
+
     /** Bulunan videoları alttan açılan sayfada gösterir; en yüksek kalite hazır seçili gelir. */
     private fun showFoundSheet(tb: Tab, found: List<FoundItem>) {
         val p = pal
@@ -2449,17 +2502,7 @@ class BrowserActivity : Activity() {
         val thumbBg = if (dark) 0xFF4C6EA8.toInt() else 0xFF82AAFF.toInt()
 
         // Kısa klipleri (fragman/reklam) geride tut, kalan içinde en yüksek çözünürlük + en büyük dosya önce gelir
-        val maxDur = found.maxOfOrNull { it.duration } ?: 0.0
-        val sizedFound = found.filter {
-            it.size > 0L || it.kind.equals("m3u8", true) || it.kind.equals("mpd", true) || it.kind == "blob"
-        }.ifEmpty { found }
-        val items = sizedFound.sortedWith(
-            compareByDescending<FoundItem> { if (maxDur > 0 && it.duration > 0 && it.duration < maxDur * 0.5) 0 else 1 }
-                .thenByDescending { it.height }
-                .thenByDescending { it.bw }
-                .thenByDescending { it.size }
-                .thenByDescending { it.duration }
-        )
+        val items = sortedFound(found)
 
         fun rounded(fill: Int, r: Int, stroke: Int = 0, sw: Int = 0): GradientDrawable =
             GradientDrawable().apply {
@@ -2545,7 +2588,7 @@ class BrowserActivity : Activity() {
 
         // Kalite kutucukları (3'lü ızgara)
         var sel = 0
-        val thumbCache = HashMap<String, Bitmap>()
+        val thumbCache = thumbMem
         val thumbRef = tb.pRef ?: tb.web?.url ?: tb.url
         fun showThumb(bm: Bitmap?) {
             if (bm == null) return
@@ -2557,48 +2600,28 @@ class BrowserActivity : Activity() {
         fun loadThumb(f: FoundItem) {
             thumbCache[f.url]?.let { showThumb(it); return }
             val key = f.url
-            Thread {
-                var bm: Bitmap? = null
-                if (f.kind != "blob" && f.kind != "mpd") {
-                    val r = android.media.MediaMetadataRetriever()
-                    try {
-                        val u = key.substringBefore("#")
-                        r.setDataSource(u, Net.headers(u, thumbRef))
-                        val d = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-                        val src = r.getFrameAtTime(minOf(d * 100L, 2_000_000L), android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-                        if (src != null) {
-                            val w = 360
-                            bm = if (src.width > w) Bitmap.createScaledBitmap(src, w, src.height * w / src.width, true) else src
-                        }
-                    } catch (_: Throwable) {
-                    } finally {
-                        try { r.release() } catch (_: Throwable) {}
+            fun still() = dlg.isShowing && items.getOrNull(sel)?.url == key && thumbImg.visibility != View.VISIBLE
+            // 1) Sayfada oynayan videonun karesi: anında gelir
+            tb.web?.evaluateJavascript("window.__fpSnap&&window.__fpSnap()") { raw ->
+                try {
+                    val str = org.json.JSONTokener(raw ?: "null").nextValue() as? String
+                    if (!str.isNullOrEmpty() && str.contains("base64,") && still()) {
+                        val bytes = android.util.Base64.decode(str.substringAfter("base64,"), android.util.Base64.DEFAULT)
+                        val sn = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        if (sn != null) showThumb(sn)
                     }
+                } catch (_: Throwable) {
                 }
+            }
+            // 2) Dosyadan kare (uzak adreste daha yavaş): gelince önbelleğe alınır
+            if (!thumbBusy.add(key)) return
+            Thread {
+                val bm = grabFrame(f, thumbRef)
                 ui.post {
-                    if (!dlg.isShowing || items.getOrNull(sel)?.url != key) {
-                        bm?.let { thumbCache[key] = it }
-                        return@post
-                    }
-                    if (bm != null) {
-                        thumbCache[key] = bm!!
-                        showThumb(bm)
-                    } else {
-                        tb.web?.evaluateJavascript("window.__fpSnap&&window.__fpSnap()") { raw ->
-                            try {
-                                val str = org.json.JSONTokener(raw ?: "null").nextValue() as? String
-                                if (!str.isNullOrEmpty() && str.contains("base64,")) {
-                                    val bytes = android.util.Base64.decode(str.substringAfter("base64,"), android.util.Base64.DEFAULT)
-                                    val sn = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                                    if (sn != null && dlg.isShowing && items.getOrNull(sel)?.url == key) {
-                                        thumbCache[key] = sn
-                                        showThumb(sn)
-                                    }
-                                }
-                            } catch (_: Throwable) {
-                            }
-                        }
-                    }
+                    thumbBusy.remove(key)
+                    if (bm == null) return@post
+                    thumbCache[key] = bm
+                    if (dlg.isShowing && items.getOrNull(sel)?.url == key) showThumb(bm)
                 }
             }.start()
         }
