@@ -2136,8 +2136,8 @@ class BrowserActivity : Activity() {
         val tb = cur ?: return
         val on = tb.found.isNotEmpty() || isYoutube(tb.url)
         fabView.setOn(on)
-        // Yuvarlak düğme kaldırıldı: indirme düğmesi artık her videonun üstünde
-        fab.visibility = View.GONE
+        // Yuvarlak indirme düğmesi geri getirildi (sürüklenebilir; video bulununca kırmızı)
+        fab.visibility = View.VISIBLE
     }
 
     // ---- indirme

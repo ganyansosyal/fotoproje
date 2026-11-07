@@ -18,9 +18,6 @@ object HomeHtml {
         val fg = if (dark) "#e8eaed" else "#202124"
         val card = if (dark) "#303134" else "#f1f3f4"
         val sub = if (dark) "#9aa0a6" else "#5f6368"
-        val accBg = if (dark) "#2b3a55" else "#e8f0fe"
-        val accFg = if (dark) "#8ab4f8" else "#1a73e8"
-        val linkTxt = if (L.code == "tr") "Link ile indir" else "Download from link"
         val tiles = StringBuilder()
         for (e in Store.homeSites()) {
             val name = e[0]
@@ -41,7 +38,6 @@ object HomeHtml {
         return TEMPLATE
             .replace("@@bg@@", bg).replace("@@fg@@", fg).replace("@@card@@", card).replace("@@sub@@", sub)
             .replace("@@tiles@@", tiles.toString())
-            .replace("@@accbg@@", accBg).replace("@@accfg@@", accFg).replace("@@link@@", esc(linkTxt))
             .replace("@@base@@", JSONObject.quote(Store.engineBase()))
             .replace("@@home@@", esc(L.t("home")))
             .replace("@@favHint@@", esc(L.t("favHint")))
@@ -56,10 +52,7 @@ html,body{margin:0;background:@@bg@@;color:@@fg@@;font-family:sans-serif;overscr
 body{padding:20px 16px 32px;min-height:100vh;box-sizing:border-box}
 h1{text-align:center;font-weight:600;font-size:22px;margin:22px 0 6px}
 p{text-align:center;margin:0 0 20px;color:@@sub@@;font-size:12px}
-form{max-width:520px;margin:0 auto 10px}
-.ld{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;max-width:520px;box-sizing:border-box;margin:0 auto 30px;padding:11px 18px;border:0;border-radius:24px;background:@@accbg@@;color:@@accfg@@;font-size:14px;font-weight:600}
-.ld:active{transform:scale(.98)}
-.ld svg{width:18px;height:18px}
+form{max-width:520px;margin:0 auto 30px}
 input{width:100%;box-sizing:border-box;padding:11px 18px;border-radius:24px;border:0;
 background:@@card@@;color:@@fg@@;font-size:14px;outline:none}
 .g{display:grid;grid-template-columns:repeat(4,1fr);gap:18px 8px;max-width:520px;margin:auto}
@@ -74,7 +67,6 @@ display:flex;align-items:center;justify-content:center;font-size:22px;font-weigh
 </style></head><body>
 <h1>@@home@@</h1><p>@@favHint@@</p>
 <form id="f"><input id="q" type="text" enterkeyhint="go" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="@@search@@" autocomplete="off"></form>
-<button class="ld" id="ld" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>@@link@@</button>
 <div class="g">@@tiles@@</div>
 <script>
 var base=@@base@@;
@@ -88,7 +80,6 @@ document.querySelectorAll('img.lg:not(.ok)').forEach(function(im){
  if(!h){ im.src=globe; } else { next(); }
 });
 function H(n,a,b){try{window.flutter_inappwebview.callHandler(n,a,b)}catch(e){}}
-document.getElementById('ld').addEventListener('click',function(){H('linkDl','','')});
 document.getElementById('addfav').addEventListener('click',function(e){e.preventDefault();H('addFav','','')});
 document.querySelectorAll('.t').forEach(function(a){
  if(a.id==='addfav') return;
