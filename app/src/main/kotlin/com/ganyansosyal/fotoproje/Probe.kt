@@ -50,9 +50,9 @@ class MediaInfo(val url: String, var kind: String) {
 object Probe {
     private val pool = Executors.newCachedThreadPool()
 
-    /** Düz dosya (mp4/webm) için asgari eşikler: altındakiler reklam/önizleme/yer tutucu sayılır. */
-    private const val MIN_FILE = 5L * 1024 * 1024
-    private const val MIN_DUR = 60.0
+    /** Düz dosya (mp4/webm) için eşikler. MIN_FILE altı kesin çöp; kısa+küçük olanlar parça/önizlemedir. */
+    private const val MIN_FILE = 1L * 1024 * 1024
+    private const val MIN_FILE_SHORT = 4L * 1024 * 1024
 
     /** Yalnızca parça/ses/altyazı olan uzantılar: asla video adayı olmaz. */
     private val FRAGMENT_EXT = Regex("\\.(ts|m4s|aac|m4a|mp3|cmfv|cmfa|vtt|srt)$", RegexOption.IGNORE_CASE)
@@ -342,20 +342,17 @@ object Probe {
         val adPlaying = expectDur in 1.0..90.0 && longExists
         val strict = expectDur >= 5 && !adPlaying
         var ok = list.filter { it.usable && !synchronized(children) { children.contains(it.url) } }
-        // Düz dosyalar (mp4/webm) için katı doğrulama: boyut ya da süre en az biri doğrulanmalı,
-        // bilinen hiçbiri eşiğin altında kalmamalı. Akışlar, blob, oynayan video (exactSrc) ve
-        // süresi oynatıcının bildirdiği süreyle eşleşen dosyalar muaf.
+        // Düz dosyalar (mp4/webm):
+        //  1) Boyutu bilinen ve 1 MB altındakiler kesin çöptür (191 KB önizleme vb.): oynayan video dahi olsa ele.
+        //  2) Kısa (<= 6 sn) ve küçük (< 4 MB) dosyalar parça/önizlemedir: oynayan video hariç ele.
+        //  3) Boyutu/süresi bilinmeyenler elenmez (sunucu bilgi vermiyor olabilir); sıralamada geride kalır.
+        // Akışlar (m3u8/mpd) ve blob bu süzgece takılmaz.
         ok = ok.filter { e ->
-            if (e.isStream || e.kind == "blob" || e.url == exactSrc) return@filter true
-            if (expectDur >= 1 && e.duration > 0 &&
-                Math.abs(e.duration - expectDur) <= maxOf(2.5, expectDur * 0.04)
-            ) return@filter true
-            val sizeOk = e.size >= MIN_FILE
-            val durOk = e.duration >= MIN_DUR
-            (sizeOk || durOk) && (e.size <= 0L || sizeOk) && (e.duration <= 0.0 || durOk)
+            if (e.isStream || e.kind == "blob") return@filter true
+            if (e.size in 1 until MIN_FILE) return@filter false
+            if (e.url == exactSrc) return@filter true
+            !(e.duration in 0.1..6.0 && e.size < MIN_FILE_SHORT)
         }
-        // Hem görüntü hem ses olan seçenek varsa sessiz (yalnızca görüntü) olanları gösterme
-        if (ok.any { it.audio == true }) ok = ok.filter { it.audio != false }
         // Uzun bir akış (m3u8/mpd, >= 10 dk) varken, ondan çok kısa süreli tek dosyalar
         // (reklam, önizleme, yer tutucu mp4) ana video sayılmaz; oynayan video hariç
         val mainDur = ok.filter { it.isStream }.maxOfOrNull { it.duration } ?: 0.0
