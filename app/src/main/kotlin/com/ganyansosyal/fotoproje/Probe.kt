@@ -326,7 +326,9 @@ object Probe {
         // Oynayan videonun süresi biliniyorsa (kısa klipler dâhil) eşleşmeyenleri ele
         // Reklam oynarken oynayan videonun süresi kısadır (15-60 sn); gerçek video (uzun) adayı bu süreyle
         // elenmesin diye, uzun aday varken kısa süreli bir oynatmayı reklam sayıp katı eşleştirmeyi bırak.
-        val longExists = list.any { it.usable && it.duration >= 180 }
+        // Eşik: oynayan sürenin en az 2 katı ve ≥90 sn (eskiden 180 sn: kısa asıl videolarda reklam elenmiyordu)
+        val adCut = maxOf(90.0, expectDur * 2)
+        val longExists = list.any { it.usable && it.duration >= adCut }
         val adPlaying = expectDur in 1.0..90.0 && longExists
         val strict = expectDur >= 5 && !adPlaying
         var ok = list.filter { it.usable && !synchronized(children) { children.contains(it.url) } }
@@ -334,7 +336,7 @@ object Probe {
         if (ok.any { it.audio == true }) ok = ok.filter { it.audio != false }
         // Reklam oynuyorsa kısa (reklam/önizleme) adayları listeden çıkar
         if (adPlaying) {
-            val noAd = ok.filter { it.duration <= 0 || it.duration >= 120 }
+            val noAd = ok.filter { it.duration <= 0 || it.duration >= adCut }
             if (noAd.isNotEmpty()) ok = noAd
         }
         // Aynı klasörde çok sayıda dosya = HLS/DASH parçaları (seg1.mp4, seg2.mp4 ...)

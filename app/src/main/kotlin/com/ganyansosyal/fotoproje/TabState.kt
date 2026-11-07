@@ -44,5 +44,9 @@ class Tab(val id: Int, var url: String) {
     var bannerDone = false
     var autoShow = false // Link ile indir'den açıldı: video bulununca seçenekleri kendiliğinden göster
     val netCands = ArrayList<NetCand>()
+    /** Reklam (kısa oynatma) sırasında bulunan adresler -> işaretlenme zamanı. Yeniden istenirse (t büyürse) geçerli sayılır. */
+    val stale = HashMap<String, Long>()
+    /** Sonraki probe oynatıcı süresine bakmadan tüm ağ adaylarını tarar (reklam oynarken yanlış eşleşmeyi önler). */
+    var deepProbe = false
     var probeRun: Runnable? = null
 }

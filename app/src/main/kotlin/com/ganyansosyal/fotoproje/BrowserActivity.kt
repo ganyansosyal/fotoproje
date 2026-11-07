@@ -2096,6 +2096,21 @@ class BrowserActivity : Activity() {
             return
         }
         val dur = m.optDouble("d", 0.0)
+        // Aynı oynatıcıda süre/kaynak değiştiyse (reklam bitti, asıl video başladı) önceki oynatmaya
+        // ait adaylar bayat sayılır; yoksa reklam adresi ~90 sn aday listesinde kalıp asıl videoyu gizler.
+        val srcNew = m.optString("src", "")
+        if (id == tb.playerId && tb.pDur > 0 &&
+            (Math.abs(dur - tb.pDur) > 1 || (srcNew.isNotEmpty() && tb.pSrc.isNotEmpty() && srcNew != tb.pSrc))
+        ) {
+            val now = System.currentTimeMillis()
+            val tol = maxOf(2.5, tb.pDur * 0.04)
+            for (f in tb.found) {
+                if (f.duration > 0 && Math.abs(f.duration - tb.pDur) <= tol) tb.stale[f.url.substringBefore("#fpq=")] = now
+            }
+            if (tb.pSrc.isNotEmpty()) tb.stale[tb.pSrc] = now
+            tb.found = emptyList()
+            if (tb === cur) updateFab()
+        }
         if (id != tb.playerId || Math.abs(dur - tb.pDur) > 1) tb.bannerDone = false
         tb.playerId = id
         tb.pDur = dur
@@ -2124,6 +2139,7 @@ class BrowserActivity : Activity() {
         tb.probeRun?.let { ui.removeCallbacks(it) }
         tb.probeGen++
         synchronized(tb.netCands) { tb.netCands.clear() }
+        tb.stale.clear()
         tb.pUrls.clear()
         tb.pHints.clear()
         tb.playerId = null
@@ -2151,7 +2167,14 @@ class BrowserActivity : Activity() {
     private fun probeArgs(tb: Tab): Map<String, Any?> {
         try { tb.web?.settings?.userAgentString?.takeIf { it.isNotBlank() }?.let { Net.ua = it } } catch (_: Throwable) {}
         val now = System.currentTimeMillis()
-        val net = synchronized(tb.netCands) { tb.netCands.filter { now - it.t < 90_000 } }
+        // Derin tarama: oynayan süre kısaysa (reklam olabilir) süreye göre eşleştirme yapma, tüm adayları en uzun önde sırala.
+        val deep = tb.deepProbe
+        tb.deepProbe = false
+        val adLike = deep || (!tb.pLive && tb.pDur in 1.0..90.0)
+        val win = if (deep) 300_000L else 90_000L
+        val net = synchronized(tb.netCands) {
+            tb.netCands.filter { now - it.t < win && it.t > (tb.stale[it.url] ?: 0L) }
+        }
         val urls = LinkedHashSet<String>()
         urls.addAll(tb.pUrls)
         for (c in net) urls.add(c.url)
@@ -2161,8 +2184,8 @@ class BrowserActivity : Activity() {
             "urls" to urls.filter { it.startsWith("http") || it.startsWith("blob:") },
             "hints" to hints,
             "ref" to (tb.pRef ?: tb.web?.url ?: ""),
-            "dur" to (if (tb.pLive) 0.0 else tb.pDur),
-            "src" to tb.pSrc,
+            "dur" to (if (tb.pLive || deep) 0.0 else tb.pDur),
+            "src" to (if (adLike) "" else tb.pSrc),
             "h" to tb.pH
         )
     }
@@ -2438,11 +2461,12 @@ class BrowserActivity : Activity() {
             scanPage(tb)
             return
         }
-        if (tb.found.isNotEmpty()) {
+        if (tb.found.isNotEmpty() && !(tb.pDur in 1.0..90.0)) {
             showFound() // bulunan videoları seçenek olarak göster
             return
         }
         toast(t("checking"))
+        if (tb.pDur in 1.0..90.0) tb.deepProbe = true // kısa oynatma reklam olabilir: tüm adayları yeniden tara
         runProbe(tb) { list ->
             if (list.isEmpty()) toast(t("noVideo")) else showFound()
         }
