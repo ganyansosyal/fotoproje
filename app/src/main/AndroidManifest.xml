@@ -15,7 +15,7 @@
         android:usesCleartextTraffic="true"
         android:hardwareAccelerated="true"
         android:enableOnBackInvokedCallback="false"
-        android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+        android:theme="@style/AppTheme.Light">
 
         <activity
             android:name=".BrowserActivity"
