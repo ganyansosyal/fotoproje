@@ -216,7 +216,7 @@ object Downloads {
                     err?.let { throw IOException(it) }
                 }
                 else -> Streams.direct(
-                    url, path, Net.smartHeaders(url, referer, task.cancel),
+                    url, path, Net.variants(url, referer),
                     task.cancel, report
                 )
             }

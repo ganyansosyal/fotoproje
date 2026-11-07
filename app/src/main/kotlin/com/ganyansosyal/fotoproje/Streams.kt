@@ -17,16 +17,19 @@ object Streams {
         keys: List<String?>? = null, ivs: List<ByteArray?>? = null, seq: Long = 0
     ) {
         if (urls.isEmpty()) throw IOException("Video parçaları bulunamadı")
-        Native.segments(urls, init, path, headers, keys, ivs, seq, 12, cancel) { a, b ->
+        Native.segments(
+            urls, init, path, Net.variants(urls.first(), headers["Referer"] ?: ""),
+            keys, ivs, seq, 12, cancel
+        ) { a, b ->
             if (b > 0) report(start + span * a / b, "$label: $a/$b")
         }
     }
 
     fun direct(
-        url: String, path: String, headers: Map<String, String>, cancel: CancelFlag,
+        url: String, path: String, headerVariants: List<Map<String, String>>, cancel: CancelFlag,
         report: Report, conns: Int = 12, strict: Boolean = false
     ) {
-        Native.direct(url, path, headers, conns, strict, cancel) { a, b ->
+        Native.direct(url, path, headerVariants, conns, strict, cancel) { a, b ->
             if (b > 0) report(a.toDouble() / b, "%" + (a * 100 / b))
             else report(-1.0, String.format("%.1f MB", a / 1048576.0))
         }
