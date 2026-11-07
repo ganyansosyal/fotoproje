@@ -58,6 +58,24 @@ object Probe {
 
     private fun text(url: String, referer: String) = Net.fetchText(url, referer).body
 
+    /**
+     * Liste getirme geçici hatalarda (ağ kısıtı, arka plandan dönüş, anlık 403/5xx) başarısız olabilir;
+     * süre/boyut "bilinmiyor" kalmasın diye kısa aralıklarla birkaç kez dener.
+     */
+    private fun textRetry(url: String, referer: String, tries: Int = 3): String {
+        var last: Throwable? = null
+        for (k in 0 until tries) {
+            try {
+                return text(url, referer)
+            } catch (e: Throwable) {
+                if (e is CanceledEx) throw e
+                last = e
+                if (k < tries - 1) try { Thread.sleep(700L * (k + 1)) } catch (_: InterruptedException) { break }
+            }
+        }
+        throw last ?: java.io.IOException("İstek başarısız")
+    }
+
     /** Uzantısı/ipucu olmayan adreste ilk baytlara bakarak biçimi bulur. */
     private fun sniffKind(url: String, referer: String): String? {
         try {
@@ -95,7 +113,7 @@ object Probe {
     }
 
     /** Dosyanın görüntü / ses izi var mı (görüntü, ses). Okunamazsa null: bilinmiyor sayılır. */
-    private fun tracks(url: String, referer: String): Pair<Boolean, Boolean>? {
+    private fun tracks(url: String, referer: String, durOut: DoubleArray? = null): Pair<Boolean, Boolean>? {
         var res: Pair<Boolean, Boolean>? = null
         val t = Thread {
             val ex = android.media.MediaExtractor()
@@ -103,11 +121,18 @@ object Probe {
                 ex.setDataSource(url.substringBefore("#"), Net.headers(url, referer))
                 var v = false
                 var a = false
+                var maxDur = 0.0
                 for (i in 0 until ex.trackCount) {
-                    val m = ex.getTrackFormat(i).getString(android.media.MediaFormat.KEY_MIME) ?: continue
+                    val f = ex.getTrackFormat(i)
+                    if (f.containsKey(android.media.MediaFormat.KEY_DURATION)) {
+                        val dsec = f.getLong(android.media.MediaFormat.KEY_DURATION) / 1_000_000.0
+                        if (dsec > maxDur) maxDur = dsec
+                    }
+                    val m = f.getString(android.media.MediaFormat.KEY_MIME) ?: continue
                     if (m.startsWith("video/")) v = true
                     if (m.startsWith("audio/")) a = true
                 }
+                if (durOut != null && durOut.isNotEmpty()) durOut[0] = maxDur
                 res = Pair(v, a)
             } catch (_: Throwable) {
             } finally {
@@ -137,7 +162,7 @@ object Probe {
         try {
             if (kind == "blob") return info
             if (kind == "m3u8") {
-                var ls = text(url, referer).split('\n').map { it.trim() }
+                var ls = textRetry(url, referer).split('\n').map { it.trim() }
                 var base = url
                 if (ls.any { it.startsWith("#EXT-X-STREAM-INF") }) {
                     // Ana listedeki tüm kalite seçeneklerini topla
@@ -193,7 +218,7 @@ object Probe {
                         return info
                     }
                     val vu = Media.resolve(base, best)
-                    ls = text(vu, referer).split('\n').map { it.trim() }
+                    ls = textRetry(vu, referer).split('\n').map { it.trim() }
                     base = vu
                 }
                 val segs = ls.filter { it.isNotEmpty() && !it.startsWith("#") }
@@ -270,7 +295,10 @@ object Probe {
             }
             if (info.usable && kind != "blob") {
                 // Görüntü/ses izi kontrolü: yalnızca-ses dosyası aday olmaz, sessiz olan işaretlenir
-                val tr = tracks(url, referer)
+                val dur = DoubleArray(1)
+                val tr = tracks(url, referer, dur)
+                // Süre bilinirse parça (kısa) dosyalar ayıklanabilir, oynayan videoyla eşleştirilebilir
+                if (info.duration <= 0 && dur[0] > 0) info.duration = dur[0]
                 if (tr != null) {
                     if (!tr.first && tr.second) {
                         info.usable = false
@@ -300,6 +328,14 @@ object Probe {
         var ok = list.filter { it.usable && !synchronized(children) { children.contains(it.url) } }
         // Hem görüntü hem ses olan seçenek varsa sessiz (yalnızca görüntü) olanları gösterme
         if (ok.any { it.audio == true }) ok = ok.filter { it.audio != false }
+        // Aynı klasörde çok sayıda dosya = HLS/DASH parçaları (seg1.mp4, seg2.mp4 ...)
+        fun dirOf(u: String) = u.substringBefore('?').substringBeforeLast('/')
+        val segDirs = ok.filter { !it.isStream && it.url != exactSrc && !it.verified }
+            .groupBy { dirOf(it.url) }.filter { it.value.size >= 3 }.keys
+        if (segDirs.isNotEmpty()) {
+            val kept = ok.filter { it.isStream || it.url == exactSrc || dirOf(it.url) !in segDirs }
+            if (kept.isNotEmpty()) ok = kept
+        }
         val mismatch = HashSet<MediaInfo>()
         for (e in ok) {
             if (exactSrc.isNotEmpty() && e.url == exactSrc) {
@@ -316,6 +352,7 @@ object Probe {
         if (okMatch.isNotEmpty()) ok = okMatch
         if (ok.any { it.verified }) ok = ok.filter { it.verified }
         ok = ok.sortedByDescending { it.rank }
+        if (ok.size > 8) ok = ok.take(8)
         val seen = HashSet<String>()
         val out = ArrayList<MediaInfo>()
         for (e in ok) {

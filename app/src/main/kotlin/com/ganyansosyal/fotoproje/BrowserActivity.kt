@@ -87,7 +87,32 @@ class BrowserActivity : Activity() {
     private lateinit var dlIcon: VecIcon
     private var dlBlink: ValueAnimator? = null
     private var themeFg = Color.BLACK
-    private val dlListener: () -> Unit = { runOnUiThread { updateDlBadge() } }
+    private val seenFail = HashSet<String>()
+    private val dlListener: () -> Unit = {
+        runOnUiThread {
+            updateDlBadge()
+            // Adres süresi dolmuş (401/403/410) bir indirme başarısız olduysa bulunan listeyi yenile
+            try {
+                for (t in ArrayList(Downloads.active)) {
+                    if (t.status != DlStatus.FAILED || !seenFail.add(t.id)) continue
+                    val e = t.error ?: ""
+                    if (e.startsWith("HTTP 403") || e.startsWith("HTTP 410") || e.startsWith("HTTP 401")) {
+                        val c = cur
+                        if (c != null && c.playerId != null) {
+                            val bare = t.url.substringBefore("#fpq=")
+                            synchronized(c.netCands) { c.netCands.removeAll { it.url == bare } }
+                            scheduleProbe(c)
+                            toast(
+                                if (L.code == "tr") "Adres süresi dolmuş olabilir, liste yenileniyor. Tekrar dene."
+                                else "The link may have expired, refreshing the list. Try again."
+                            )
+                        }
+                    }
+                }
+            } catch (_: Throwable) {
+            }
+        }
+    }
     private lateinit var line: View
     private lateinit var bottom: LinearLayout
     private lateinit var backBtn: TextView
@@ -181,6 +206,10 @@ class BrowserActivity : Activity() {
         updateDlBadge()
         val c = cur
         if (c != null && c.isHome && c.web != null && !c.loading) loadHome(c)
+        // Arka plandayken süre/boyut alınamamış (bilinmiyor) yayınlar varsa geri dönünce yeniden incele
+        if (c != null && c.playerId != null && c.found.any {
+                (it.kind == "m3u8" || it.kind == "mpd") && (it.duration <= 0.0 || (it.size <= 0L && it.bw <= 0))
+            }) scheduleProbe(c)
     }
 
     override fun onDestroy() {
