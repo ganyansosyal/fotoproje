@@ -206,8 +206,18 @@ object Media {
  function allowed(){ return Date.now()-last<OK; }
  window.addEventListener('click',mark,true);
  window.addEventListener('keydown',mark,true);
+ // Mobil oynatıcıların çoğu "dokun-oynat" için click değil touchend kullanır (click'i engeller).
+ // Kısa bir dokunuş (kaydırma değil) da kullanıcı hareketi sayılır; yoksa play() reddedilir,
+ // video hiç oynamaz ve algılanamaz.
+ var tx=0, ty=0;
+ window.addEventListener('touchstart',function(e){
+  if(e.isTrusted && e.touches && e.touches[0]){ tx=e.touches[0].clientX; ty=e.touches[0].clientY; }
+ },true);
  window.addEventListener('touchend',function(e){
-  if(e.isTrusted && location.pathname.indexOf('/shorts')===0) last=Date.now();
+  if(!e.isTrusted) return;
+  var t=e.changedTouches&&e.changedTouches[0];
+  if(location.pathname.indexOf('/shorts')===0 ||
+   (t && Math.abs(t.clientX-tx)<12 && Math.abs(t.clientY-ty)<12)) last=Date.now();
  },true);
  var P=window.HTMLMediaElement&&HTMLMediaElement.prototype;
  if(!P) return;
