@@ -41,12 +41,21 @@ class MediaInfo(val url: String, var kind: String) {
         get() {
             if (!usable) return -1.0
             if (kind == "blob") return 0.0
-            return (if (verified) 1e6 else 0.0) + 1000 + duration * 10 + height + size / 1e6
+            // Ana liste (kalite seçenekleri olan master playlist) tek parça listelerden önce gelir
+            val master = if (variants.isNotEmpty()) 500.0 else 0.0
+            return (if (verified) 1e6 else 0.0) + 1000 + master + duration * 10 + height + size / 1e6
         }
 }
 
 object Probe {
     private val pool = Executors.newCachedThreadPool()
+
+    /** Bunun altındaki tek dosyalar (oynayan video hariç) parça sayılır, listeye girmez. */
+    private const val MIN_FILE = 1L * 1024 * 1024
+    private const val MIN_FILE_SHORT = 4L * 1024 * 1024
+
+    /** Yalnızca parça/ses/altyazı olan uzantılar: asla video adayı olmaz. */
+    private val FRAGMENT_EXT = Regex("\\.(ts|m4s|aac|m4a|mp3|cmfv|cmfa|vtt|srt)$", RegexOption.IGNORE_CASE)
 
     private fun extinfTotal(ls: List<String>): Double {
         var total = 0.0
@@ -150,6 +159,9 @@ object Probe {
         listOf("mp4a", "ac-3", "ec-3", "opus", "flac", "mp3", "vorbis").any { c.contains(it) }
 
     private fun probeOne(url: String, hint: String, referer: String, children: MutableSet<String>): MediaInfo {
+        if (FRAGMENT_EXT.containsMatchIn(url.substringBefore('?').substringBefore('#'))) {
+            return MediaInfo(url, "mp4").also { it.usable = false }
+        }
         var kind = Media.kind(url) ?: hint
         if (kind == "sniff") {
             // Ağdan uzantısız yakalanan adres: gerçekten video değilse aday olmaz
@@ -330,6 +342,11 @@ object Probe {
         val adPlaying = expectDur in 1.0..90.0 && longExists
         val strict = expectDur >= 5 && !adPlaying
         var ok = list.filter { it.usable && !synchronized(children) { children.contains(it.url) } }
+        // Küçük / kısa süreli tek dosyalar parçadır (150-200 KB TS/fMP4 vb.): oynayan video hariç ele
+        ok = ok.filter { e ->
+            e.isStream || e.kind == "blob" || e.url == exactSrc || e.size <= 0L ||
+                (e.size >= MIN_FILE && !(e.duration in 0.1..6.0 && e.size < MIN_FILE_SHORT))
+        }
         // Hem görüntü hem ses olan seçenek varsa sessiz (yalnızca görüntü) olanları gösterme
         if (ok.any { it.audio == true }) ok = ok.filter { it.audio != false }
         // Reklam oynuyorsa kısa (reklam/önizleme) adayları listeden çıkar

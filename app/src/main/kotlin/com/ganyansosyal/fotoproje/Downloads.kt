@@ -230,11 +230,21 @@ object Downloads {
 
     /** Hata mesajı döner (null: başladı). */
     fun start(
-        url: String, referer: String, hint: String?, title: String?,
+        url0: String, referer: String, hint: String?, title: String?,
         blobReader: ((String, String, BlobRes) -> Unit)?
     ): String? {
         if (!wifiOk()) return L.t("wifiBlocked")
+        var url = url0
         var kind = Media.kind(url) ?: hint ?: "mp4"
+        // blob: bellekteki geçici nesnedir; önce arkasındaki düz kaynak (m3u8/mp4) var mı bak.
+        // Bulunamazsa eski yol (sayfadan blob okuma) denenir.
+        if (kind == "blob") {
+            val real = try { Streams.resolveBlob(referer, CancelFlag()) } catch (_: Throwable) { null }
+            if (real != null) {
+                url = real
+                kind = Media.kind(real) ?: "mp4"
+            }
+        }
         // Yalnızca gerçek video adresleri; blob: sayfadan okunur
         if (kind != "blob" && pathExt(url) !in ALLOWED_EXT) {
             // Uzantısız adres: Content-Type / ilk baytlarla gerçek türü bul (start() arka plan iş parçacığında çalışır)

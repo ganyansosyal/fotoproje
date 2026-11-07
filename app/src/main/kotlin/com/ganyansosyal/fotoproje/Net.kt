@@ -51,8 +51,10 @@ object Net {
     }
 
     // ---- Taze adres takibi: WebView'in en son istediği .mp4/.m3u8 adresi (token yenilenmiş olabilir)
-    private val seenMedia = object : LinkedHashMap<String, String>() {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > 200
+    private class Seen(val url: String, val at: Long)
+
+    private val seenMedia = object : LinkedHashMap<String, Seen>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Seen>?) = size > 200
     }
 
     /** Host + yol (sorgu/fragment olmadan): token yalnızca sorguda değişen adresleri eşleştirir. */
@@ -68,14 +70,22 @@ object Net {
         val key = pathKey(u)
         val ext = key.substringAfterLast('.', "").lowercase()
         if (key.isEmpty() || (ext != "mp4" && ext != "m3u8")) return
-        synchronized(seenMedia) { seenMedia[key] = u.substringBefore("#") }
+        synchronized(seenMedia) { seenMedia[key] = Seen(u.substringBefore("#"), System.currentTimeMillis()) }
     }
 
     /** Aynı host+yol için WebView'in gördüğü en yeni adres (yoksa null). */
     fun newestFor(u: String): String? {
         val key = pathKey(u)
         if (key.isEmpty()) return null
-        return synchronized(seenMedia) { seenMedia[key] }
+        return synchronized(seenMedia) { seenMedia[key]?.url }
+    }
+
+    /** WebView'in son dakikalarda istediği .mp4/.m3u8 adresleri, en yeniden eskiye. */
+    fun recentMedia(maxAgeMs: Long = 10 * 60_000L): List<String> {
+        val now = System.currentTimeMillis()
+        return synchronized(seenMedia) {
+            seenMedia.values.filter { now - it.at <= maxAgeMs }.sortedByDescending { it.at }.map { it.url }
+        }
     }
 
     // ---- Protokol seviyesinde tür algılama (uzantı gerekmez, platformdan bağımsız)

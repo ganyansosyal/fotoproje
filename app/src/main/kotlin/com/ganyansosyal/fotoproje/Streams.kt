@@ -18,6 +18,33 @@ object Streams {
     }
 
     /**
+     * blob: için sayfanın gerçekten istediği düz kaynağı bulur (m3u8 ana listesi ya da mp4); yoksa null.
+     * Yalnızca ağdan görülen ya da sayfada yazılı adresleri kullanır; DRM/şifreli akışları çözmez
+     * (onlar indirme sırasında mevcut kontrollerle reddedilir).
+     */
+    fun resolveBlob(referer: String, cancel: CancelFlag): String? {
+        val cands = LinkedHashSet<String>()
+        cands.addAll(Net.recentMedia())
+        if (cands.isEmpty() && referer.isNotBlank()) {
+            try { PageScan.scan(referer) { cancel.on }.forEach { cands.add(it.url) } } catch (_: Throwable) {}
+        }
+        val list = cands.take(8)
+        fun ext(u: String) = u.substringBefore('?').substringBefore('#').substringAfterLast('.', "").lowercase()
+        val m3u8 = list.filter { ext(it) == "m3u8" }
+        for (u in m3u8) {
+            val body = try {
+                Net.fetchText(u, referer, cancel).body
+            } catch (e: CanceledEx) {
+                throw e
+            } catch (_: Throwable) {
+                continue
+            }
+            if (body.contains("#EXT-X-STREAM-INF")) return u // ana liste
+        }
+        return m3u8.firstOrNull() ?: list.firstOrNull { ext(it) == "mp4" }
+    }
+
+    /**
      * Süresi dolmuş (token/timestamp) bir adres için taze adres bulur; bulamazsa null.
      * 1) Ucuz yol: WebView'in aynı host+yol için en son istediği adres (oynatıcı token'ı yenilemiştir).
      * 2) [network] true ise: bulunduğu sayfa yeniden taranır ve aynı dosya adlı farklı adres aranır.
