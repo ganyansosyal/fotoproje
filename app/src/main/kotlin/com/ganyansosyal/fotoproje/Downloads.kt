@@ -252,7 +252,23 @@ object Downloads {
                     }
                 }
             }
-            finish(task, path, if (sepAudio) apath else null)
+            // HLS/DASH tek parça çıktısı ham TS / parçalı MP4'tür: temiz MP4'e çevir (siyah görüntü önlenir)
+            var outPath = path
+            if (!sepAudio && (kind == "m3u8" || kind == "mpd")) {
+                val np = "$path.n.mp4"
+                try {
+                    task.label = if (L.code == "tr") "Video düzenleniyor…" else "Fixing video…"
+                    notifyUi(true)
+                    Mux.remux(path, np)
+                    File(path).delete()
+                    outPath = np
+                } catch (e: CanceledEx) {
+                    throw e
+                } catch (_: Throwable) {
+                    File(np).delete() // çevrilemedi: ham dosya olduğu gibi kalır
+                }
+            }
+            finish(task, outPath, if (sepAudio) apath else null)
         }
     }
 
@@ -521,6 +537,11 @@ object Downloads {
         }
         task.path = dest.path
         task.size = dest.length()
+        if (dest.extension.lowercase() in setOf("mp4", "mov", "m4v", "3gp", "webm", "mkv") && !Mux.hasFrame(dest.path)) {
+            val w = if (L.code == "tr") "Uyarı: bu cihaz görüntüyü çözemiyor olabilir (siyah ekran)."
+            else "Warning: this device may not decode the picture (black screen)."
+            task.note = if (task.note.isNullOrEmpty()) w else task.note + " " + w
+        }
         if (sepAudio != null) {
             val ad = File(dest.path.replace(Regex("\\.[^.]+$"), "_ses.m4a"))
             File(sepAudio).copyTo(ad, overwrite = true, bufferSize = 262144)
@@ -589,6 +610,16 @@ object Mux {
         return -1
     }
 
+    private fun rotation(f: MediaFormat): Int =
+        try { if (f.containsKey("rotation-degrees")) f.getInteger("rotation-degrees") else 0 } catch (_: Throwable) { 0 }
+
+    private fun isKey(ex: MediaExtractor) = (ex.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC) != 0
+
+    /**
+     * Görüntü + ayrı ses -> temiz MP4.
+     * Siyah görüntü nedenleri giderilir: ilk anahtar kareden önceki çözülemez kareler atılır,
+     * zaman damgaları sıfırdan başlatılır (görüntü sesten geç başlamaz), dönüş bilgisi korunur.
+     */
     fun run(video: String, audio: String, out: String, onProgress: (Double) -> Unit = {}) {
         val ve = MediaExtractor()
         val ae = MediaExtractor()
@@ -602,14 +633,22 @@ object Mux {
             if (vt < 0 || at < 0) throw IOException("track yok")
             ve.selectTrack(vt)
             ae.selectTrack(at)
+            // İlk anahtar kareye kadar olan kareler çözülemez (ekran siyah kalır): atla
+            while (ve.sampleTime >= 0 && !isKey(ve)) ve.advance()
+            val v0 = ve.sampleTime
+            if (v0 < 0) throw IOException("Görüntü karesi yok")
+            val a0 = ae.sampleTime
+            val base = if (a0 in 0 until v0) a0 else v0
             muxer = MediaMuxer(out, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-            val vi = muxer.addTrack(ve.getTrackFormat(vt))
+            val vf = ve.getTrackFormat(vt)
+            val vi = muxer.addTrack(vf)
             val ai = muxer.addTrack(ae.getTrackFormat(at))
+            try { muxer.setOrientationHint(rotation(vf)) } catch (_: Throwable) {}
             muxer.start()
             started = true
-            val buf = ByteBuffer.allocate(2 * 1024 * 1024)
+            val buf = ByteBuffer.allocate(4 * 1024 * 1024)
             val info = MediaCodec.BufferInfo()
-            val totalUs = try { ve.getTrackFormat(vt).getLong(MediaFormat.KEY_DURATION) } catch (_: Throwable) { 0L }
+            val totalUs = try { vf.getLong(MediaFormat.KEY_DURATION) } catch (_: Throwable) { 0L }
             // Kareleri zaman sırasına göre iç içe yaz (art arda yazmak takılma yapıyordu)
             while (true) {
                 val vTime = ve.sampleTime
@@ -627,18 +666,89 @@ object Mux {
                 }
                 info.offset = 0
                 info.size = size
-                info.presentationTimeUs = ex.sampleTime
-                info.flags = if ((ex.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC) != 0)
-                    MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
+                info.presentationTimeUs = (ex.sampleTime - base).coerceAtLeast(0L)
+                info.flags = if (isKey(ex)) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
                 muxer.writeSampleData(track, buf, info)
                 ex.advance()
-                if (useVideo && totalUs > 0) onProgress(info.presentationTimeUs.toDouble() / totalUs)
+                if (useVideo && totalUs > 0) onProgress((info.presentationTimeUs.toDouble() / totalUs).coerceIn(0.0, 1.0))
             }
         } finally {
             try { if (started) muxer?.stop() } catch (_: Throwable) {}
             try { muxer?.release() } catch (_: Throwable) {}
             try { ve.release() } catch (_: Throwable) {}
             try { ae.release() } catch (_: Throwable) {}
+        }
+    }
+
+    /**
+     * Tek dosyayı (ham TS, parçalı fMP4 birleşimi) yeniden kodlamadan temiz MP4'e çevirir.
+     * HLS parçaları ham TS olarak .mp4 adıyla kaydedildiğinde ses gelip görüntü siyah kalıyordu.
+     */
+    fun remux(src: String, out: String, onProgress: (Double) -> Unit = {}) {
+        val ex = MediaExtractor()
+        var muxer: MediaMuxer? = null
+        var started = false
+        try {
+            ex.setDataSource(src)
+            val vt = pick(ex, "video")
+            val at = pick(ex, "audio")
+            if (vt < 0) throw IOException("track yok")
+            ex.selectTrack(vt)
+            if (at >= 0) ex.selectTrack(at)
+            muxer = MediaMuxer(out, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            val vf = ex.getTrackFormat(vt)
+            val vi = muxer.addTrack(vf)
+            val ai = if (at >= 0) muxer.addTrack(ex.getTrackFormat(at)) else -1
+            try { muxer.setOrientationHint(rotation(vf)) } catch (_: Throwable) {}
+            muxer.start()
+            started = true
+            val buf = ByteBuffer.allocate(4 * 1024 * 1024)
+            val info = MediaCodec.BufferInfo()
+            val totalUs = try { vf.getLong(MediaFormat.KEY_DURATION) } catch (_: Throwable) { 0L }
+            var base = -1L
+            var wrote = false
+            while (true) {
+                val ti = ex.sampleTrackIndex
+                if (ti < 0) break
+                val t = ex.sampleTime
+                val isVideo = ti == vt
+                if (base < 0) {
+                    // İlk anahtar kareden önceki kareler (ve ses) atılır
+                    if (!isVideo || !isKey(ex)) { ex.advance(); continue }
+                    base = t
+                }
+                buf.clear()
+                val size = ex.readSampleData(buf, 0)
+                if (size < 0) break
+                info.offset = 0
+                info.size = size
+                info.presentationTimeUs = (t - base).coerceAtLeast(0L)
+                info.flags = if (isKey(ex)) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
+                muxer.writeSampleData(if (isVideo) vi else ai, buf, info)
+                wrote = true
+                ex.advance()
+                if (isVideo && totalUs > 0) onProgress((info.presentationTimeUs.toDouble() / totalUs).coerceIn(0.0, 1.0))
+            }
+            if (!wrote) throw IOException("Görüntü karesi yok")
+        } finally {
+            try { if (started) muxer?.stop() } catch (_: Throwable) {}
+            try { muxer?.release() } catch (_: Throwable) {}
+            try { ex.release() } catch (_: Throwable) {}
+        }
+    }
+
+    /** Dosyadan gerçekten bir görüntü karesi alınabiliyor mu (false: siyah ekran riski). Bilinmezse true. */
+    fun hasFrame(path: String): Boolean {
+        val r = android.media.MediaMetadataRetriever()
+        return try {
+            r.setDataSource(path)
+            val d = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            val at = minOf(d * 500L, 1_000_000L)
+            r.getFrameAtTime(at, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC) != null
+        } catch (_: Throwable) {
+            true
+        } finally {
+            try { r.release() } catch (_: Throwable) {}
         }
     }
 }

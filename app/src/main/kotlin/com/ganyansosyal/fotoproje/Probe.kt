@@ -16,6 +16,7 @@ class MediaInfo(val url: String, var kind: String) {
     var verified = false
     /** Yalnızca ses içeren dosya (Instagram/Facebook'ta görüntü ve ses ayrı gelir). */
     var audioOnly = false
+    var mp4Read = false
     /** Sessiz görüntü dosyasıyla eşleşen ayrı ses dosyası adresi. */
     var audioUrl = ""
     /** true: sesli, false: sessiz (yalnızca görüntü), null: bilinmiyor */
@@ -153,6 +154,102 @@ object Probe {
         t.start()
         t.join(8000)
         return if (t.isAlive) 0.0 else out
+    }
+
+    /** MP4 kutularından okunan bilgi: süre, görüntü/ses izi, çözünürlük. */
+    private class Mp4Info {
+        var duration = 0.0
+        var video = false
+        var audio = false
+        var height = 0
+    }
+
+    private fun u32(b: ByteArray, o: Int): Long =
+        ((b[o].toLong() and 0xFF) shl 24) or ((b[o + 1].toLong() and 0xFF) shl 16) or
+            ((b[o + 2].toLong() and 0xFF) shl 8) or (b[o + 3].toLong() and 0xFF)
+
+    private fun u64(b: ByteArray, o: Int): Long = (u32(b, o) shl 32) or u32(b, o + 4)
+
+    private fun fourcc(b: ByteArray, o: Int) = String(b, o, 4, Charsets.ISO_8859_1)
+
+    /**
+     * MP4 başlığını (moov) kendimiz okur: süre, görüntü/ses izi ve çözünürlük.
+     * MediaExtractor'a göre hızlı ve uzak adreslerde güvenilirdir (tek küçük aralık isteği).
+     * moov başta değilse dosyanın sonundan da dener; bulunamazsa null.
+     */
+    private fun mp4Info(url: String, referer: String): Mp4Info? {
+        for (range in listOf("bytes=0-262143", "bytes=-262144")) {
+            val buf = try {
+                Http.get(url.substringBefore("#"), Net.headers(url, referer), range, CancelFlag()) { c ->
+                    c.inputStream.use { ins ->
+                        val out = java.io.ByteArrayOutputStream()
+                        val tmp = ByteArray(16384)
+                        while (out.size() < 262144) {
+                            val n = ins.read(tmp)
+                            if (n < 0) break
+                            out.write(tmp, 0, n)
+                        }
+                        out.toByteArray()
+                    }
+                }
+            } catch (e: CanceledEx) {
+                throw e
+            } catch (_: Throwable) {
+                null
+            } ?: continue
+            val info = Mp4Info()
+            var timescale = 0L
+            var mvhdDur = 0L
+            var mehdDur = 0L
+            var foundMoov = false
+            fun walk(start: Int, end: Int, inTrak: Boolean, st: Array<Any?>) {
+                var p = start
+                while (p + 8 <= end) {
+                    var size = u32(buf, p)
+                    val type = fourcc(buf, p + 4)
+                    var hdr = 8
+                    if (size == 1L && p + 16 <= end) { size = u64(buf, p + 8); hdr = 16 }
+                    else if (size == 0L) size = (end - p).toLong()
+                    if (size < hdr) return
+                    val bodyStart = p + hdr
+                    val boxEnd = minOf(end.toLong(), p + size).toInt()
+                    when (type) {
+                        "moov" -> { foundMoov = true; walk(bodyStart, boxEnd, false, st) }
+                        "mvex", "mdia" -> walk(bodyStart, boxEnd, inTrak, st)
+                        "trak" -> {
+                            val s2 = arrayOf<Any?>("", 0)
+                            walk(bodyStart, boxEnd, true, s2)
+                            if (s2[0] == "vide") { info.video = true; info.height = maxOf(info.height, s2[1] as Int) }
+                            if (s2[0] == "soun") info.audio = true
+                        }
+                        "mvhd" -> if (boxEnd - bodyStart >= 20) {
+                            val v = buf[bodyStart].toInt()
+                            if (v == 1 && boxEnd - bodyStart >= 32) { timescale = u32(buf, bodyStart + 20); mvhdDur = u64(buf, bodyStart + 24) }
+                            else { timescale = u32(buf, bodyStart + 12); mvhdDur = u32(buf, bodyStart + 16) }
+                        }
+                        "mehd" -> if (boxEnd - bodyStart >= 8) {
+                            mehdDur = if (buf[bodyStart].toInt() == 1 && boxEnd - bodyStart >= 12) u64(buf, bodyStart + 4)
+                            else u32(buf, bodyStart + 4)
+                        }
+                        "hdlr" -> if (inTrak && boxEnd - bodyStart >= 12) st[0] = fourcc(buf, bodyStart + 8)
+                        "tkhd" -> if (inTrak) {
+                            val v = buf[bodyStart].toInt()
+                            val wo = bodyStart + if (v == 1) 88 else 76
+                            if (wo + 8 <= boxEnd) st[1] = (u32(buf, wo + 4) shr 16).toInt()
+                        }
+                    }
+                    if (boxEnd <= p) return
+                    p = boxEnd
+                }
+            }
+            walk(0, buf.size, false, arrayOf<Any?>("", 0))
+            if (!foundMoov) continue
+            val d = if (mvhdDur > 0 && mvhdDur != 0xFFFFFFFFL) mvhdDur else mehdDur
+            info.duration = if (timescale > 0 && d > 0) d.toDouble() / timescale else 0.0
+            if (!info.video && !info.audio) continue
+            return info
+        }
+        return null
     }
 
     private fun isAudioCodec(c: String) =
@@ -303,7 +400,22 @@ object Probe {
                 // Boyut / süre eşiği yok: video biçimindeki her dosya aday olur
                 Unit
             }
-            if (info.usable && kind != "blob") {
+            if (info.usable && kind in setOf("mp4", "m4v", "mov", "3gp")) {
+                // Önce MP4 başlığından oku (hızlı, güvenilir): süre, çözünürlük, görüntü/ses izi
+                val mi = mp4Info(url, referer)
+                if (mi != null) {
+                    if (mi.duration > 0) info.duration = mi.duration
+                    if (mi.height > 0) info.height = mi.height
+                    if (!mi.video) {
+                        info.usable = false
+                        info.audioOnly = mi.audio
+                    } else {
+                        info.audio = mi.audio
+                        info.mp4Read = true
+                    }
+                }
+            }
+            if (info.usable && kind != "blob" && !info.mp4Read) {
                 // Görüntü/ses izi kontrolü: yalnızca-ses dosyası aday olmaz, sessiz olan işaretlenir
                 val dur = DoubleArray(1)
                 val tr = tracks(url, referer, dur)
@@ -351,26 +463,42 @@ object Probe {
         val ok = list.filter { it.usable && !synchronized(children) { children.contains(it.url) } }
             .sortedByDescending { it.rank }
         val filtered = ok.distinctBy { it.url }
+        // Süzgeç değil, EŞLEŞTİRME: kullanıcının bastığı videonun süresi biliniyorsa yalnızca o videonun
+        // dosyaları gösterilir (Instagram akışında önceden yüklenen başka videolar karışmasın).
+        // Eşleşen yoksa hiçbir şey saklanmaz; hepsi süreye yakınlık sırasıyla listelenir.
+        var cands = filtered
+        if (expectDur > 0.5) {
+            val tol = maxOf(1.5, expectDur * 0.03)
+            val matches = filtered.filter { it.duration > 0 && Math.abs(it.duration - expectDur) <= tol || it.url == exactSrc }
+            if (matches.isNotEmpty()) {
+                matches.forEach { it.verified = true }
+                cands = matches
+            } else {
+                cands = filtered.sortedBy { if (it.duration > 0) Math.abs(it.duration - expectDur) else 1e9 }
+            }
+        }
         // Oynayan videonun süresi biliniyorsa, süresi okunamayan adayın süresi olarak göster
-        for (e in filtered) {
-            if (e.duration <= 0 && expectDur > 0 && (e.url == exactSrc || filtered.size == 1)) e.duration = expectDur
-            if (e.height <= 0 && height > 0 && (e.url == exactSrc || filtered.size == 1)) e.height = height
+        for (e in cands) {
+            if (e.duration <= 0 && expectDur > 0 && (e.url == exactSrc || cands.size == 1)) e.duration = expectDur
+            if (e.height <= 0 && height > 0 && (e.url == exactSrc || cands.size == 1)) e.height = height
         }
         // Sessiz görüntü dosyası + ayrı ses dosyası (Instagram/Facebook): eşleştir, indirirken birleştirilir
         val audios = list.filter { it.audioOnly }
         if (audios.isNotEmpty()) {
-            for (e in filtered) {
+            for (e in cands) {
                 if (e.isStream || e.kind == "blob" || e.audio != false) continue
-                val best = audios.minByOrNull { Math.abs(it.duration - e.duration) } ?: continue
+                val best = (if (e.duration > 0) audios.minByOrNull { Math.abs(it.duration - e.duration) }
+                    else audios.singleOrNull()) ?: continue
+                // Süreler biliniyorsa aynı videoya ait olmalı (başka videonun sesi karışmasın)
                 if (e.duration > 0 && best.duration > 0 &&
-                    Math.abs(best.duration - e.duration) > maxOf(3.0, e.duration * 0.1)) continue
+                    Math.abs(best.duration - e.duration) > maxOf(1.5, e.duration * 0.03)) continue
                 e.audioUrl = best.url
             }
         }
         // HLS ana listesi / DASH kalite seçeneklerine aç.
         // Seçim "#fpq=<bant genişliği>_<yükseklik>" ile yapılır (Streams.hls / Streams.dash çözer).
         val res = ArrayList<MediaInfo>()
-        for (e in filtered) {
+        for (e in cands.sortedByDescending { it.rank }) {
             val expand = (e.kind == "m3u8" && e.variants.isNotEmpty()) ||
                 (e.kind == "mpd" && e.variants.isNotEmpty())
             if (expand) {

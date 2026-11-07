@@ -2586,7 +2586,7 @@ class BrowserActivity : Activity() {
                     if (tr) "Boyut bilinmiyor" else "Size unknown"
                 else -> f.kind.uppercase()
             }
-            val s = tv(sz, 14f, p.sub)
+            val s = tv(if (f.duration > 0) sz + " · " + Media.fmtDuration(f.duration) else sz, 14f, p.sub)
             s.gravity = Gravity.CENTER
             inner.addView(s)
             chip.addView(inner, FrameLayout.LayoutParams(-1, -2))

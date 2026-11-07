@@ -127,7 +127,7 @@ object Media {
     var from=pass?st-30000:st-8000, to=pass?9e15:st+20000;
     for(j=0;j<cand.length;j++){ if(cand[j].t>=from&&cand[j].t<=to){ urls.push(cand[j].u); if(cand[j].k) hints[cand[j].u]=cand[j].k; } }
    }
-   urls=urls.slice(-12);
+   urls=urls.slice(-40);
    if(!urls.length&&/^blob:/i.test(src)) urls=[src];
   }
   var o={d:live?0:Math.round(d*10)/10, live:live, w:v.videoWidth||0, h:v.videoHeight||0,

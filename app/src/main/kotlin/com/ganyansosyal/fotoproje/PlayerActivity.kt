@@ -262,7 +262,11 @@ class PlayerActivity : Activity() {
         subBtn.visibility = if (hasSubs) View.VISIBLE else View.GONE
         val item = MediaItem.Builder().setUri(Uri.fromFile(f)).setSubtitleConfigurations(subs).build()
 
-        val p = ExoPlayer.Builder(this).build()
+        // Ana görüntü çözücü başarısız olursa yedek çözücüye geç (ses gelip görüntü siyah kalmasın)
+        val p = ExoPlayer.Builder(
+            this,
+            androidx.media3.exoplayer.DefaultRenderersFactory(this).setEnableDecoderFallback(true)
+        ).build()
         player = p
         pv.player = p
         p.setMediaItem(item)
