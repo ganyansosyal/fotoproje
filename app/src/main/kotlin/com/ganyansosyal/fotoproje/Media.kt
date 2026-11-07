@@ -145,11 +145,14 @@ object Media {
  function permalink(v){ try{
   if(xHost()) return xlink(v);
   if(!igHost()) return location.href;
-  var RX=/\/(reels?|p|tv)\/[A-Za-z0-9_-]+/;
-  if(RX.test(location.pathname)&&location.pathname.indexOf('/audio')<0) return location.href;
+  // Facebook: gönderi adresleri farklı biçimlerde olur (videos/, watch/?v=, posts/, reel/, video.php, story.php ...)
+  var fb=/(^|\.)facebook\.com${'$'}/i.test(location.hostname);
+  var RX=fb?/\/(reel\/\d|videos\/\d|watch\/?\?|video\.php\?|posts\/|permalink|story\.php|share\/[rvp]\/)/:/\/(reels?|p|tv)\/[A-Za-z0-9_-]+/;
+  var SEL=fb?'a[href*="/reel/"],a[href*="/videos/"],a[href*="/watch/?"],a[href*="/watch?"],a[href*="video.php"],a[href*="/posts/"],a[href*="permalink"],a[href*="story.php"]':'a[href*="/reel/"],a[href*="/reels/"],a[href*="/p/"],a[href*="/tv/"]';
+  if(RX.test(fb?location.pathname+location.search:location.pathname)&&location.pathname.indexOf('/audio')<0) return location.href;
   var n=v, i, a, h, k;
   for(i=0;n&&i<30;i++,n=n.parentElement){
-   a=n.querySelectorAll&&n.querySelectorAll('a[href*="/reel/"],a[href*="/reels/"],a[href*="/p/"],a[href*="/tv/"]');
+   a=n.querySelectorAll&&n.querySelectorAll(SEL);
    // "Orijinal ses" bağlantısı (/reels/audio/...) gönderi adresi değildir, atlanır
    if(a){ for(k=0;k<a.length;k++){ h=a[k].getAttribute('href')||''; if(RX.test(h)&&h.indexOf('/audio')<0) return new URL(h,location.href).href; } }
   }
@@ -271,14 +274,19 @@ object Media {
     val NO_AUTOPLAY_JS = """
 (function(){ if(window.__noap) return; window.__noap=1;
  var last=0, OK=8000, lx=-1, ly=-1;
- // Akış sitelerinde (Instagram/Facebook/X/TikTok) yalnızca DOKUNULAN videoya izin verilir
- var strict=/(^|[.])(instagram[.]com|facebook[.]com|fb[.]watch|x[.]com|twitter[.]com|tiktok[.]com)/i.test(location.hostname);
+ // TÜM sitelerde (Google, YouTube, film siteleri, sosyal medya...) yalnızca DOKUNULAN videoya izin verilir
+ var strict=true;
+ var feed=/(^|[.])(instagram[.]com|facebook[.]com|fb[.]watch|x[.]com|twitter[.]com|tiktok[.]com)/i.test(location.hostname);
  function pt(e){ var t=e.changedTouches&&e.changedTouches[0]||e; if(t&&t.clientX!=null){ lx=t.clientX; ly=t.clientY; } }
  function mark(e){ if(e.isTrusted){ last=Date.now(); pt(e); } }
+ // Videonun kendi alanı + hemen çevresindeki oynat düğmesi/kapsayıcısı (en çok 3 kat büyüklüğe kadar)
+ function box(v){ var r=v.getBoundingClientRect(), a=r.width*r.height, n=v.parentElement, i, q;
+  for(i=0;n&&i<4;i++,n=n.parentElement){ q=n.getBoundingClientRect(); if(q.width*q.height>a*3) break; r=q; }
+  return r; }
  function allowed(v){
   if(Date.now()-last>=OK) return false;
   if(!strict||!v||!v.getBoundingClientRect) return true;
-  var r=v.getBoundingClientRect();
+  var r=box(v);
   return lx>=r.left-6&&lx<=r.right+6&&ly>=r.top-6&&ly<=r.bottom+6; }
  window.addEventListener('click',mark,true);
  window.addEventListener('keydown',mark,true);
@@ -313,7 +321,7 @@ object Media {
  function reset(e){ if(e.target) e.target.__ap=0; }
  document.addEventListener('ended',reset,true);
  document.addEventListener('emptied',reset,true);
- if(strict){
+ if(feed){
   // Duraklatılan video bir daha kendiliğinden başlamasın; ekrandan çıkan video durdurulur
   document.addEventListener('pause',reset,true);
   setInterval(function(){

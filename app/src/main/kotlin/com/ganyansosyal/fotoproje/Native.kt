@@ -34,7 +34,7 @@ import kotlin.concurrent.withLock
 
 class CanceledEx : IOException("canceled")
 
-class HttpErr(val code: Int, val host: String) : IOException(buildMsg(code, host)) {
+class HttpErr(val code: Int, val host: String, val retryAfterMs: Long = 0L) : IOException(buildMsg(code, host)) {
     companion object {
         private fun buildMsg(code: Int, host: String): String {
             val hint = when (code) {
@@ -113,9 +113,11 @@ object Http {
                 }
                 if (code >= 400) {
                     val host = URL(u).host
+                    // Sunucu "şu kadar sn sonra dene" diyorsa (Retry-After) onu kullan
+                    val ra = (c.getHeaderField("Retry-After")?.trim()?.toLongOrNull() ?: 0L) * 1000L
                     cancel.remove(c)
                     c.disconnect()
-                    throw HttpErr(code, host)
+                    throw HttpErr(code, host, ra)
                 }
                 return c
             } catch (e: Exception) {
@@ -285,12 +287,35 @@ object Native {
             lk.withLock { cv.signalAll() }
         }
 
+        // İstekler arası bekleme: başta 120 ms (en çok ~8 istek/sn); 429 gelince ikiye katlanır
+        // (en çok 2 sn), başarılı isteklerde yavaşça eski haline döner.
+        val pacer = Any()
+        var gap = 120L
+        var slotAt = 0L
+        fun pace() {
+            val now = System.currentTimeMillis()
+            var w = synchronized(pacer) {
+                val s = maxOf(now, slotAt)
+                slotAt = s + gap
+                s - now
+            }
+            while (w > 0) {
+                if (cancel.on) throw CanceledEx()
+                val st = minOf(w, 100L)
+                Thread.sleep(st)
+                w -= st
+            }
+        }
+
         fun fetch(url: String): ByteArray {
             var k = 0
             var th = 0
             while (true) {
                 try {
-                    return Http.bytes(url, headers, cancel)
+                    pace()
+                    val b = Http.bytes(url, headers, cancel)
+                    synchronized(pacer) { if (gap > 120L) gap = maxOf(120L, gap - 20L) }
+                    return b
                 } catch (e: CanceledEx) {
                     throw e
                 } catch (e: Exception) {
@@ -298,8 +323,10 @@ object Native {
                     if (isThrottle(e)) {
                         // Sunucu "çok fazla istek" dedi: bağlantı sayısını düşür, üstel bekleyip tekrar dene
                         if (lim.limit > 1) lim.limit = maxOf(1, lim.limit / 2)
+                        synchronized(pacer) { gap = minOf(2000L, gap * 2) }
                         if (th++ >= 12) throw e
-                        val wait = minOf(15000L, 1000L shl minOf(th - 1, 4))
+                        val ra = (e as? HttpErr)?.retryAfterMs ?: 0L
+                        val wait = maxOf(minOf(15000L, 1000L shl minOf(th - 1, 4)), minOf(ra, 60000L))
                         var w = 0L
                         while (w < wait) {
                             if (cancel.on) throw CanceledEx()

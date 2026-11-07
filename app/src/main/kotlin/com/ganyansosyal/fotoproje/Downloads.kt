@@ -186,6 +186,7 @@ object Downloads {
         val referer = task.referer
         return body@{
             val kind = task.kind ?: "mp4"
+            var silentRes: Ytdlp.Result? = null // yt-dlp'nin sessiz çıkardığı dosya (diğer yöntem de olmazsa bu kaydedilir)
             // Ana yol: yt-dlp + ffmpeg (ses/görüntü birleştirme, HLS/DASH, kodek uyumu)
             val yt = Ytdlp.isYoutube(task.url, referer)
             val social = Ytdlp.isSocial(task.url, referer)
@@ -244,8 +245,16 @@ object Downloads {
                             notifyUi()
                         }
                         task.note = r.info
-                        finish(task, r.path, null)
-                        return@body
+                        if (r.info.contains("SES YOK") && !social && !yt && xPost == null && kind != "blob") {
+                            // yt-dlp görüntüyü aldı ama sesi alamadı: kendi indiricimizle (ayrı ses akışını da alır) dene.
+                            // O da olmazsa sessiz dosya yine de kaydedilir.
+                            silentRes = r
+                            task.label = if (L.code == "tr") "Ses izi yok, başka yöntem deneniyor…" else "No audio, trying another method…"
+                            notifyUi(true)
+                        } else {
+                            finish(task, r.path, null)
+                            return@body
+                        }
                     } catch (e: CanceledEx) {
                         throw e
                     } catch (e: Throwable) {
@@ -259,6 +268,7 @@ object Downloads {
                     }
                 }
             }
+            try {
             // "#fpa=" ile gelen ayrı ses adresini ayır (adres tazelenirken kaybolmasın)
             if (kind != "blob" && task.url.contains("#fpa=")) {
                 task.audio = try {
@@ -375,6 +385,15 @@ object Downloads {
                 }
             }
             finish(task, outPath, if (sepAudio) apath else null)
+            } catch (e: CanceledEx) {
+                throw e
+            } catch (e: Throwable) {
+                // Kendi yöntemimiz de olmadı: yt-dlp'nin sessiz ama sağlam dosyası varsa onu kaydet
+                val sr = silentRes
+                if (sr == null || task.cancel.on) throw e
+                task.note = sr.info
+                finish(task, sr.path, null)
+            }
         }
     }
 
@@ -520,7 +539,12 @@ object Downloads {
                         attempt++
                         task.label = "Yeniden deneniyor…"
                         notifyUi(false)
-                        Thread.sleep(1500L * attempt)
+                        // Çok fazla istek (429/503) ise daha uzun bekle; iptale basılırsa hemen çık
+                        var wait = if (e.code == 429 || e.code == 503) 10000L * attempt else 1500L * attempt
+                        while (wait > 0 && !task.cancel.on) {
+                            Thread.sleep(250L)
+                            wait -= 250L
+                        }
                     }
                 }
                 task.status = DlStatus.DONE

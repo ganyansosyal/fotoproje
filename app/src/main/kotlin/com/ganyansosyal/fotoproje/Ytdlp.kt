@@ -60,7 +60,7 @@ object Ytdlp {
         urls.firstOrNull { it.startsWith("http") && YTPAGE.containsMatchIn(it) }?.substringBefore("#")
 
     private val POST = Regex(
-        "(instagram\\.com/(?:[^/?#]+/)?(?:reels?|p|tv)/(?!audio\\b)[A-Za-z0-9_-]+|facebook\\.com/[^#]*(?:/reel/|/videos/|/watch/?\\?v=|/share/[rv]/)|fb\\.watch/)",
+        "(instagram\\.com/(?:[^/?#]+/)?(?:reels?|p|tv)/(?!audio\\b)[A-Za-z0-9_-]+|facebook\\.com/[^#]*(?:/reel/|/videos/|/watch/?\\?(?:[^#]*&)?v=|/video\\.php\\?(?:[^#]*&)?v=|/posts/|/permalink/|/permalink\\.php\\?|/story\\.php\\?|/share/[rvp]/)|fb\\.watch/)",
         RegexOption.IGNORE_CASE
     )
 
