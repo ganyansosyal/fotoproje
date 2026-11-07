@@ -38,7 +38,8 @@ class DownloadTask(val id: String, @Volatile var url: String, val referer: Strin
     @Volatile var canPause = true
     var body: (() -> Unit)? = null
     var kind: String? = null   // mp4 / m3u8 / mpd / blob
-    var yt = false             // YouTube görevi mi
+    var audio = ""             // Görüntüyle birleştirilecek ayrı ses dosyası adresi (Instagram/Facebook)
+    val alts = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>() // yedek kaynaklar (adres, tür)
     var page = ""              // Çözümleyiciye gönderilen sayfa adresi (süre dolunca yeniden çözmek için)
 }
 
@@ -125,7 +126,6 @@ object Downloads {
                 t.createdAt = m.optLong("c")
                 t.kind = m.optString("k").ifEmpty { null }
                 t.page = m.optString("pg")
-                t.yt = m.optBoolean("y")
                 // Uygulama kapanınca çalışan indirme de "duraklatıldı" sayılır; Devam ile başlar
                 t.status = if (m.optString("st") == "FAILED") DlStatus.FAILED else DlStatus.PAUSED
                 t.error = m.optString("e").ifEmpty { null }
@@ -150,7 +150,7 @@ object Downloads {
             if (t.status == DlStatus.CANCELED) continue
             pend.put(
                 JSONObject().put("id", t.id).put("u", t.url).put("r", t.referer).put("pg", t.page).put("t", t.title)
-                    .put("c", t.createdAt).put("k", t.kind ?: "").put("y", t.yt)
+                    .put("c", t.createdAt).put("k", t.kind ?: "")
                     .put("st", t.status.name).put("e", t.error ?: "")
             )
         }
@@ -184,8 +184,15 @@ object Downloads {
         task: DownloadTask, blobReader: ((String, String, BlobRes) -> Unit)?
     ): () -> Unit {
         val referer = task.referer
-        val kind = task.kind ?: "mp4"
         return {
+            val kind = task.kind ?: "mp4"
+            // "#fpa=" ile gelen ayrı ses adresini ayır (adres tazelenirken kaybolmasın)
+            if (kind != "blob" && task.url.contains("#fpa=")) {
+                task.audio = try {
+                    java.net.URLDecoder.decode(task.url.substringAfter("#fpa=").substringBefore("#"), "UTF-8")
+                } catch (_: Throwable) { "" }
+                task.url = task.url.substringBefore("#fpa=")
+            }
             // Düğmeye basıldığı/Devam edildiği anda: WebView'in gördüğü daha taze adres varsa onu kullan
             if (kind != "blob") {
                 Streams.refresh(task.url, referer, task.cancel, false)?.let { task.url = it }
@@ -221,18 +228,63 @@ object Downloads {
                     }
                     err?.let { throw IOException(it) }
                 }
-                else -> Streams.direct(
-                    url, path, Net.smartHeaders(url, referer, task.cancel),
-                    task.cancel, report
-                )
+                else -> {
+                    Streams.direct(
+                        url, path, Net.smartHeaders(url, referer, task.cancel),
+                        task.cancel, report
+                    )
+                    // Bozuk / video olmayan dosya "indi" sayılmaz: hata verir, yedek kaynak denenir
+                    checkPlayable(path, kind)
+                    if (task.audio.isNotEmpty()) {
+                        try {
+                            task.label = "Ses indiriliyor…"
+                            notifyUi()
+                            Streams.direct(
+                                task.audio, apath, Net.smartHeaders(task.audio, referer, task.cancel),
+                                task.cancel, { _, _ -> }
+                            )
+                            sepAudio = true
+                        } catch (e: CanceledEx) {
+                            throw e
+                        } catch (_: Throwable) {
+                            File(apath).delete()
+                        }
+                    }
+                }
             }
             finish(task, path, if (sepAudio) apath else null)
+        }
+    }
+
+    /** İndirilen dosya gerçekten oynatılabilir video mu: değilse siler ve hata verir. */
+    private fun checkPlayable(path: String, kind: String) {
+        val f = File(path)
+        val bad = IOException("Video dosyası bozuk")
+        if (!f.exists() || f.length() < 2048) { f.delete(); throw bad }
+        val head = try { f.inputStream().use { i -> ByteArray(16).also { i.read(it) } } } catch (_: Throwable) { ByteArray(16) }
+        if (head[0] == '<'.code.toByte() || head[0] == '{'.code.toByte()) { f.delete(); throw bad }
+        val ex = android.media.MediaExtractor()
+        try {
+            ex.setDataSource(path)
+            var video = false
+            for (i in 0 until ex.trackCount) {
+                if ((ex.getTrackFormat(i).getString(android.media.MediaFormat.KEY_MIME) ?: "").startsWith("video/")) video = true
+            }
+            if (!video) { f.delete(); throw bad }
+        } catch (e: IOException) {
+            if (e === bad || e.message == bad.message) throw e
+            // Çözücü bu kapsayıcıyı (avi/flv/wmv...) tanımıyor: doğrulanamaz, dosya kabul edilir
+            if (kind in setOf("mp4", "mov", "m4v", "3gp", "webm", "mkv")) { f.delete(); throw bad }
+        } catch (_: Throwable) {
+        } finally {
+            try { ex.release() } catch (_: Throwable) {}
         }
     }
 
     /** Hata mesajı döner (null: başladı). */
     fun start(
         url0: String, referer0: String, hint: String?, title: String?,
+        alts: List<Pair<String, String>> = emptyList(),
         blobReader: ((String, String, BlobRes) -> Unit)?
     ): String? {
         if (!wifiOk()) return L.t("wifiBlocked")
@@ -266,14 +318,15 @@ object Downloads {
         if (kind != "blob" && pathExt(url) !in ALLOWED_EXT) {
             // Uzantısız adres: Content-Type / ilk baytlarla gerçek türü bul (start() arka plan iş parçacığında çalışır)
             val sk = try { Net.sniffKind(url, referer) } catch (_: Throwable) { null }
-            if (sk == null || sk !in ALLOWED_EXT) return L.t("failed")
-            kind = sk
+            // Tür okunamazsa yine de indirilir; dosya sonradan doğrulanır, bozuksa yedek kaynak denenir
+            kind = sk ?: hint?.takeIf { it in ALLOWED_EXT } ?: "mp4"
         }
         val name = pickName(title2, url)
         val task = DownloadTask(System.nanoTime().toString(), url, referer, name)
         task.canPause = kind != "blob"
         task.kind = kind
         task.page = pageUrl
+        task.alts.addAll(alts)
         active.add(0, task)
         notifyUi(true)
         run(task, bodyFor(task, blobReader))
@@ -294,7 +347,21 @@ object Downloads {
                         break
                     } catch (e: Throwable) {
                         val canceled = e is CanceledEx || task.cancel.on
-                        if (canceled || e !is HttpErr || attempt >= 2) throw e
+                        if (canceled) throw e
+                        if (e !is HttpErr || attempt >= 2) {
+                            // Bu kaynak olmadı: sıradaki yedek kaynağı dene, hiç kalmadıysa hata ver
+                            val next = if (task.alts.isNotEmpty()) task.alts.removeAt(0) else null
+                            if (next == null) throw e
+                            task.url = next.first
+                            task.kind = next.second
+                            task.audio = ""
+                            task.progress = 0.0
+                            task.label = "Başka kaynak deneniyor…"
+                            attempt = 0
+                            notifyUi(false)
+                            persist()
+                            continue
+                        }
                         // Adres bayatlamış olabilir (401/403/410): sayfadan taze adres almayı dene
                         if ((e.code == 401 || e.code == 403 || e.code == 410) && task.kind != "blob") {
                             task.label = "Adres yenileniyor…"
@@ -465,7 +532,7 @@ object Downloads {
     }
 
     /** İndirmeye izin verilen uzantılar (sorgu dizisine değil, URL yoluna bakılır). */
-    private val ALLOWED_EXT = setOf("mp4", "m3u8")
+    private val ALLOWED_EXT = setOf("m3u8", "mpd", "mp4", "webm", "mov", "m4v", "mkv", "flv", "3gp", "3g2", "ogv", "avi", "wmv", "mpg", "mpeg", "f4v", "asf", "m2ts", "mts")
 
     private fun pathExt(url: String): String = try {
         java.net.URI(url.substringBefore("#")).path.orEmpty()
@@ -599,12 +666,27 @@ object Gallery {
         }
     }
 
+    private fun mimeOf(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {
+        "webm" -> "video/webm"
+        "mov" -> "video/quicktime"
+        "mkv" -> "video/x-matroska"
+        "flv" -> "video/x-flv"
+        "3gp" -> "video/3gpp"
+        "3g2" -> "video/3gpp2"
+        "ogv" -> "video/ogg"
+        "avi" -> "video/x-msvideo"
+        "wmv", "asf" -> "video/x-ms-wmv"
+        "mpg", "mpeg" -> "video/mpeg"
+        "m2ts", "mts" -> "video/mp2t"
+        else -> "video/mp4"
+    }
+
     fun putVideo(ctx: Context, f: File) {
         try {
             if (Build.VERSION.SDK_INT >= 29) {
                 val v = ContentValues()
                 v.put(MediaStore.Video.Media.DISPLAY_NAME, f.name)
-                v.put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                v.put(MediaStore.Video.Media.MIME_TYPE, mimeOf(f.name))
                 v.put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/VideoDownloader")
                 v.put(MediaStore.Video.Media.IS_PENDING, 1)
                 val r = ctx.contentResolver

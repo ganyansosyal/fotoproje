@@ -14,6 +14,10 @@ class MediaInfo(val url: String, var kind: String) {
     var size = 0L
     var usable = true
     var verified = false
+    /** Yalnızca ses içeren dosya (Instagram/Facebook'ta görüntü ve ses ayrı gelir). */
+    var audioOnly = false
+    /** Sessiz görüntü dosyasıyla eşleşen ayrı ses dosyası adresi. */
+    var audioUrl = ""
     /** true: sesli, false: sessiz (yalnızca görüntü), null: bilinmiyor */
     var audio: Boolean? = null
 
@@ -24,7 +28,7 @@ class MediaInfo(val url: String, var kind: String) {
         get() {
             val p = ArrayList<String>()
             if (height > 0) p.add("${height}p")
-            if (duration > 0) p.add(Media.fmtDuration(duration))
+            if (duration > 0) p.add("0:00–" + Media.fmtDuration(duration))
             if (size > 0) p.add(Media.fmtBytes(size))
             if (audio == false) p.add(if (L.code == "tr") "sessiz" else "no audio")
             if (p.isEmpty()) return if (kind == "blob") L.t("protected") else kind.uppercase()
@@ -62,10 +66,6 @@ object Probe {
         }
     }
 
-    /** Düz dosya (mp4/webm) için eşikler. MIN_FILE altı kesin çöp; kısa+küçük olanlar parça/önizlemedir. */
-    private const val MIN_FILE = 1L * 1024 * 1024
-    private const val MIN_FILE_SHORT = 4L * 1024 * 1024
-
     /** Yalnızca parça/ses/altyazı olan uzantılar: asla video adayı olmaz. */
     private val FRAGMENT_EXT = Regex("\\.(ts|m4s|aac|m4a|mp3|cmfv|cmfa|vtt|srt)$", RegexOption.IGNORE_CASE)
 
@@ -97,41 +97,9 @@ object Probe {
         throw last ?: java.io.IOException("İstek başarısız")
     }
 
-    /** Uzantısı/ipucu olmayan adreste ilk baytlara bakarak biçimi bulur. */
-    private fun sniffKind(url: String, referer: String): String? {
-        try {
-            var ctype = ""
-            val d = Http.get(url, Net.headers(url, referer), "bytes=0-1023", CancelFlag()) { c ->
-                ctype = (c.contentType ?: "").lowercase()
-                c.inputStream.use { ins ->
-                    val buf = ByteArray(1024)
-                    var n = 0
-                    while (n < buf.size) {
-                        val r = ins.read(buf, n, buf.size - n)
-                        if (r < 0) break
-                        n += r
-                    }
-                    buf.copyOf(n)
-                }
-            }
-            // TS / MPEG parçaları video değil, yalnızca parçadır
-            if (ctype.contains("mp2t") || ctype.contains("mpeg2")) return null
-            if (ctype.contains("mpegurl")) return "m3u8"
-            if (ctype.contains("dash+xml")) return "mpd"
-            if (d.size < 8) return null
-            val head = String(d, 0, minOf(d.size, 600), Charsets.ISO_8859_1)
-            if (head.trimStart().startsWith("#EXTM3U")) return "m3u8"
-            if (head.contains("<MPD")) return "mpd"
-            if (d[4] == 0x66.toByte() && d[5] == 0x74.toByte() && d[6] == 0x79.toByte() && d[7] == 0x70.toByte()) return "mp4"
-            // moov / mdat / free / wide ile başlayan MP4 dosyaları
-            val box = String(d, 4, 4, Charsets.ISO_8859_1)
-            if (box == "moov" || box == "mdat" || box == "free" || box == "wide") return "mp4"
-            if (ctype.startsWith("video/webm")) return "webm"
-            if (d[0] == 0x1A.toByte() && d[1] == 0x45.toByte() && d[2] == 0xDF.toByte() && d[3] == 0xA3.toByte()) return "webm"
-        } catch (_: Throwable) {
-        }
-        return null
-    }
+    /** Uzantısı/ipucu olmayan adreste Content-Type / ilk baytlara bakarak biçimi bulur. */
+    private fun sniffKind(url: String, referer: String): String? =
+        try { Net.sniffKind(url, referer) } catch (_: Throwable) { null }
 
     /** Dosyanın görüntü / ses izi var mı (görüntü, ses). Okunamazsa null: bilinmiyor sayılır. */
     private fun tracks(url: String, referer: String, durOut: DoubleArray? = null): Pair<Boolean, Boolean>? {
@@ -165,6 +133,26 @@ object Probe {
         t.join(8000)
         if (t.isAlive) return null
         return res
+    }
+
+    /** MediaExtractor süreyi veremezse MediaMetadataRetriever ile dener. */
+    private fun retrieverDuration(url: String, referer: String): Double {
+        var out = 0.0
+        val t = Thread {
+            val r = android.media.MediaMetadataRetriever()
+            try {
+                r.setDataSource(url.substringBefore("#"), Net.headers(url, referer))
+                out = (r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toLongOrNull() ?: 0L) / 1000.0
+            } catch (_: Throwable) {
+            } finally {
+                try { r.release() } catch (_: Throwable) {}
+            }
+        }
+        t.isDaemon = true
+        t.start()
+        t.join(8000)
+        return if (t.isAlive) 0.0 else out
     }
 
     private fun isAudioCodec(c: String) =
@@ -312,9 +300,7 @@ object Probe {
                 c.disconnect()
                 if (ct.startsWith("image/") || ct.startsWith("text/") || ct.contains("json")) info.usable = false
                 info.size = len
-                if (len in 1 until 150 * 1024) info.usable = false
-                // Ağdan uzantısız yakalanan adres: küçük dosya parçadır, gerçek video sayılmaz
-                if (hint == "sniff" && len < 8L * 1024 * 1024) info.usable = false
+                // Boyut / süre eşiği yok: video biçimindeki her dosya aday olur
                 Unit
             }
             if (info.usable && kind != "blob") {
@@ -324,12 +310,15 @@ object Probe {
                 // Süre bilinirse parça (kısa) dosyalar ayıklanabilir, oynayan videoyla eşleştirilebilir
                 if (info.duration <= 0 && dur[0] > 0) info.duration = dur[0]
                 if (tr != null) {
-                    if (!tr.first && tr.second) {
+                    if (!tr.first) {
+                        // Görüntü izi yok: oynamaz. Yalnızca ses varsa, sessiz görüntüyle eşleştirmek için sakla
                         info.usable = false
+                        info.audioOnly = tr.second
                     } else {
                         info.audio = tr.second
                     }
                 }
+                if (info.usable && info.duration <= 0) info.duration = retrieverDuration(url, referer)
             }
         } catch (_: Throwable) {
             info.duration = 0.0
@@ -343,13 +332,13 @@ object Probe {
         expectDur: Double = 0.0, exactSrc: String = "", height: Int = 0
     ): List<MediaInfo> {
         val children = HashSet<String>()
-        val futures = urls.distinct().take(40).map { u ->
+        val futures = urls.distinct().take(100).map { u ->
             pool.submit(Callable { probeOne(u, hints[u] ?: "", referer, children) })
         }
         val list = futures.map { try { it.get() } catch (_: Throwable) { null } }.filterNotNull()
         val log = ArrayList<String>()
         log.add("referer=" + short(referer) + " expectDur=" + expectDur + " exactSrc=" + short(exactSrc))
-        log.add("aday=" + urls.distinct().take(40).size + " incelenen=" + list.size)
+        log.add("aday=" + urls.distinct().take(100).size + " incelenen=" + list.size)
         for (e in list) {
             log.add(
                 "ADAY " + e.kind + " ipucu=" + (hints[e.url] ?: "-") + " kullanilabilir=" + e.usable +
@@ -357,75 +346,26 @@ object Probe {
                     " ses=" + e.audio + " " + short(e.url)
             )
         }
-        // Oynayan videonun süresi biliniyorsa (kısa klipler dâhil) eşleşmeyenleri ele
-        // Reklam oynarken oynayan videonun süresi kısadır (15-60 sn); gerçek video (uzun) adayı bu süreyle
-        // elenmesin diye, uzun aday varken kısa süreli bir oynatmayı reklam sayıp katı eşleştirmeyi bırak.
-        val longExists = list.any { it.usable && it.duration >= 180 }
-        val adPlaying = expectDur in 1.0..90.0 && longExists
-        val strict = expectDur >= 5 && !adPlaying
-        var ok = list.filter { it.usable && !synchronized(children) { children.contains(it.url) } }
-        // Düz dosyalar (mp4/webm):
-        //  1) Boyutu bilinen ve 1 MB altındakiler kesin çöptür (191 KB önizleme vb.): oynayan video dahi olsa ele.
-        //  2) Kısa (<= 6 sn) ve küçük (< 4 MB) dosyalar parça/önizlemedir: oynayan video hariç ele.
-        //  3) Boyutu/süresi bilinmeyenler elenmez (sunucu bilgi vermiyor olabilir); sıralamada geride kalır.
-        // Akışlar (m3u8/mpd) ve blob bu süzgece takılmaz.
-        ok = ok.filter { e ->
-            if (e.isStream || e.kind == "blob") return@filter true
-            if (e.size in 1 until MIN_FILE) return@filter false
-            if (e.url == exactSrc) return@filter true
-            !(e.duration in 0.1..6.0 && e.size < MIN_FILE_SHORT)
+        // Süzgeç yok: kullanılabilir (video biçiminde, şifresiz) her aday listelenir.
+        // Yalnızca HLS/DASH ana listesinin kendi alt listeleri (aynı videonun kalite parçaları) ayıklanır.
+        val ok = list.filter { it.usable && !synchronized(children) { children.contains(it.url) } }
+            .sortedByDescending { it.rank }
+        val filtered = ok.distinctBy { it.url }
+        // Oynayan videonun süresi biliniyorsa, süresi okunamayan adayın süresi olarak göster
+        for (e in filtered) {
+            if (e.duration <= 0 && expectDur > 0 && (e.url == exactSrc || filtered.size == 1)) e.duration = expectDur
+            if (e.height <= 0 && height > 0 && (e.url == exactSrc || filtered.size == 1)) e.height = height
         }
-        // Uzun bir akış (m3u8/mpd, >= 10 dk) varken, ondan çok kısa süreli tek dosyalar
-        // (reklam, önizleme, yer tutucu mp4) ana video sayılmaz; oynayan video hariç
-        val mainDur = ok.filter { it.isStream }.maxOfOrNull { it.duration } ?: 0.0
-        if (mainDur >= 600) {
-            val kept = ok.filter {
-                it.isStream || it.url == exactSrc || it.duration <= 0 || it.duration >= mainDur * 0.5
+        // Sessiz görüntü dosyası + ayrı ses dosyası (Instagram/Facebook): eşleştir, indirirken birleştirilir
+        val audios = list.filter { it.audioOnly }
+        if (audios.isNotEmpty()) {
+            for (e in filtered) {
+                if (e.isStream || e.kind == "blob" || e.audio != false) continue
+                val best = audios.minByOrNull { Math.abs(it.duration - e.duration) } ?: continue
+                if (e.duration > 0 && best.duration > 0 &&
+                    Math.abs(best.duration - e.duration) > maxOf(3.0, e.duration * 0.1)) continue
+                e.audioUrl = best.url
             }
-            if (kept.isNotEmpty()) ok = kept
-        }
-        // Reklam oynuyorsa kısa (reklam/önizleme) adayları listeden çıkar
-        if (adPlaying) {
-            val noAd = ok.filter { it.duration <= 0 || it.duration >= 120 }
-            if (noAd.isNotEmpty()) ok = noAd
-        }
-        // Aynı klasörde çok sayıda dosya = HLS/DASH parçaları (seg1.mp4, seg2.mp4 ...)
-        fun dirOf(u: String) = u.substringBefore('?').substringBeforeLast('/')
-        val segDirs = ok.filter { !it.isStream && it.url != exactSrc && !it.verified }
-            .groupBy { dirOf(it.url) }.filter { it.value.size >= 3 }.keys
-        if (segDirs.isNotEmpty()) {
-            val kept = ok.filter { it.isStream || it.url == exactSrc || dirOf(it.url) !in segDirs }
-            if (kept.isNotEmpty()) ok = kept
-        }
-        val mismatch = HashSet<MediaInfo>()
-        for (e in ok) {
-            if (exactSrc.isNotEmpty() && e.url == exactSrc) {
-                if (e.duration <= 0) e.duration = expectDur
-                if (e.height <= 0) e.height = height
-                if (strict) e.verified = true
-            } else if (strict && e.duration > 0) {
-                val tol = maxOf(2.5, expectDur * 0.04)
-                if (Math.abs(e.duration - expectDur) <= tol) e.verified = true else mismatch.add(e)
-            }
-        }
-        // Hepsi eşleşmediyse (süre yanlış bildirilmiş olabilir) boş bırakma
-        val okMatch = ok.filter { it !in mismatch }
-        if (okMatch.isNotEmpty()) ok = okMatch
-        if (ok.any { it.verified }) ok = ok.filter { it.verified }
-        ok = ok.sortedByDescending { it.rank }
-        if (ok.size > 8) ok = ok.take(8)
-        val seen = HashSet<String>()
-        val out = ArrayList<MediaInfo>()
-        for (e in ok) {
-            val key = if (e.duration > 0) "${e.kind}|${Math.round(e.duration).toInt() / 3}|${e.height}" else e.url
-            if (seen.add(key)) out.add(e)
-        }
-        // Aynı süreli, çözünürlüğü belli bir yayın varsa çözünürlüksüz olanı (ses/yan liste) gizle
-        val filtered = out.filter { e ->
-            !(e.isStream && e.height == 0 && e.duration > 0 && out.any { o ->
-                o !== e && o.isStream && o.height > 0 &&
-                    Math.abs(o.duration - e.duration) <= maxOf(4.0, e.duration * 0.04)
-            })
         }
         // HLS ana listesi / DASH kalite seçeneklerine aç.
         // Seçim "#fpq=<bant genişliği>_<yükseklik>" ile yapılır (Streams.hls / Streams.dash çözer).
@@ -444,6 +384,14 @@ object Probe {
                     m.audio = e.audio
                     res.add(m)
                 }
+            } else if (e.audioUrl.isNotEmpty()) {
+                val m = MediaInfo(e.url.substringBefore("#") + "#fpa=" + java.net.URLEncoder.encode(e.audioUrl, "UTF-8"), e.kind)
+                m.duration = e.duration
+                m.height = e.height
+                m.size = e.size
+                m.audio = true
+                m.verified = e.verified
+                res.add(m)
             } else res.add(e)
         }
         for (r in res) log.add("SONUC " + r.kind + " boyut=" + r.size + " sure=" + r.duration + " " + short(r.url))

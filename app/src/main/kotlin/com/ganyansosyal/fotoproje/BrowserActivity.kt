@@ -1386,7 +1386,6 @@ class BrowserActivity : Activity() {
             "perf" -> if (tb === cur) onPerf(arr.optInt(0), arr.optInt(1), arr.optInt(2))
             // Ana sayfa düğmeleri yalnızca ana sayfada geçerlidir
             "addFav" -> if (tb.isHome) showAddFav()
-            "linkDl" -> if (tb.isHome) LinkSheet.show(this, dark, { openForAutoDownload(it) })
             "favMenu" -> if (tb.isHome) confirmRemoveFav(arr.optString(0), arr.optString(1))
         }
     }
@@ -1518,42 +1517,6 @@ class BrowserActivity : Activity() {
         tb.web?.loadUrl(url)
     }
 
-    /** Link ile indir: sayfayı aç, video bulunur bulunmaz indirme seçeneklerini kendiliğinden göster. */
-    private fun openForAutoDownload(url: String) {
-        loadInCurrent(url)
-        val tb = cur ?: return
-        tb.autoShow = true
-        // 1) Asıl videoyu kendimiz başlatıp ararız (sayfa kendiliğinden oynatmıyorsa).
-        // 2) Aynı anda sayfanın içindeki video adreslerini (TikTok/Instagram/X) tararız.
-        try { tb.web?.settings?.mediaPlaybackRequiresUserGesture = false } catch (_: Throwable) {}
-        val started = System.currentTimeMillis()
-        var tick = 0
-        val step = object : Runnable {
-            override fun run() {
-                if (!tb.autoShow || tb !== cur || System.currentTimeMillis() - started > 25_000) return
-                if (!tb.loading || tb.progress >= 40) {
-                    tb.web?.evaluateJavascript("window.__fpAutoAll&&window.__fpAutoAll()", null)
-                    tick++
-                    if (tick == 2 || tick == 4 || tick == 7 || tick == 10) scanPage(tb)
-                }
-                ui.postDelayed(this, 2000)
-            }
-        }
-        ui.postDelayed(step, 2500)
-        ui.postDelayed({
-            try { tb.web?.settings?.mediaPlaybackRequiresUserGesture = true } catch (_: Throwable) {}
-            if (tb.autoShow) {
-                tb.autoShow = false
-                if (tb === cur && tb.found.isEmpty()) {
-                    toast(
-                        if (L.code == "tr") "Video bulunamadı. Videoyu oynatmayı dene."
-                        else "No video found. Try playing the video."
-                    )
-                }
-            }
-        }, 26_000)
-    }
-
     /** Sayfanın kaynağındaki video adreslerini bulup inceler; bulunursa indirme seçeneklerini açar. */
     private fun scanPage(tb: Tab) {
         val w = tb.web ?: return
@@ -1573,7 +1536,12 @@ class BrowserActivity : Activity() {
                 tb.netCands.filter { now - it.t < 120_000 }.forEach { urls.add(it.url); netHints[it.url] = it.kind }
             }
             val candidates = urls.distinct().take(100)
-            if (candidates.isEmpty() || !tb.autoShow || tb.found.isNotEmpty()) return@evaluateJavascript
+            if (!tb.autoShow || tb.found.isNotEmpty()) return@evaluateJavascript
+            if (candidates.isEmpty()) {
+                tb.autoShow = false
+                if (tb === cur) toast(t("noVideo"))
+                return@evaluateJavascript
+            }
             val ref = tb.web?.url ?: tb.url
             Thread {
                 val list = try {
@@ -1587,7 +1555,10 @@ class BrowserActivity : Activity() {
                     if (list.isNotEmpty() && tb.autoShow && tb.found.isEmpty()) {
                         tb.found = list
                         tb.autoShow = false
-                        if (tb === cur) showFound()
+                        if (tb === cur) { updateFab(); showFound() }
+                    } else if (list.isEmpty() && tb.autoShow && tb.found.isEmpty()) {
+                        tb.autoShow = false
+                        if (tb === cur) toast(t("noVideo"))
                     }
                 }
             }.start()
@@ -2012,12 +1983,6 @@ class BrowserActivity : Activity() {
         Toast.makeText(this, m, Toast.LENGTH_SHORT).show()
     }
 
-    private fun isYoutube(u: String): Boolean {
-        val x = u.lowercase()
-        return x.contains("youtube.com/watch") || x.contains("youtube.com/shorts") ||
-            x.contains("youtu.be/")
-    }
-
     private fun kindOf(u: String): String? {
         if (u.startsWith("blob:")) return "blob"
         val l = u.lowercase()
@@ -2040,12 +2005,15 @@ class BrowserActivity : Activity() {
     )
 
     private fun noteNet(
-        tb: Tab, u: String, ranged: Boolean = false,
+        tb: Tab, u0: String, ranged: Boolean = false,
         requestHeaders: Map<String, String>? = null
     ) {
-        if (u.length > 2500) return
-        Net.rememberRequestHeaders(u, requestHeaders)
-        if (BAD_RE.containsMatchIn(u) || SEG_RE.containsMatchIn(u)) return
+        if (u0.length > 2500) return
+        Net.rememberRequestHeaders(u0, requestHeaders)
+        // Instagram/Facebook parça isteklerindeki bytestart/byteend atılır: tam dosya adresi aday olur
+        val u = Media.unrange(u0)
+        if (u != u0) Net.rememberRequestHeaders(u, requestHeaders)
+        if (SEG_RE.containsMatchIn(u)) return
         val match = MEDIA_RE.find(u)
         val lower = u.lowercase()
         // Uzantısı olmayan CDN adresleri: URL'nin bilinen medya parametrelerinden aday çıkar.
@@ -2325,14 +2293,16 @@ class BrowserActivity : Activity() {
 
     private fun updateFab() {
         val tb = cur ?: return
-        val on = tb.found.isNotEmpty() || isYoutube(tb.url)
+        val on = tb.found.isNotEmpty()
         fabView.setOn(on)
         // Yuvarlak indirme düğmesi geri getirildi (sürüklenebilir; video bulununca kırmızı)
         fab.visibility = View.VISIBLE
     }
 
     // ---- indirme
-    private fun startDownload(tb: Tab, url: String, kind: String, name: String? = null) {
+    private fun startDownload(
+        tb: Tab, url: String, kind: String, name: String? = null, others: List<FoundItem> = emptyList()
+    ) {
         try { tb.web?.settings?.userAgentString?.takeIf { it.isNotBlank() }?.let { Net.ua = it } } catch (_: Throwable) {}
         dart(
             "download",
@@ -2341,7 +2311,9 @@ class BrowserActivity : Activity() {
                 "kind" to kind,
                 "ref" to (tb.pRef ?: tb.web?.url ?: ""),
                 "title" to (name ?: tb.title),
-                "tab" to tb.id
+                "tab" to tb.id,
+                // Seçilen kaynak olmazsa sırayla bunlar denenir
+                "alts" to others.filter { it.url != url && it.kind != "blob" }.map { it.kind + "|" + it.url }
             ),
             { r -> toast(if (r is String) r else t("downloadStarted")) },
             { toast(t("failed")) }
@@ -2423,10 +2395,6 @@ class BrowserActivity : Activity() {
 
     private fun onFabTap() {
         val tb = cur ?: return
-        if (isYoutube(tb.url)) {
-            toast(if (L.code == "tr") "YouTube videoları indirilemez" else "YouTube videos can't be downloaded")
-            return
-        }
         if (tb.playerId == null) {
             // Oynatıcı DOM'da görünmese bile sayfa kaynaklarını ve ağ isteklerini tara.
             if (tb.found.isNotEmpty()) {
@@ -2443,8 +2411,17 @@ class BrowserActivity : Activity() {
             return
         }
         toast(t("checking"))
+        probeThenScan(tb)
+    }
+
+    /** Önce oynatıcıdan bulunanlara bakar; boşsa sayfa kaynağını ve ağ kayıtlarını da tarar. */
+    private fun probeThenScan(tb: Tab) {
         runProbe(tb) { list ->
-            if (list.isEmpty()) toast(t("noVideo")) else showFound()
+            if (list.isNotEmpty()) showFound()
+            else {
+                tb.autoShow = true
+                scanPage(tb)
+            }
         }
     }
 
@@ -2456,7 +2433,7 @@ class BrowserActivity : Activity() {
                 return
             }
             toast(t("checking"))
-            runProbe(tb) { list -> if (list.isEmpty()) toast(t("noVideo")) else showFound() }
+            probeThenScan(tb)
             return
         }
         showFoundSheet(tb, tb.found)
@@ -2688,7 +2665,7 @@ class BrowserActivity : Activity() {
         val dl = action("⤓", t("download"), acc) {
             val f = items[sel]
             dlg.dismiss()
-            startDownload(tb, f.url, f.kind, name)
+            startDownload(tb, f.url, f.kind, name, items)
         }
         for (a in listOf(cl, rn, dl)) bar.addView(a, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         val bp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
@@ -2851,13 +2828,9 @@ class BrowserActivity : Activity() {
         private const val PERF_STOP = "window.__pg=(window.__pg||0)+1;"
 
         private val MEDIA_RE = Regex(
-            "\\.(m3u8|mpd|mp4|webm|m4v|mov|mkv|flv|3gp|ogv|avi|wmv)(?:\$|[?#/])|[?&]mime_type=video_(mp4|webm)", RegexOption.IGNORE_CASE
+            "\\.(m3u8|mpd|mp4|webm|mov|m4v|mkv|flv|3gp|3g2|ogv|avi|wmv|mpg|mpeg|f4v|asf|m2ts|mts)(?:\$|[?#/])|[?&]mime_type=video_(mp4|webm)", RegexOption.IGNORE_CASE
         )
-        private val EXT_RE = Regex("\\.(mp4|webm|mov|m4v|mkv|flv|3gp|ogv|avi|wmv)\$")
-        private val BAD_RE = Regex(
-            "(imasdk|adservice|adsystem|preroll|midroll|vpaid|tracking|beacon|analytics|thumb|sprite|storyboard|preview|[/_.-]ads?[/_.-]|[/_.-]advert|[/_.-]vast[/_.?-])",
-            RegexOption.IGNORE_CASE
-        )
+        private val EXT_RE = Regex("\\.(mp4|webm|mov|m4v|mkv|flv|3gp|3g2|ogv|avi|wmv|mpg|mpeg|f4v|asf|m2ts|mts)\$")
         private val SEG_RE = Regex(
             "((seg|segment|chunk|frag|fragment)[-_.]?\\d|/init[-_.][^/]*\$|[?&](bytestart|byterange|range|sq|seg|segment|chunk)=)",
             RegexOption.IGNORE_CASE

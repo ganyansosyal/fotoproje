@@ -11,10 +11,10 @@ object Media {
  function fix(u){ return String(u||'').replace(/\\u002F/gi,'/').replace(/\\u0026/gi,'&').replace(/\\\//g,'/').replace(/&amp;/g,'&'); }
  function add(u){
   u=fix(u); if(!/^https?:\/\//i.test(u)||seen[u]||u.length>2500) return;
-  if(/(doubleclick|googlesyndication|googleadservices|imasdk|adservice|analytics|tracking|beacon|thumbnail|storyboard|sprite)/i.test(u)) return;
-  if(/\.(m4s|ts|m4v|mp4|m3u8|mpd|webm|mov|mkv|flv)(?:[?#]|$)/i.test(u)||
+  if(/\.(m4s|ts|mp4|webm|mov|m4v|mkv|flv|3gp|3g2|ogv|avi|wmv|mpg|mpeg|f4v|asf|m2ts|mts|m3u8|mpd)(?:[?#]|$)/i.test(u)||
      /[?&](?:mime_type=video_|format=(?:mp4|hls|dash)|type=(?:video|mp4)|response-content-type=video)/i.test(u)||
-     /\/(?:video|videos|videoplayback|manifest|master\.m3u8|playlist\.m3u8)(?:[/?]|$)/i.test(u)){
+     /\/(?:video|videos|videoplayback|manifest|master\.m3u8|playlist\.m3u8)(?:[/?]|$)/i.test(u)||
+     /\/(?:video\/tos|aweme\/v\d+\/play|obj\/[^/]*video)\//i.test(u)){
     seen[u]=1; out.push(u);
   }
  }
@@ -46,28 +46,28 @@ object Media {
 
     val HOOK_JS = """
 (function(){ if(window.__hk) return; window.__hk=1;
- // YouTube'u uygulama kendi yöntemiyle indirir; orada kanca gereksiz ve yavaştır.
- if(/(^|\.)(youtube\.com|youtube-nocookie\.com|googlevideo\.com)${'$'}/.test(location.hostname)) return;
  var ID=Math.random().toString(36).slice(2);
- var RE=/\.(m3u8|mpd|mp4|webm|mov|m4v|mkv|flv|3gp|ogv|avi|wmv)(\?|#|\/|&|${'$'})/i;
- // Reklam, izleyici, önizleme ve küçük resim adresleri aday değildir.
- var BAD=/(doubleclick|googlesyndication|googleadservices|imasdk|adservice|adsystem|adnxs|adsrvr|taboola|outbrain|[\/_.-]ads?[\/_.-]|[\/_.-]advert|adserver|preroll|midroll|[\/_.-]vast[\/_.?-]|vpaid|tracking|beacon|analytics|thumb|sprite|storyboard|preview)/i;
+ var RE=/\.(m3u8|mpd|mp4|webm|mov|m4v|mkv|flv|3gp|3g2|ogv|avi|wmv|mpg|mpeg|f4v|asf|m2ts|mts)(\?|#|\/|&|${'$'})/i;
  // Parça (segment) adresleri tam video değildir.
  var SEGN=/((seg|segment|chunk|frag|fragment)[-_.]?\d|^init[-_.])/i;
  var SEGQ=/[?&](bytestart|byterange|range|sq|seg|segment|chunk)=/i;
  var cand=[];
  function norm(u){ try{u=new URL(String(u),location.href).href;}catch(e){return ''} return /^https?:/i.test(u)?u:''; }
- function good(u){ if(!u||BAD.test(u)||SEGQ.test(u)) return false;
+ // Instagram/Facebook parça isteklerindeki bytestart/byteend atılır: tam dosya adresi aday olur.
+ function unrange(u){ if(!/[?&](bytestart|byteend)=/i.test(u)) return u;
+  u=u.replace(/[?&](bytestart|byteend)=\d*/gi,function(m){ return m.charAt(0)==='?'?'?':''; });
+  return u.replace('?&','?').replace(/\?${'$'}/,''); }
+ function good(u){ if(!u||SEGQ.test(u)) return false;
   var p=u.split('#')[0].split('?')[0]; return !SEGN.test(p.substring(p.lastIndexOf('/')+1)); }
  // Adaylar sadece kaydedilir; Flutter'a oynatıcı açılınca bildirilir.
- function note(u,k){ u=norm(u); if(!u||!good(u)) return; var now=Date.now();
+ function note(u,k){ u=norm(u); if(u) u=unrange(u); if(!u||!good(u)) return; var now=Date.now();
   for(var i=0;i<cand.length;i++){ if(cand[i].u===u){ cand[i].t=now; if(k&&!cand[i].k) cand[i].k=k; poke(); return; } }
   cand.push({u:u,k:k||'',t:now}); if(cand.length>60) cand.shift(); poke(); }
  function ctype(c,u,cr,cl){ c=(c||'').toLowerCase(); if(!u) return;
   if(c.indexOf('mpegurl')>-1){ note(u,'m3u8'); return; }
   if(c.indexOf('dash+xml')>-1){ note(u,'mpd'); return; }
   if(c.indexOf('video/')===0){ var tot=0, m=cr&&/\/(\d+)\s*${'$'}/.exec(cr); if(m) tot=+m[1];
-   if(!tot) tot=parseInt(cl||'0',10)||0; if(tot>=3000000) note(u,'mp4'); } }
+   if(!tot) tot=parseInt(cl||'0',10)||0; note(u,'mp4'); } }
  // Biçime göre tanıma: adres/uzantı ne olursa olsun yanıtın başı HLS (#EXTM3U)
  // veya DASH (<MPD) ise aday sayılır. Yalnızca küçük, metin benzeri yanıtlara bakılır.
  function sniffOK(c){ c=(c||'').toLowerCase(); return !c||/text|json|xml|javascript|octet-stream|mpegurl|plain|binary|css/.test(c); }
@@ -107,11 +107,7 @@ object Media {
  function alive(v){ if(!v||!v.isConnected) return false;
   var r=v.getBoundingClientRect(); if(r.width<=0||r.height<=0) return false;
   var cs=getComputedStyle(v); return cs.visibility!=='hidden'&&cs.display!=='none'; }
- function qual(v){ if(!alive(v)) return false;
-  var r=v.getBoundingClientRect(); if(r.width<200||r.height<110) return false;
-  var d=v.duration; if(isFinite(d)&&d<2) return false;
-  if(v.loop&&(!isFinite(d)||d<180)) return false;
-  return true; }
+ function qual(v){ return alive(v); }
  function send(o){ o.id=ID; try{window.flutter_inappwebview.callHandler('player',JSON.stringify(o));}catch(e){} }
  function stop(){ if(!act) return; act=null; last=''; if(wd){clearInterval(wd);wd=0;} send({stop:true}); }
  function sched(ms){ if(ft) return; ft=setTimeout(report,ms||500); }
@@ -254,7 +250,17 @@ object Media {
 })();
 """
 
-    private val EXT = Regex("\\.(mp4|webm|mov|m4v|mkv|flv|3gp|ogv|avi|wmv)$")
+    /** Instagram/Facebook parça isteklerindeki bytestart/byteend'i atar (tam dosya adresi kalır). */
+    fun unrange(u: String): String {
+        if (!Regex("[?&](bytestart|byteend)=", RegexOption.IGNORE_CASE).containsMatchIn(u)) return u
+        var r = u.replace(Regex("[?&](bytestart|byteend)=\\d*", RegexOption.IGNORE_CASE)) { m ->
+            if (m.value.startsWith("?")) "?" else ""
+        }
+        r = r.replace("?&", "?")
+        return r.trimEnd('?')
+    }
+
+    private val EXT = Regex("\\.(mp4|webm|mov|m4v|mkv|flv|3gp|3g2|ogv|avi|wmv|mpg|mpeg|f4v|asf|m2ts|mts)$")
 
     fun kind(u: String): String? {
         if (u.startsWith("blob:")) return "blob"

@@ -51,8 +51,13 @@ object Backend {
                     val tab = (a["tab"] as? Number)?.toInt()
                     val kind = s("kind")
                     val title = s("title")
+                    val alts = (a["alts"] as? List<*>)?.mapNotNull { x ->
+                        val sx = x.toString()
+                        val i = sx.indexOf('|')
+                        if (i > 0) sx.substring(0, i) to sx.substring(i + 1) else null
+                    } ?: emptyList()
                     val r = Downloads.start(
-                        s("url"), s("ref"), kind.ifEmpty { null }, title.ifEmpty { null }
+                        s("url"), s("ref"), kind.ifEmpty { null }, title.ifEmpty { null }, alts = alts
                     ) { url, path, res ->
                         ui.post {
                             val b = BrowserActivity.current
