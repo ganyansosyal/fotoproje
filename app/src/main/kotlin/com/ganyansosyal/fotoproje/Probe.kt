@@ -349,6 +349,15 @@ object Probe {
         }
         // Hem görüntü hem ses olan seçenek varsa sessiz (yalnızca görüntü) olanları gösterme
         if (ok.any { it.audio == true }) ok = ok.filter { it.audio != false }
+        // Uzun bir akış (m3u8/mpd, >= 10 dk) varken, ondan çok kısa süreli tek dosyalar
+        // (reklam, önizleme, yer tutucu mp4) ana video sayılmaz; oynayan video hariç
+        val mainDur = ok.filter { it.isStream }.maxOfOrNull { it.duration } ?: 0.0
+        if (mainDur >= 600) {
+            val kept = ok.filter {
+                it.isStream || it.url == exactSrc || it.duration <= 0 || it.duration >= mainDur * 0.5
+            }
+            if (kept.isNotEmpty()) ok = kept
+        }
         // Reklam oynuyorsa kısa (reklam/önizleme) adayları listeden çıkar
         if (adPlaying) {
             val noAd = ok.filter { it.duration <= 0 || it.duration >= 120 }
