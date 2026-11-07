@@ -11,6 +11,12 @@ import java.util.regex.Pattern
 object PageScan {
     class Hit(val url: String, val ref: String)
 
+    /**
+     * Otomatik link bulucu ana şalteri. false iken sayfa hiç taranmaz (ağ isteği yok);
+     * yalnızca WebView'in oynatma sırasında gördüğü adresler kullanılır. Tekrar açmak için true yap.
+     */
+    const val ENABLED = false
+
     // Yalnızca gerçek video uzantıları: URL yolu .mp4 veya .m3u8 ile bitmeli (sorgu dizisine bakılmaz)
     private val MEDIA = Pattern.compile("\\.(m3u8|mp4)$", Pattern.CASE_INSENSITIVE)
     private val AD = Pattern.compile(
@@ -76,6 +82,7 @@ object PageScan {
 
     /** [cancelled] true dönerse tarama bırakılır. En çok 12 sayfa/script indirir. */
     fun scan(pageUrl: String, cancelled: () -> Boolean): List<Hit> {
+        if (!ENABLED) return emptyList()
         val hits = LinkedHashMap<String, String>()
         val seen = HashSet<String>()
         val queue = ArrayDeque<Triple<String, String, Int>>()
