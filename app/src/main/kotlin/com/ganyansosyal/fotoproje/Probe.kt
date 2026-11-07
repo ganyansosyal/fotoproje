@@ -324,10 +324,19 @@ object Probe {
         }
         val list = futures.map { try { it.get() } catch (_: Throwable) { null } }.filterNotNull()
         // Oynayan videonun süresi biliniyorsa (kısa klipler dâhil) eşleşmeyenleri ele
-        val strict = expectDur >= 5
+        // Reklam oynarken oynayan videonun süresi kısadır (15-60 sn); gerçek video (uzun) adayı bu süreyle
+        // elenmesin diye, uzun aday varken kısa süreli bir oynatmayı reklam sayıp katı eşleştirmeyi bırak.
+        val longExists = list.any { it.usable && it.duration >= 180 }
+        val adPlaying = expectDur in 1.0..90.0 && longExists
+        val strict = expectDur >= 5 && !adPlaying
         var ok = list.filter { it.usable && !synchronized(children) { children.contains(it.url) } }
         // Hem görüntü hem ses olan seçenek varsa sessiz (yalnızca görüntü) olanları gösterme
         if (ok.any { it.audio == true }) ok = ok.filter { it.audio != false }
+        // Reklam oynuyorsa kısa (reklam/önizleme) adayları listeden çıkar
+        if (adPlaying) {
+            val noAd = ok.filter { it.duration <= 0 || it.duration >= 120 }
+            if (noAd.isNotEmpty()) ok = noAd
+        }
         // Aynı klasörde çok sayıda dosya = HLS/DASH parçaları (seg1.mp4, seg2.mp4 ...)
         fun dirOf(u: String) = u.substringBefore('?').substringBeforeLast('/')
         val segDirs = ok.filter { !it.isStream && it.url != exactSrc && !it.verified }
