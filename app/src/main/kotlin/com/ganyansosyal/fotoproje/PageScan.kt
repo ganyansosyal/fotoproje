@@ -11,11 +11,8 @@ import java.util.regex.Pattern
 object PageScan {
     class Hit(val url: String, val ref: String)
 
-    private val MEDIA = Pattern.compile("\\.(m3u8|mpd|mp4|webm|mov|m4v|mkv|flv)(?:[?#]|$)", Pattern.CASE_INSENSITIVE)
-    private val HINT = Pattern.compile(
-        "(videoplayback|mime_type=video|/manifest|/playlist|master\\.m3u8|format=(?:hls|dash|mp4))",
-        Pattern.CASE_INSENSITIVE
-    )
+    // Yalnızca gerçek video uzantıları: URL yolu .mp4 veya .m3u8 ile bitmeli (sorgu dizisine bakılmaz)
+    private val MEDIA = Pattern.compile("\\.(m3u8|mp4)$", Pattern.CASE_INSENSITIVE)
     private val AD = Pattern.compile(
         "(doubleclick|googlesyndication|imasdk|adservice|adsystem|adnxs|taboola|outbrain|[/_.-]ads?[/_.-]|" +
             "advert|preroll|midroll|vast|vpaid|tracking|beacon|analytics|thumb|sprite|storyboard|preview)",
@@ -26,10 +23,10 @@ object PageScan {
     )
     private val ABS = Pattern.compile("https?://[^\\s\"'<>\\\\)\\]}]+")
     private val REL = Pattern.compile(
-        "[\"'(]((?:/|\\.\\./|\\./)?[^\"'\\s<>()]+?\\.(?:m3u8|mpd|mp4|webm)(?:\\?[^\"'\\s<>()]*)?)[\"')]",
+        "[\"'(]((?:/|\\.\\./|\\./)?[^\"'\\s<>()]+?\\.(?:m3u8|mp4)(?:\\?[^\"'\\s<>()]*)?)[\"')]",
         Pattern.CASE_INSENSITIVE
     )
-    private val PROTO = Pattern.compile("[\"'](//[^\"'\\s<>]+?\\.(?:m3u8|mpd|mp4)[^\"'\\s<>]*)[\"']", Pattern.CASE_INSENSITIVE)
+    private val PROTO = Pattern.compile("[\"'](//[^\"'\\s<>]+?\\.(?:m3u8|mp4)[^\"'\\s<>]*)[\"']", Pattern.CASE_INSENSITIVE)
     private val IFRAME = Pattern.compile("<iframe[^>]+?(?:src|data-src)=[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE)
     private val SCRIPT = Pattern.compile("<script[^>]+?src=[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE)
     private val SKIP_JS = Pattern.compile("(jquery|bootstrap|gtag|fbevents|analytics|adsbygoogle)", Pattern.CASE_INSENSITIVE)
@@ -72,8 +69,8 @@ object PageScan {
 
     private fun isMediaUrl(u: String): Boolean {
         if (u.length > 2500 || AD.matcher(u).find()) return false
-        if (!MEDIA.matcher(u).find() && !HINT.matcher(u).find()) return false
         val path = u.substringBefore('?').substringBefore('#')
+        if (!MEDIA.matcher(path).find()) return false
         return !SEG.matcher(path.substringAfterLast('/')).find()
     }
 
@@ -90,7 +87,7 @@ object PageScan {
             val body = get(url, ref) ?: continue
             n++
             val head = body.take(300).trimStart()
-            if (head.startsWith("#EXTM3U") || head.contains("<MPD")) {
+            if (head.startsWith("#EXTM3U")) {
                 hits.putIfAbsent(url, ref)
                 continue
             }

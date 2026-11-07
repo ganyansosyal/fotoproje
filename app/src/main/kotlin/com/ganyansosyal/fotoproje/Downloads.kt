@@ -231,7 +231,9 @@ object Downloads {
     ): String? {
         if (!wifiOk()) return L.t("wifiBlocked")
         val kind = Media.kind(url) ?: hint ?: "mp4"
-        val name = if (!title.isNullOrBlank()) title.trim() else nameOf(url)
+        // Yalnızca gerçek video adresleri (.mp4 / .m3u8, yol üzerinden); blob: sayfadan okunur
+        if (kind != "blob" && pathExt(url) !in ALLOWED_EXT) return L.t("failed")
+        val name = pickName(title, url)
         val task = DownloadTask(System.nanoTime().toString(), url, referer, name)
         task.canPause = kind != "blob"
         task.kind = kind
@@ -409,6 +411,33 @@ object Downloads {
         if (Store.syncGallery) {
             Gallery.putVideo(ctx, dest)
         }
+    }
+
+    /** İndirmeye izin verilen uzantılar (sorgu dizisine değil, URL yoluna bakılır). */
+    private val ALLOWED_EXT = setOf("mp4", "m3u8")
+
+    private fun pathExt(url: String): String = try {
+        java.net.URI(url.substringBefore("#")).path.orEmpty()
+            .substringAfterLast('/').substringAfterLast('.', "").lowercase()
+    } catch (_: Throwable) {
+        ""
+    }
+
+    private val GENERIC_TITLES = setOf(
+        "new tab", "yeni sekme", "about:blank", "untitled", "başlıksız", "video", "loading", "yükleniyor"
+    )
+
+    /**
+     * Dosya adı: sayfa başlığı yalnızca anlamlıysa kullanılır (boş, URL/host benzeri ya da genel
+     * başlıklar elenir, " - Site" / " | Site" eki atılır); aksi halde adresten türetilir.
+     */
+    private fun pickName(title: String?, url: String): String {
+        var t = title?.trim().orEmpty()
+        t = t.replace(Regex("\\s+[|\\-–—·]\\s+[^|\\-–—·]{2,40}$"), "").trim()
+        val bad = t.length < 2 || t.lowercase() in GENERIC_TITLES ||
+            t.startsWith("http", true) || t.startsWith("www.", true) ||
+            Regex("^[\\w.-]+\\.[a-z]{2,}(/.*)?$", RegexOption.IGNORE_CASE).matches(t)
+        return if (bad) nameOf(url) else t
     }
 
     private fun nameOf(url: String): String {
