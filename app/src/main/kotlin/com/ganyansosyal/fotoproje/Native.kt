@@ -34,7 +34,19 @@ import kotlin.concurrent.withLock
 
 class CanceledEx : IOException("canceled")
 
-class HttpErr(val code: Int, val host: String) : IOException("HTTP $code · $host")
+class HttpErr(val code: Int, val host: String) : IOException(buildMsg(code, host)) {
+    companion object {
+        private fun buildMsg(code: Int, host: String): String {
+            val hint = when (code) {
+                401, 403 -> "Sunucu isteği reddetti (oturum/token süresi dolmuş ya da bu içeriğin indirilmesine izin verilmiyor olabilir)"
+                410 -> "Bağlantının süresi dolmuş; videoyu sayfada yeniden başlatıp tekrar dene"
+                429 -> "Çok fazla istek; biraz bekleyip tekrar dene"
+                else -> ""
+            }
+            return if (hint.isEmpty()) "HTTP $code · $host" else "HTTP $code · $host — $hint"
+        }
+    }
+}
 
 class CancelFlag {
     @Volatile
@@ -71,9 +83,12 @@ object Http {
             // Keep the page's navigation context, but never forward a stale Cookie
             // header blindly across CDN redirects. Ask WebView's cookie store for
             // cookies valid for the current URL on every hop.
+            val sameHost = URL(u).host.equals(URL(url).host, true)
             for ((k, v) in headers) {
                 if (k.equals("Range", true) || k.equals("Accept-Encoding", true) ||
                     k.equals("Cookie", true)) continue
+                // Kimlik bilgisi başlığı başka bir host'a yönlendirmede sızmasın
+                if (!sameHost && k.equals("Authorization", true)) continue
                 c.setRequestProperty(k, v)
             }
             try {
@@ -396,6 +411,7 @@ object Native {
                         }
                     }
                 }
+                if (len > 0 && got != len) throw IOException("İndirme eksik kaldı ($got/$len bayt)")
                 progress(got, if (len > 0) len else -1L)
             }
             return
