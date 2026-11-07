@@ -268,6 +268,9 @@ object Probe {
         }
     }
 
+    /** Adresteki dosyada (görüntü, ses) izleri var mı; okunamazsa null. */
+    fun avTracks(url: String, referer: String): Pair<Boolean, Boolean>? = tracks(url, referer, null)
+
     private val AUDIO_EXT = Regex("\\.(m4a|aac|mp3)$", RegexOption.IGNORE_CASE)
 
     /** Son incelemede bulunan yalnızca-ses dosyaları: indirme sırasında sessiz videoya eş aranır. */

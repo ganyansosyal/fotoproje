@@ -98,7 +98,7 @@ class BrowserActivity : Activity() {
                     val e = t.error ?: ""
                     if (e.startsWith("HTTP 403") || e.startsWith("HTTP 410") || e.startsWith("HTTP 401")) {
                         val c = cur
-                        if (c != null && c.playerId != null) {
+                        if (c != null && (c.playerId != null || hasNet(c))) {
                             val bare = t.url.substringBefore("#fpq=")
                             synchronized(c.netCands) { c.netCands.removeAll { it.url == bare } }
                             scheduleProbe(c)
@@ -207,7 +207,7 @@ class BrowserActivity : Activity() {
         val c = cur
         if (c != null && c.isHome && c.web != null && !c.loading) loadHome(c)
         // Arka plandayken süre/boyut alınamamış (bilinmiyor) yayınlar varsa geri dönünce yeniden incele
-        if (c != null && c.playerId != null && c.found.any {
+        if (c != null && (c.playerId != null || hasNet(c)) && c.found.any {
                 (it.kind == "m3u8" || it.kind == "mpd") && (it.duration <= 0.0 || (it.size <= 0L && it.bw <= 0))
             }) scheduleProbe(c)
     }
@@ -1164,6 +1164,10 @@ class BrowserActivity : Activity() {
                     updateNav()
                 }
                 scheduleSave()
+                // Sayfa açılır açılmaz sessizce tara: sayfa kaynağındaki videolar da hemen bulunsun
+                if (!tb.isHome && u != null && u.startsWith("http")) {
+                    ui.postDelayed({ if (tb.found.isEmpty() && tb.web === view) scanPage(tb, silent = true) }, 1200)
+                }
             }
 
             override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
@@ -1518,7 +1522,7 @@ class BrowserActivity : Activity() {
     }
 
     /** Sayfanın kaynağındaki video adreslerini bulup inceler; bulunursa indirme seçeneklerini açar. */
-    private fun scanPage(tb: Tab) {
+    private fun scanPage(tb: Tab, silent: Boolean = false) {
         val w = tb.web ?: return
         w.evaluateJavascript(Media.SCAN_JS) { raw ->
             val urls = ArrayList<String>()
@@ -1536,7 +1540,8 @@ class BrowserActivity : Activity() {
                 tb.netCands.filter { now - it.t < 120_000 }.forEach { urls.add(it.url); netHints[it.url] = it.kind }
             }
             val candidates = urls.distinct().take(100)
-            if (!tb.autoShow || tb.found.isNotEmpty()) return@evaluateJavascript
+            if ((!silent && !tb.autoShow) || tb.found.isNotEmpty()) return@evaluateJavascript
+            if (silent && candidates.isEmpty()) return@evaluateJavascript
             if (candidates.isEmpty()) {
                 tb.autoShow = false
                 if (tb === cur) toast(t("noVideo"))
@@ -1552,7 +1557,13 @@ class BrowserActivity : Activity() {
                     emptyList()
                 }
                 ui.post {
-                    if (list.isNotEmpty() && tb.autoShow && tb.found.isEmpty()) {
+                    if (silent && !tb.autoShow) {
+                        if (list.isNotEmpty() && tb.found.isEmpty()) {
+                            tb.found = list
+                            prefetchThumb(tb, list)
+                            if (tb === cur) { updateFab(); toast(t("videoFound")) }
+                        }
+                    } else if (list.isNotEmpty() && tb.autoShow && tb.found.isEmpty()) {
                         tb.found = list
                         tb.autoShow = false
                         if (tb === cur) { updateFab(); showFound() }
@@ -2047,7 +2058,7 @@ class BrowserActivity : Activity() {
                 if (tb.netCands.size > 120) tb.netCands.removeAt(0)
             }
         }
-        if (isNew) ui.post { if (tb.playerId != null) scheduleProbe(tb) }
+        if (isNew) ui.post { scheduleProbe(tb) }
     }
 
     // ---- oynatıcı bildirimi (hookJs'ten)
@@ -2060,7 +2071,8 @@ class BrowserActivity : Activity() {
         val id = m.optString("id")
         if (m.optBoolean("stop", false)) {
             if (id != tb.playerId) return
-            clearMedia(tb)
+            clearMedia(tb, keepNet = hasNet(tb))
+            if (hasNet(tb)) scheduleProbe(tb)
             return
         }
         val dur = m.optDouble("d", 0.0)
@@ -2088,10 +2100,15 @@ class BrowserActivity : Activity() {
         scheduleProbe(tb)
     }
 
-    private fun clearMedia(tb: Tab) {
+    private fun hasNet(tb: Tab): Boolean {
+        val now = System.currentTimeMillis()
+        return synchronized(tb.netCands) { tb.netCands.any { now - it.t < 90_000 } }
+    }
+
+    private fun clearMedia(tb: Tab, keepNet: Boolean = false) {
         tb.probeRun?.let { ui.removeCallbacks(it) }
         tb.probeGen++
-        synchronized(tb.netCands) { tb.netCands.clear() }
+        if (!keepNet) synchronized(tb.netCands) { tb.netCands.clear() }
         tb.pUrls.clear()
         tb.pHints.clear()
         tb.playerId = null
@@ -2100,7 +2117,7 @@ class BrowserActivity : Activity() {
         tb.pH = 0
         tb.pSrc = ""
         tb.pRef = null
-        tb.found = emptyList()
+        if (!keepNet) tb.found = emptyList()
         tb.bannerDone = false
         if (tb === cur) updateFab()
     }
@@ -2108,12 +2125,13 @@ class BrowserActivity : Activity() {
     private fun scheduleProbe(tb: Tab) {
         val r = tb.probeRun ?: Runnable { runProbe(tb, null) }.also { tb.probeRun = it }
         ui.removeCallbacks(r)
-        if (tb.playerId == null) {
+        if (tb.playerId == null && !hasNet(tb)) {
             tb.found = emptyList()
             if (tb === cur) updateFab()
             return
         }
-        ui.postDelayed(r, 600)
+        // Video açılır açılmaz bulunsun: oynatıcı beklenmez, ağdan gelen adaylar hemen incelenir
+        ui.postDelayed(r, if (tb.playerId == null) 400 else 600)
     }
 
     private fun probeArgs(tb: Tab): Map<String, Any?> {
@@ -2136,14 +2154,14 @@ class BrowserActivity : Activity() {
     }
 
     private fun runProbe(tb: Tab, onDone: ((List<FoundItem>) -> Unit)?) {
-        if (tb.playerId == null) {
+        if (tb.playerId == null && !hasNet(tb)) {
             onDone?.invoke(emptyList())
             return
         }
 
         val gen = ++tb.probeGen
         dart("probe", probeArgs(tb), { r ->
-            if (gen != tb.probeGen || tb.playerId == null) {
+            if (gen != tb.probeGen || (tb.playerId == null && !hasNet(tb))) {
                 onDone?.invoke(tb.found)
                 return@dart
             }
@@ -2180,7 +2198,7 @@ class BrowserActivity : Activity() {
 
                 val result = expanded.distinctBy { it.url }
                 runOnUiThread {
-                    if (isFinishing || gen != tb.probeGen || tb.playerId == null) {
+                    if (isFinishing || gen != tb.probeGen || (tb.playerId == null && !hasNet(tb))) {
                         onDone?.invoke(tb.found)
                         return@runOnUiThread
                     }

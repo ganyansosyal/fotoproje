@@ -246,6 +246,19 @@ object Downloads {
                         } catch (_: Throwable) { 0.0 }
                         Probe.bestAudio(dur)?.let { task.audio = it.url }
                     }
+                    if (task.audio.isEmpty() && Mux.tracks(path)?.second == false &&
+                        Regex("(cdninstagram|fbcdn)\\.", RegexOption.IGNORE_CASE).containsMatchIn(url)
+                    ) {
+                        // Ayrı ses yakalanamadı: sayfadaki sesli+görüntülü (progressive) dosyayı bul ve onu indir
+                        val alt = findProgressive(referer, task.cancel)
+                        if (alt != null) {
+                            task.label = if (L.code == "tr") "Sesli sürüm indiriliyor…" else "Downloading version with audio…"
+                            notifyUi()
+                            File(path).delete()
+                            Streams.direct(alt, path, Net.smartHeaders(alt, referer, task.cancel), task.cancel, report)
+                            checkPlayable(path, kind)
+                        }
+                    }
                     if (task.audio.isNotEmpty()) {
                         // Ses kesin gelmeli: 3 deneme, olmazsa sessiz video kaydetmek yerine hata ver
                         var ok = false
@@ -290,6 +303,25 @@ object Downloads {
             }
             finish(task, outPath, if (sepAudio) apath else null)
         }
+    }
+
+    /** Instagram/Facebook sayfasından (ve embed sayfasından) hem görüntü hem ses izi olan .mp4 adresini bulur. */
+    private fun findProgressive(page: String, cancel: CancelFlag): String? {
+        val pages = ArrayList<String>()
+        if (page.startsWith("http")) pages.add(page)
+        Regex("instagram\\.com/(?:[^/]+/)?(reels?|p|tv)/([A-Za-z0-9_-]+)").find(page)?.let {
+            val k = if (it.groupValues[1].startsWith("reel")) "reel" else it.groupValues[1]
+            pages.add("https://www.instagram.com/$k/${it.groupValues[2]}/embed/captioned/")
+        }
+        for (pg in pages) {
+            val hits = try { PageScan.scan(pg) { cancel.on } } catch (_: Throwable) { continue }
+            for (h in hits) {
+                if (cancel.on) throw CanceledEx()
+                val tr = Probe.avTracks(h.url, h.ref.ifEmpty { pg }) ?: continue
+                if (tr.first && tr.second) return h.url
+            }
+        }
+        return null
     }
 
     /** İndirilen dosya gerçekten oynatılabilir video mu: değilse siler ve hata verir. */
@@ -570,8 +602,16 @@ object Downloads {
         task.path = dest.path
         task.size = dest.length()
         if (dest.extension.lowercase() in setOf("mp4", "mov", "m4v", "3gp", "webm", "mkv") && !Mux.hasFrame(dest.path)) {
-            val w = if (L.code == "tr") "Uyarı: bu cihaz görüntüyü çözemiyor olabilir (siyah ekran)."
-            else "Warning: this device may not decode the picture (black screen)."
+            val codec = try {
+                val ex = MediaExtractor()
+                try {
+                    ex.setDataSource(dest.path)
+                    (0 until ex.trackCount).map { ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME) ?: "" }
+                        .firstOrNull { it.startsWith("video/") }?.removePrefix("video/") ?: "?"
+                } finally { try { ex.release() } catch (_: Throwable) {} }
+            } catch (_: Throwable) { "?" }
+            val w = if (L.code == "tr") "Uyarı: bu cihaz görüntüyü çözemiyor olabilir (siyah ekran). Kodek: $codec"
+            else "Warning: this device may not decode the picture (black screen). Codec: $codec"
             task.note = if (task.note.isNullOrEmpty()) w else task.note + " " + w
         }
         if (sepAudio != null) {
@@ -667,6 +707,10 @@ object Mux {
             ae.selectTrack(at)
             // İlk anahtar kareye kadar olan kareler çözülemez (ekran siyah kalır): atla
             while (ve.sampleTime >= 0 && !isKey(ve)) ve.advance()
+            if (ve.sampleTime < 0) {
+                // Dosyada anahtar kare bayrağı yok: ilk kareden başla
+                ve.seekTo(0, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+            }
             val v0 = ve.sampleTime
             if (v0 < 0) throw IOException("Görüntü karesi yok")
             val a0 = ae.sampleTime
@@ -739,14 +783,27 @@ object Mux {
             val totalUs = try { vf.getLong(MediaFormat.KEY_DURATION) } catch (_: Throwable) { 0L }
             var base = -1L
             var wrote = false
+            // Ön tarama: ilk 300 görüntü karesinde anahtar kare bayrağı var mı?
+            var anyKey = false
+            var seen = 0
+            while (seen < 300) {
+                val ti0 = ex.sampleTrackIndex
+                if (ti0 < 0) break
+                if (ti0 == vt) {
+                    seen++
+                    if (isKey(ex)) { anyKey = true; break }
+                }
+                ex.advance()
+            }
+            ex.seekTo(0, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
             while (true) {
                 val ti = ex.sampleTrackIndex
                 if (ti < 0) break
                 val t = ex.sampleTime
                 val isVideo = ti == vt
                 if (base < 0) {
-                    // İlk anahtar kareden önceki kareler (ve ses) atılır
-                    if (!isVideo || !isKey(ex)) { ex.advance(); continue }
+                    // İlk anahtar kareden önceki kareler (ve ses) atılır; bayrak hiç yoksa ilk görüntü karesinden başla
+                    if (!isVideo || (anyKey && !isKey(ex))) { ex.advance(); continue }
                     base = t
                 }
                 buf.clear()
