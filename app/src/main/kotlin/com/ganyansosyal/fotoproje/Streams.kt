@@ -26,7 +26,7 @@ object Streams {
         val cands = LinkedHashSet<String>()
         cands.addAll(Net.recentMedia())
         if (cands.isEmpty() && referer.isNotBlank()) {
-            try { PageScan.scan(referer) { cancel.on }.forEach { cands.add(it.url) } } catch (_: Throwable) {}
+            try { PageScan.scan(referer, true) { cancel.on }.forEach { cands.add(it.url) } } catch (_: Throwable) {}
         }
         val list = cands.take(8)
         fun ext(u: String) = u.substringBefore('?').substringBefore('#').substringAfterLast('.', "").lowercase()

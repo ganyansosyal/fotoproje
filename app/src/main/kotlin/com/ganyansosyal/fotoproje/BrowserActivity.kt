@@ -2024,7 +2024,10 @@ class BrowserActivity : Activity() {
         // Instagram/Facebook parça isteklerindeki bytestart/byteend atılır: tam dosya adresi aday olur
         val u = Media.unrange(u0)
         if (u != u0) Net.rememberRequestHeaders(u, requestHeaders)
-        if (SEG_RE.containsMatchIn(u)) return
+        // Parça filtresi tüm adrese değil yalnızca dosya adına ve sorguya bakar (rastgele token/klasör adı gerçek videoyu elemesin)
+        val segPath = u.substringBefore('?').substringBefore('#')
+        val segQuery = if (u.contains('?')) "?" + u.substringAfter('?').substringBefore('#') else ""
+        if (SEG_RE.containsMatchIn("/" + segPath.substringAfterLast('/') + segQuery)) return
         val match = MEDIA_RE.find(u)
         val lower = u.lowercase()
         // Uzantısı olmayan CDN adresleri: URL'nin bilinen medya parametrelerinden aday çıkar.

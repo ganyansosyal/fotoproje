@@ -81,8 +81,8 @@ object PageScan {
     }
 
     /** [cancelled] true dönerse tarama bırakılır. En çok 12 sayfa/script indirir. */
-    fun scan(pageUrl: String, cancelled: () -> Boolean): List<Hit> {
-        if (!ENABLED) return emptyList()
+    fun scan(pageUrl: String, force: Boolean = false, cancelled: () -> Boolean): List<Hit> {
+        if (!ENABLED && !force) return emptyList()
         val hits = LinkedHashMap<String, String>()
         val seen = HashSet<String>()
         val queue = ArrayDeque<Triple<String, String, Int>>()

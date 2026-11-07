@@ -137,7 +137,7 @@ object Media {
   var RX=/\/(reels?|p|tv)\/[A-Za-z0-9_-]+/;
   if(RX.test(location.pathname)) return location.href;
   var n=v, i, a, h;
-  for(i=0;n&&i<14;i++,n=n.parentElement){
+  for(i=0;n&&i<30;i++,n=n.parentElement){
    a=n.querySelector&&n.querySelector('a[href*="/reel/"],a[href*="/reels/"],a[href*="/p/"],a[href*="/tv/"]');
    if(a){ h=a.getAttribute('href')||''; if(RX.test(h)) return new URL(h,location.href).href; }
   }
@@ -237,9 +237,16 @@ object Media {
 
     val NO_AUTOPLAY_JS = """
 (function(){ if(window.__noap) return; window.__noap=1;
- var last=0, OK=8000;
- function mark(e){ if(e.isTrusted) last=Date.now(); }
- function allowed(){ return Date.now()-last<OK; }
+ var last=0, OK=8000, lx=-1, ly=-1;
+ // Akış sitelerinde (Instagram/Facebook/X/TikTok) yalnızca DOKUNULAN videoya izin verilir
+ var strict=/(^|[.])(instagram[.]com|facebook[.]com|fb[.]watch|x[.]com|twitter[.]com|tiktok[.]com)/i.test(location.hostname);
+ function pt(e){ var t=e.changedTouches&&e.changedTouches[0]||e; if(t&&t.clientX!=null){ lx=t.clientX; ly=t.clientY; } }
+ function mark(e){ if(e.isTrusted){ last=Date.now(); pt(e); } }
+ function allowed(v){
+  if(Date.now()-last>=OK) return false;
+  if(!strict||!v||!v.getBoundingClientRect) return true;
+  var r=v.getBoundingClientRect();
+  return lx>=r.left-6&&lx<=r.right+6&&ly>=r.top-6&&ly<=r.bottom+6; }
  window.addEventListener('click',mark,true);
  window.addEventListener('keydown',mark,true);
  // Mobil oynatıcıların çoğu "dokun-oynat" için click değil touchend kullanır (click'i engeller).
@@ -253,26 +260,37 @@ object Media {
   if(!e.isTrusted) return;
   var t=e.changedTouches&&e.changedTouches[0];
   if(location.pathname.indexOf('/shorts')===0 ||
-   (t && Math.abs(t.clientX-tx)<12 && Math.abs(t.clientY-ty)<12)) last=Date.now();
+   (t && Math.abs(t.clientX-tx)<12 && Math.abs(t.clientY-ty)<12)){ last=Date.now(); pt(e); }
  },true);
  var P=window.HTMLMediaElement&&HTMLMediaElement.prototype;
  if(!P) return;
  var op=P.play;
  P.play=function(){
-  if(this.__ap||allowed()){ this.__ap=1; return op.apply(this,arguments); }
+  if(this.__ap||allowed(this)){ this.__ap=1; return op.apply(this,arguments); }
   return Promise.reject(new DOMException('Autoplay engellendi','NotAllowedError'));
  };
  // autoplay özniteliğiyle başlayanlar play() çağırmaz; olaydan yakalayıp durdur
  document.addEventListener('play',function(e){
   var v=e.target;
   if(!v||!v.pause) return;
-  if(v.__ap||allowed()){ v.__ap=1; return; }
+  if(v.__ap||allowed(v)){ v.__ap=1; return; }
   try{ v.pause(); }catch(x){}
  },true);
  // Video bitince / kaynak değişince izin sıfırlanır (sıradaki video kendiliğinden başlamasın)
  function reset(e){ if(e.target) e.target.__ap=0; }
  document.addEventListener('ended',reset,true);
  document.addEventListener('emptied',reset,true);
+ if(strict){
+  // Duraklatılan video bir daha kendiliğinden başlamasın; ekrandan çıkan video durdurulur
+  document.addEventListener('pause',reset,true);
+  setInterval(function(){
+   var vs=document.getElementsByTagName('video'), i, vh=window.innerHeight;
+   for(i=0;i<vs.length;i++){ var v=vs[i]; if(v.paused||!v.__ap) continue;
+    var r=v.getBoundingClientRect(), h=r.bottom-r.top;
+    var vis=Math.min(r.bottom,vh)-Math.max(r.top,0);
+    if(h>0&&vis/h<0.4){ v.__ap=0; try{ v.pause(); }catch(x){} } }
+  },400);
+ }
 })();
 """
 
