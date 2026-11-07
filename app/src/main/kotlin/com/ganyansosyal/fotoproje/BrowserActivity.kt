@@ -190,6 +190,7 @@ class BrowserActivity : Activity() {
         ui.removeCallbacks(saveRun)
         for (j in ArrayList(blobJobs.values)) finishBlob(j, false)
         for (tb in ArrayList(tabs)) destroyWeb(tb)
+        hlsExec.shutdownNow()
         super.onDestroy()
     }
 
@@ -2102,36 +2103,160 @@ class BrowserActivity : Activity() {
             onDone?.invoke(emptyList())
             return
         }
+
         val gen = ++tb.probeGen
         dart("probe", probeArgs(tb), { r ->
             if (gen != tb.probeGen || tb.playerId == null) {
                 onDone?.invoke(tb.found)
-            } else {
-                val list = (r as? List<*>)?.mapNotNull { e ->
-                    (e as? Map<*, *>)?.let {
-                        FoundItem(
-                            it["url"].toString(), it["kind"].toString(),
-                            it["title"].toString(), it["subtitle"].toString(),
-                            (it["h"] as? Number)?.toInt() ?: 0,
-                            (it["d"] as? Number)?.toDouble() ?: 0.0,
-                            (it["s"] as? Number)?.toLong() ?: 0L,
-                            (it["bw"] as? Number)?.toInt() ?: 0
-                        )
-                    }
-                } ?: emptyList()
-                tb.found = list
-                if (tb === cur) updateFab()
-                if (list.isNotEmpty() && !tb.bannerDone) {
-                    tb.bannerDone = true
-                    if (tb === cur) toast(t("videoFound"))
-                }
-                if (list.isNotEmpty() && tb.autoShow && tb === cur) {
-                    tb.autoShow = false
-                    showFound()
-                }
-                onDone?.invoke(list)
+                return@dart
             }
-        }, { onDone?.invoke(emptyList()) })
+
+            val original = (r as? List<*>)?.mapNotNull { e ->
+                (e as? Map<*, *>)?.let { item ->
+                    val url = item["url"]?.toString().orEmpty()
+                    if (url.isBlank()) return@let null
+                    FoundItem(
+                        url,
+                        item["kind"]?.toString().orEmpty(),
+                        item["title"]?.toString().orEmpty(),
+                        item["subtitle"]?.toString().orEmpty(),
+                        (item["h"] as? Number)?.toInt() ?: 0,
+                        (item["d"] as? Number)?.toDouble() ?: 0.0,
+                        (item["s"] as? Number)?.toLong() ?: 0L,
+                        (item["bw"] as? Number)?.toInt() ?: 0
+                    )
+                }
+            } ?: emptyList()
+
+            // WebView verilerini ana thread üzerinde al; ağ isteğini arka planda yap.
+            val referer = tb.pRef ?: tb.web?.url ?: tb.url
+            val hlsUrlCookies = original
+                .filter { isHlsUrl(it.url, it.kind) }
+                .associate { it.url to (try { CookieManager.getInstance().getCookie(it.url).orEmpty() } catch (_: Throwable) { "" }) }
+
+            hlsExec.execute {
+                val expanded = ArrayList<FoundItem>()
+                original.forEach { item ->
+                    if (!isHlsUrl(item.url, item.kind)) {
+                        expanded.add(item)
+                    } else {
+                        val variants = readHlsMasterPlaylist(
+                            masterUrl = item.url,
+                            referer = referer,
+                            cookies = hlsUrlCookies[item.url].orEmpty(),
+                            original = item
+                        )
+                        // Master playlist değilse (veya okunamazsa) eski tek seçenek davranışı.
+                        if (variants.isEmpty()) expanded.add(item) else expanded.addAll(variants)
+                    }
+                }
+
+                val result = expanded.distinctBy { it.url }
+                runOnUiThread {
+                    if (isFinishing || gen != tb.probeGen || tb.playerId == null) {
+                        onDone?.invoke(tb.found)
+                        return@runOnUiThread
+                    }
+                    tb.found = result
+                    if (tb === cur) updateFab()
+                    if (result.isNotEmpty() && !tb.bannerDone) {
+                        tb.bannerDone = true
+                        if (tb === cur) toast(t("videoFound"))
+                    }
+                    if (result.isNotEmpty() && tb.autoShow && tb === cur) {
+                        tb.autoShow = false
+                        showFound()
+                    }
+                    onDone?.invoke(result)
+                }
+            }
+        }, {
+            onDone?.invoke(emptyList())
+        })
+    }
+
+    private fun isHlsUrl(url: String, kind: String): Boolean {
+        val path = try { android.net.Uri.parse(url).path.orEmpty() } catch (_: Throwable) { url.substringBefore('?') }
+        return kind.contains("m3u8", ignoreCase = true) ||
+            kind.contains("hls", ignoreCase = true) ||
+            path.endsWith(".m3u8", ignoreCase = true)
+    }
+
+    /** Master playlist içindeki EXT-X-STREAM-INF satırlarını çözünürlük seçeneklerine çevirir. */
+    private fun readHlsMasterPlaylist(
+        masterUrl: String,
+        referer: String,
+        cookies: String,
+        original: FoundItem
+    ): List<FoundItem> {
+        var connection: java.net.HttpURLConnection? = null
+        return try {
+            connection = (java.net.URL(masterUrl).openConnection() as java.net.HttpURLConnection).apply {
+                connectTimeout = 10000
+                readTimeout = 10000
+                requestMethod = "GET"
+                instanceFollowRedirects = true
+                setRequestProperty(
+                    "User-Agent",
+                    "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36"
+                )
+                if (referer.isNotBlank()) setRequestProperty("Referer", referer)
+                if (cookies.isNotBlank()) setRequestProperty("Cookie", cookies)
+                setRequestProperty("Accept", "application/vnd.apple.mpegurl,application/x-mpegURL,*/*")
+            }
+
+            if (connection.responseCode !in 200..299) return emptyList()
+            val finalUrl = connection.url
+            val playlist = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            if (!playlist.trimStart().startsWith("#EXTM3U")) return emptyList()
+
+            val lines = playlist.lines()
+            val variants = ArrayList<FoundItem>()
+            val resolutionRegex = Regex("RESOLUTION=(\\d+)x(\\d+)", RegexOption.IGNORE_CASE)
+            val bandwidthRegex = Regex("(?:AVERAGE-BANDWIDTH|BANDWIDTH)=(\\d+)", RegexOption.IGNORE_CASE)
+
+            for (index in lines.indices) {
+                val info = lines[index].trim()
+                if (!info.startsWith("#EXT-X-STREAM-INF:", ignoreCase = true)) continue
+
+                val resolution = resolutionRegex.find(info) ?: continue
+                val width = resolution.groupValues[1].toIntOrNull() ?: continue
+                val height = resolution.groupValues[2].toIntOrNull() ?: continue
+                if (height <= 0 || width <= 0) continue
+                val bandwidth = bandwidthRegex.find(info)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
+
+                // EXT-X-STREAM-INF sonrasındaki ilk boş olmayan, yorum olmayan satır URI'dir.
+                val variantPath = lines.drop(index + 1).firstOrNull {
+                    it.trim().isNotEmpty() && !it.trim().startsWith("#")
+                }?.trim() ?: continue
+
+                val variantUrl = try {
+                    finalUrl.toURI().resolve(java.net.URI(variantPath)).toString()
+                } catch (_: Throwable) {
+                    try { java.net.URL(finalUrl, variantPath).toString() } catch (_: Throwable) { continue }
+                }
+
+                variants.add(
+                    FoundItem(
+                        variantUrl,
+                        "m3u8",
+                        original.title,
+                        "${height}P · ${width}x${height}",
+                        height,
+                        original.duration,
+                        0L,
+                        bandwidth
+                    )
+                )
+            }
+            variants.distinctBy { it.url }.sortedWith(
+                compareByDescending<FoundItem> { it.height }.thenByDescending { it.bw }
+            )
+        } catch (_: Throwable) {
+            emptyList()
+        } finally {
+            try { connection?.disconnect() } catch (_: Throwable) { }
+        }
     }
 
     private fun updateFab() {
@@ -2512,6 +2637,7 @@ class BrowserActivity : Activity() {
 
     private val blobJobs = HashMap<String, BlobJob>()
     private val blobExec = Executors.newSingleThreadExecutor()
+    private val hlsExec = Executors.newSingleThreadExecutor()
 
     private fun q(s: String): String = JSONObject.quote(s)
 
