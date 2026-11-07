@@ -90,19 +90,24 @@ object Net {
         val vars = variants(url, referer)
         val key = hostOf(url) + "|" + referer
         val start = (hdrIdx[key] ?: 0).coerceIn(0, vars.size - 1)
+        var last: Throwable? = null
         for (k in vars.indices) {
             val i = (start + k) % vars.size
             try {
                 Http.get(url, vars[i], "bytes=0-0", cancel) { c ->
+                    // A successful response validates this exact header set.
                     c.disconnect()
                 }
                 hdrIdx[key] = i
                 return vars[i]
             } catch (e: Throwable) {
                 if (e is CanceledEx) throw e
-                if (!retryOther(e)) return vars[start]
+                last = e
+                // Try alternate page-context headers only for common request
+                // negotiation failures. Do not silently pretend a 403 worked.
+                if (!retryOther(e)) throw e
             }
         }
-        return vars.first()
+        throw last ?: IOException("Video isteği doğrulanamadı")
     }
 }

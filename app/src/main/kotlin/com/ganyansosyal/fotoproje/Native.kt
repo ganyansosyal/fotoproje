@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.webkit.CookieManager
 import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.FileOutputStream
@@ -67,9 +68,19 @@ object Http {
             c.connectTimeout = 20000
             c.readTimeout = 60000
             c.instanceFollowRedirects = false
+            // Keep the page's navigation context, but never forward a stale Cookie
+            // header blindly across CDN redirects. Ask WebView's cookie store for
+            // cookies valid for the current URL on every hop.
             for ((k, v) in headers) {
-                if (k.equals("Range", true) || k.equals("Accept-Encoding", true)) continue
+                if (k.equals("Range", true) || k.equals("Accept-Encoding", true) ||
+                    k.equals("Cookie", true)) continue
                 c.setRequestProperty(k, v)
+            }
+            try {
+                val currentCookies = CookieManager.getInstance().getCookie(u)
+                if (!currentCookies.isNullOrBlank()) c.setRequestProperty("Cookie", currentCookies)
+            } catch (_: Throwable) {
+                // Some downloads may run without a WebView cookie store.
             }
             c.setRequestProperty("Accept-Encoding", "identity")
             if (range != null) c.setRequestProperty("Range", range)
