@@ -150,8 +150,8 @@ class BrowserActivity : Activity() {
         prefs = getSharedPreferences("fp_native", MODE_PRIVATE)
         loadCachedCfg()
         setTheme(
-            if (dark) android.R.style.Theme_DeviceDefault_NoActionBar
-            else android.R.style.Theme_DeviceDefault_Light_NoActionBar
+            if (dark) R.style.AppTheme_Dark
+            else R.style.AppTheme_Light
         )
         super.onCreate(savedInstanceState)
         current = this
@@ -321,17 +321,17 @@ class BrowserActivity : Activity() {
         fab.orientation = LinearLayout.HORIZONTAL
         fab.gravity = Gravity.CENTER
         fabView = DlFabView(this)
-        fab.addView(fabView, LinearLayout.LayoutParams(dp(68), dp(68)))
+        fab.addView(fabView, LinearLayout.LayoutParams(dp(84), dp(84)))
         fabText = TextView(this) // eski kodla uyum için (ekranda görünmez)
         fabText.text = t("getVideo")
         fab.contentDescription = t("getVideo")
         fab.setOnClickListener { onFabTap() }
         content.addView(
             fab,
-            FrameLayout.LayoutParams(dp(68), dp(68)).apply {
-                gravity = Gravity.END or Gravity.BOTTOM
-                rightMargin = dp(18)
-                bottomMargin = dp(10)
+            FrameLayout.LayoutParams(dp(84), dp(84)).apply {
+                // sağ kenarın tam ortası (videonun üstündeki kırmızı düğmeyle karışmasın)
+                gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                rightMargin = dp(2)
             }
         )
         setupFabDrag()
@@ -1642,8 +1642,8 @@ class BrowserActivity : Activity() {
     //  Menü
     // =====================================================================
     private fun dlgTheme(): Int =
-        if (dark) android.R.style.Theme_DeviceDefault_Dialog_Alert
-        else android.R.style.Theme_DeviceDefault_Light_Dialog_Alert
+        if (dark) R.style.AppDialog_Dark
+        else R.style.AppDialog_Light
 
     private fun showMenu(anchor: View) {
         val tb = cur ?: return
@@ -2196,7 +2196,7 @@ class BrowserActivity : Activity() {
                 MotionEvent.ACTION_UP -> {
                     if (moved) {
                         try {
-                            sp.edit().putFloat("fabX", fab.translationX).putFloat("fabY", fab.translationY).apply()
+                            sp.edit().putFloat("fab2X", fab.translationX).putFloat("fab2Y", fab.translationY).apply()
                         } catch (_: Throwable) {
                         }
                     } else {
@@ -2218,12 +2218,10 @@ class BrowserActivity : Activity() {
             }
         }
         fab.post {
-            if (sp.contains("fabX") || sp.contains("fabY")) {
-                fab.translationX = clampTx(sp.getFloat("fabX", 0f))
-                fab.translationY = clampTy(sp.getFloat("fabY", 0f))
-            } else {
-                // İlk açılış: köşeye yapışık durmasın, sürüklenebildiği anlaşılsın
-                fab.translationY = clampTy(-content.height * 0.22f)
+            // Varsayılan: sağ kenarın ortası. Kullanıcı sürüklediyse o yer hatırlanır.
+            if (sp.contains("fab2X") || sp.contains("fab2Y")) {
+                fab.translationX = clampTx(sp.getFloat("fab2X", 0f))
+                fab.translationY = clampTy(sp.getFloat("fab2Y", 0f))
             }
         }
     }
@@ -2593,13 +2591,13 @@ class BrowserActivity : Activity() {
 }
 
 
-/** Yuvarlak indirme düğmesi: gri (video yok) / kırmızı (video var) + dışa yayılan halka. */
+/** Yuvarlak indirme düğmesi: soluk gri (video yok) / parlayan yeşil (video var) + nabız gibi atan ışıma ve dışa yayılan halka. */
 class DlFabView(ctx: android.content.Context) : android.view.View(ctx) {
     private val d = resources.displayMetrics.density
     private val fill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
     private val ringP = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         style = android.graphics.Paint.Style.STROKE
-        strokeWidth = 2f * d
+        strokeWidth = 2.5f * d
     }
     private val ic = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         color = android.graphics.Color.WHITE
@@ -2607,16 +2605,17 @@ class DlFabView(ctx: android.content.Context) : android.view.View(ctx) {
     private val icStroke = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         color = android.graphics.Color.WHITE
         style = android.graphics.Paint.Style.STROKE
-        strokeWidth = 2.6f * d
+        strokeWidth = 2.8f * d
         strokeCap = android.graphics.Paint.Cap.ROUND
     }
     private val head = android.graphics.Path()
     private var on = false
     private var ring = 0f
+    private var pulse = 0f
     private var anim: ValueAnimator? = null
 
     init {
-        setLayerType(LAYER_TYPE_SOFTWARE, null) // gölge için
+        setLayerType(LAYER_TYPE_SOFTWARE, null) // gölge / ışıma için
         fill.setShadowLayer(4f * d, 0f, 1.5f * d, 0x55000000)
     }
 
@@ -2626,12 +2625,18 @@ class DlFabView(ctx: android.content.Context) : android.view.View(ctx) {
         anim?.cancel()
         anim = null
         ring = 0f
+        pulse = 0f
         if (v) {
             anim = ValueAnimator.ofFloat(0f, 1f).apply {
-                duration = 1500
+                duration = 1400
                 repeatCount = ValueAnimator.INFINITE
                 interpolator = android.view.animation.DecelerateInterpolator()
-                addUpdateListener { ring = it.animatedValue as Float; invalidate() }
+                addUpdateListener {
+                    ring = it.animatedValue as Float
+                    val f = it.animatedFraction
+                    pulse = if (f < 0.5f) f * 2f else (1f - f) * 2f // 0 -> 1 -> 0
+                    invalidate()
+                }
                 start()
             }
         }
@@ -2651,22 +2656,31 @@ class DlFabView(ctx: android.content.Context) : android.view.View(ctx) {
     override fun onDraw(c: android.graphics.Canvas) {
         val cx = width / 2f
         val cy = height / 2f
-        val r = 22f * d
-        if (on && ring > 0f) {
+        val r = 24f * d
+        if (on) {
+            // dışa yayılan halka
             val rr = r + ring * (width / 2f - r - 2f * d)
-            ringP.color = 0xF44336 or ((((1f - ring) * 150).toInt()) shl 24)
+            ringP.color = 0x16C060 or ((((1f - ring) * 200).toInt()) shl 24)
             c.drawCircle(cx, cy, rr, ringP)
+            // parlayan yeşil ışıma (gölge katmanı)
+            fill.setShadowLayer((7f + 8f * pulse) * d, 0f, 0f, 0xFF2BE07A.toInt())
+            fill.color = 0xFF16C060.toInt()
+        } else {
+            fill.setShadowLayer(4f * d, 0f, 1.5f * d, 0x55000000)
+            fill.color = 0xB39E9E9E.toInt()
         }
-        fill.color = if (on) 0xFFF23A3A.toInt() else 0xFF9E9E9E.toInt()
         c.drawCircle(cx, cy, r, fill)
         // simge: ok + tepsi
-        c.drawLine(cx, cy - 9f * d, cx, cy - 0.5f * d, icStroke)
+        val a = if (on) 255 else 190
+        ic.alpha = a
+        icStroke.alpha = a
+        c.drawLine(cx, cy - 9.5f * d, cx, cy - 0.5f * d, icStroke)
         head.reset()
-        head.moveTo(cx - 6f * d, cy - 1.5f * d)
-        head.lineTo(cx + 6f * d, cy - 1.5f * d)
-        head.lineTo(cx, cy + 5.5f * d)
+        head.moveTo(cx - 6.5f * d, cy - 1.5f * d)
+        head.lineTo(cx + 6.5f * d, cy - 1.5f * d)
+        head.lineTo(cx, cy + 6f * d)
         head.close()
         c.drawPath(head, ic)
-        c.drawLine(cx - 7.5f * d, cy + 9.5f * d, cx + 7.5f * d, cy + 9.5f * d, icStroke)
+        c.drawLine(cx - 8f * d, cy + 10f * d, cx + 8f * d, cy + 10f * d, icStroke)
     }
 }
