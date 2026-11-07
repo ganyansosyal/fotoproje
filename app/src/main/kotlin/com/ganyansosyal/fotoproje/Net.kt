@@ -56,7 +56,7 @@ object Net {
         ""
     }
 
-    fun headers(url: String, referer: String): Map<String, String> {
+    fun headers(url: String, referer: String, useCaptured: Boolean = true): Map<String, String> {
         val h = linkedMapOf(
             "User-Agent" to ua,
             "Accept" to "*/*",
@@ -68,7 +68,7 @@ object Net {
             if (o.isNotEmpty()) h["Origin"] = o
         }
         // Önce WebView'in o medya URL'si için gerçekten gönderdiği başlıkları uygula.
-        capturedHeaders[url]?.forEach { (k, v) ->
+        if (useCaptured) capturedHeaders[url]?.forEach { (k, v) ->
             if (!k.equals("Cookie", true) && !k.equals("Range", true)) h[k] = v
         }
         try {
@@ -95,7 +95,13 @@ object Net {
         val self = origin(url)
         if (self.isNotEmpty()) add("$self/")
         add("")
-        return refs.map { headers(url, it) }
+        // İlk takım: WebView'in gönderdiği başlıklar. Diğerleri onlarsız denenir; aksi hâlde yakalanan Referer
+        // her takımı aynı yapıp farklı Referer/Origin denemelerini boşa çıkarırdı.
+        val out = ArrayList<Map<String, String>>()
+        refs.forEachIndexed { i, r -> out.add(headers(url, r, useCaptured = i == 0)) }
+        if (referer.isNotEmpty()) out.add(headers(url, referer, useCaptured = false)) // yakalanan başlıksız, sayfa Referer'i
+        if (self.isNotEmpty()) out.add(headers(url, "$self/", useCaptured = false).filterKeys { !it.equals("Origin", true) }) // Origin'siz
+        return out
     }
 
     private fun retryOther(e: Throwable): Boolean =
