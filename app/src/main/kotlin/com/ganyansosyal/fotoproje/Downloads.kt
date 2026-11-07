@@ -235,6 +235,17 @@ object Downloads {
                     )
                     // Bozuk / video olmayan dosya "indi" sayılmaz: hata verir, yedek kaynak denenir
                     checkPlayable(path, kind)
+                    // Dosyada ses izi yoksa: sayfada yakalanan ayrı ses dosyasını bul (eşleştirme: süre)
+                    if (task.audio.isEmpty() && Mux.tracks(path)?.second == false) {
+                        val dur = try {
+                            val r = android.media.MediaMetadataRetriever()
+                            try {
+                                r.setDataSource(path)
+                                (r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L) / 1000.0
+                            } finally { try { r.release() } catch (_: Throwable) {} }
+                        } catch (_: Throwable) { 0.0 }
+                        Probe.bestAudio(dur)?.let { task.audio = it.url }
+                    }
                     if (task.audio.isNotEmpty()) {
                         // Ses kesin gelmeli: 3 deneme, olmazsa sessiz video kaydetmek yerine hata ver
                         var ok = false
@@ -546,6 +557,16 @@ object Downloads {
             File(src).delete()
             dest = d
         }
+        // Kesin doğrulama: ayrı sesle gelen ya da Instagram/Facebook videosunda dosyada ses izi OLMALI
+        val needAudio = task.audio.isNotEmpty() || Regex("(cdninstagram|fbcdn)\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url)
+        if (needAudio) {
+            val tr = Mux.tracks(dest.path)
+            if (tr != null && (!tr.first || !tr.second)) {
+                val msg = if (L.code == "tr") "Dosyada ${if (!tr.first) "görüntü" else "ses"} yok, indirme geçersiz" else "File has no ${if (!tr.first) "video" else "audio"} track"
+                try { dest.delete() } catch (_: Throwable) {}
+                throw IOException(msg)
+            }
+        }
         task.path = dest.path
         task.size = dest.length()
         if (dest.extension.lowercase() in setOf("mp4", "mov", "m4v", "3gp", "webm", "mkv") && !Mux.hasFrame(dest.path)) {
@@ -744,6 +765,26 @@ object Mux {
         } finally {
             try { if (started) muxer?.stop() } catch (_: Throwable) {}
             try { muxer?.release() } catch (_: Throwable) {}
+            try { ex.release() } catch (_: Throwable) {}
+        }
+    }
+
+    /** Dosyadaki gerçek izler (görüntü, ses). Okunamazsa null. */
+    fun tracks(path: String): Pair<Boolean, Boolean>? {
+        val ex = MediaExtractor()
+        return try {
+            ex.setDataSource(path)
+            var v = false
+            var a = false
+            for (i in 0 until ex.trackCount) {
+                val m = ex.getTrackFormat(i).getString(MediaFormat.KEY_MIME) ?: continue
+                if (m.startsWith("video/")) v = true
+                if (m.startsWith("audio/")) a = true
+            }
+            Pair(v, a)
+        } catch (_: Throwable) {
+            null
+        } finally {
             try { ex.release() } catch (_: Throwable) {}
         }
     }

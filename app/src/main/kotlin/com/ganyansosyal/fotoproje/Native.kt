@@ -287,6 +287,7 @@ object Native {
 
         fun fetch(url: String): ByteArray {
             var k = 0
+            var th = 0
             while (true) {
                 try {
                     return Http.bytes(url, headers, cancel)
@@ -294,11 +295,21 @@ object Native {
                     throw e
                 } catch (e: Exception) {
                     if (cancel.on) throw CanceledEx()
-                    if (isThrottle(e) && lim.limit > 4) {
-                        lim.limit -= 2
-                        Thread.sleep(400)
+                    if (isThrottle(e)) {
+                        // Sunucu "çok fazla istek" dedi: bağlantı sayısını düşür, üstel bekleyip tekrar dene
+                        if (lim.limit > 1) lim.limit = maxOf(1, lim.limit / 2)
+                        if (th++ >= 12) throw e
+                        val wait = minOf(15000L, 1000L shl minOf(th - 1, 4))
+                        var w = 0L
+                        while (w < wait) {
+                            if (cancel.on) throw CanceledEx()
+                            Thread.sleep(250)
+                            w += 250
+                        }
+                    } else {
+                        if (k++ >= 3) throw e
+                        Thread.sleep(300L * k)
                     }
-                    if (k++ >= 3) throw e
                 }
             }
         }
@@ -480,6 +491,21 @@ object Native {
                                     return
                                 }
                                 Thread.sleep(600)
+                                continue
+                            }
+                            if (isThrottle(e)) {
+                                // Tek bağlantıda bile kısıtlanıyorsa üstel bekleyip daha çok dene
+                                if (k++ >= 12) {
+                                    err.compareAndSet(null, e)
+                                    return
+                                }
+                                var w = 0L
+                                val wait = minOf(15000L, 1000L shl minOf(k - 1, 4))
+                                while (w < wait) {
+                                    if (cancel.on) { err.compareAndSet(null, CanceledEx()); return }
+                                    Thread.sleep(250)
+                                    w += 250
+                                }
                                 continue
                             }
                             if (k++ >= 3) {

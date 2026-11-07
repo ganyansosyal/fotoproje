@@ -268,7 +268,51 @@ object Probe {
         }
     }
 
+    private val AUDIO_EXT = Regex("\\.(m4a|aac|mp3)$", RegexOption.IGNORE_CASE)
+
+    /** Son incelemede bulunan yalnızca-ses dosyaları: indirme sırasında sessiz videoya eş aranır. */
+    @Volatile var audioPool: List<MediaInfo> = emptyList()
+
+    /** [dur] saniyeye en uygun ses dosyası (süre bilinmiyorsa en büyük). Yoksa null. */
+    fun bestAudio(dur: Double): MediaInfo? {
+        val l = audioPool
+        if (l.isEmpty()) return null
+        if (dur > 0) {
+            val tol = maxOf(1.5, dur * 0.03)
+            val m = l.filter { it.duration > 0 && Math.abs(it.duration - dur) <= tol }
+            if (m.isNotEmpty()) return m.maxByOrNull { it.size }
+            if (l.any { it.duration > 0 }) return null
+        }
+        return l.maxByOrNull { it.size }
+    }
+
+    private fun probeAudio(url: String, referer: String): MediaInfo {
+        val a = MediaInfo(url, "m4a")
+        a.usable = false
+        a.audioOnly = true
+        try {
+            Http.get(url.substringBefore("#"), Net.headers(url, referer), "bytes=0-0", CancelFlag()) { c ->
+                val cr = c.getHeaderField("Content-Range") ?: ""
+                val total = Regex("/(\\d+)\\s*$").find(cr)?.groupValues?.get(1)?.toLongOrNull()
+                val code = try { c.responseCode } catch (_: Throwable) { 200 }
+                val cl = c.getHeaderField("Content-Length")?.toLongOrNull() ?: 0L
+                a.size = total ?: (if (code == 206 || cl <= 1L) 0L else cl)
+                c.disconnect()
+                Unit
+            }
+            val dur = DoubleArray(1)
+            tracks(url, referer, dur)
+            a.duration = if (dur[0] > 0) dur[0] else retrieverDuration(url, referer)
+        } catch (_: Throwable) {
+        }
+        return a
+    }
+
     private fun probeOne(url: String, hint: String, referer: String, children: MutableSet<String>): MediaInfo {
+        if (hint == "m4a" || hint == "aac" || hint == "mp3" ||
+            AUDIO_EXT.containsMatchIn(url.substringBefore('?').substringBefore('#'))) {
+            return probeAudio(url, referer)
+        }
         if (FRAGMENT_EXT.containsMatchIn(url.substringBefore('?').substringBefore('#'))) {
             return MediaInfo(url, "mp4").also { it.usable = false }
         }
@@ -543,6 +587,7 @@ object Probe {
         }
         // Sessiz görüntü dosyası + ayrı ses dosyası (Instagram/Facebook): eşleştir, indirirken birleştirilir
         val audios = list.filter { it.audioOnly }
+        if (audios.isNotEmpty()) audioPool = audios
         if (audios.isNotEmpty()) {
             for (e in cands) {
                 if (e.isStream || e.kind == "blob" || e.audio == true) continue

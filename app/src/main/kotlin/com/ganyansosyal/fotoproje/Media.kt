@@ -47,7 +47,7 @@ object Media {
     val HOOK_JS = """
 (function(){ if(window.__hk) return; window.__hk=1;
  var ID=Math.random().toString(36).slice(2);
- var RE=/\.(m3u8|mpd|mp4|webm|mov|m4v|mkv|flv|3gp|3g2|ogv|avi|wmv|mpg|mpeg|f4v|asf|m2ts|mts)(\?|#|\/|&|${'$'})/i;
+ var RE=/\.(m3u8|mpd|mp4|webm|mov|m4v|mkv|flv|3gp|3g2|ogv|avi|wmv|mpg|mpeg|f4v|asf|m2ts|mts|m4a|aac|mp3)(\?|#|\/|&|${'$'})/i;
  // Parça (segment) adresleri tam video değildir.
  var SEGN=/((seg|segment|chunk|frag|fragment)[-_.]?\d|^init[-_.])/i;
  var SEGQ=/[?&](bytestart|byterange|range|sq|seg|segment|chunk)=/i;
@@ -66,6 +66,7 @@ object Media {
  function ctype(c,u,cr,cl){ c=(c||'').toLowerCase(); if(!u) return;
   if(c.indexOf('mpegurl')>-1){ note(u,'m3u8'); return; }
   if(c.indexOf('dash+xml')>-1){ note(u,'mpd'); return; }
+  if(c.indexOf('audio/')===0){ note(u,'m4a'); return; }
   if(c.indexOf('video/')===0){ var tot=0, m=cr&&/\/(\d+)\s*${'$'}/.exec(cr); if(m) tot=+m[1];
    if(!tot) tot=parseInt(cl||'0',10)||0; note(u,'mp4'); } }
  // Biçime göre tanıma: adres/uzantı ne olursa olsun yanıtın başı HLS (#EXTM3U)

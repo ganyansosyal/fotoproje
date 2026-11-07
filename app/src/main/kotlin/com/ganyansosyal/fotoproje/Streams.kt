@@ -72,7 +72,7 @@ object Streams {
         keys: List<String?>? = null, ivs: List<ByteArray?>? = null, seq: Long = 0
     ) {
         if (urls.isEmpty()) throw IOException("Video parçaları bulunamadı")
-        Native.segments(urls, init, path, headers, keys, ivs, seq, 12, cancel) { a, b ->
+        Native.segments(urls, init, path, headers, keys, ivs, seq, 6, cancel) { a, b ->
             if (b > 0) report(start + span * a / b, "$label: $a/$b")
         }
     }
