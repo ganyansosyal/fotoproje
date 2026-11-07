@@ -39,6 +39,7 @@ class DownloadTask(val id: String, @Volatile var url: String, val referer: Strin
     var body: (() -> Unit)? = null
     var kind: String? = null   // mp4 / m3u8 / mpd / blob
     var yt = false             // YouTube görevi mi
+    var page = ""              // Çözümleyiciye gönderilen sayfa adresi (süre dolunca yeniden çözmek için)
 }
 
 /** blob: içeriğini sayfadan okuyan yerel ekranın sonucu. */
@@ -123,6 +124,7 @@ object Downloads {
                 val t = DownloadTask(m.getString("id"), m.optString("u"), m.optString("r"), m.optString("t"))
                 t.createdAt = m.optLong("c")
                 t.kind = m.optString("k").ifEmpty { null }
+                t.page = m.optString("pg")
                 t.yt = m.optBoolean("y")
                 // Uygulama kapanınca çalışan indirme de "duraklatıldı" sayılır; Devam ile başlar
                 t.status = if (m.optString("st") == "FAILED") DlStatus.FAILED else DlStatus.PAUSED
@@ -147,7 +149,7 @@ object Downloads {
             if (t.kind == "blob") continue // blob sayfaya bağlıdır, yeniden başlatılamaz
             if (t.status == DlStatus.CANCELED) continue
             pend.put(
-                JSONObject().put("id", t.id).put("u", t.url).put("r", t.referer).put("t", t.title)
+                JSONObject().put("id", t.id).put("u", t.url).put("r", t.referer).put("pg", t.page).put("t", t.title)
                     .put("c", t.createdAt).put("k", t.kind ?: "").put("y", t.yt)
                     .put("st", t.status.name).put("e", t.error ?: "")
             )
@@ -230,15 +232,30 @@ object Downloads {
 
     /** Hata mesajı döner (null: başladı). */
     fun start(
-        url0: String, referer: String, hint: String?, title: String?,
+        url0: String, referer0: String, hint: String?, title: String?,
         blobReader: ((String, String, BlobRes) -> Unit)?
     ): String? {
         if (!wifiOk()) return L.t("wifiBlocked")
         var url = url0
+        var referer = referer0
+        var pageUrl = ""
+        var title2 = title
         var kind = Media.kind(url) ?: hint ?: "mp4"
-        // blob: bellekteki geçici nesnedir; önce arkasındaki düz kaynak (m3u8/mp4) var mı bak.
-        // Bulunamazsa eski yol (sayfadan blob okuma) denenir.
-        if (kind == "blob") {
+        if (Resolver.enabled()) {
+            // Backend: sayfa adresi gider, net indirme adresi (.mp4 / .m3u8) döner
+            pageUrl = referer0.ifBlank { url0 }
+            if (!pageUrl.startsWith("http")) return "Sayfa adresi bulunamadı"
+            val r = try {
+                Resolver.resolve(pageUrl)
+            } catch (e: Throwable) {
+                return "Çözümleyici: " + (e.message ?: e.javaClass.simpleName)
+            }
+            url = r.url
+            kind = r.kind
+            referer = r.referer ?: pageUrl
+            if (!r.title.isNullOrBlank()) title2 = r.title
+        } else if (kind == "blob") {
+            // blob: bellekteki geçici nesnedir; önce arkasındaki düz kaynak (m3u8/mp4) var mı bak.
             val real = try { Streams.resolveBlob(referer, CancelFlag()) } catch (_: Throwable) { null }
             if (real != null) {
                 url = real
@@ -252,10 +269,11 @@ object Downloads {
             if (sk == null || sk !in ALLOWED_EXT) return L.t("failed")
             kind = sk
         }
-        val name = pickName(title, url)
+        val name = pickName(title2, url)
         val task = DownloadTask(System.nanoTime().toString(), url, referer, name)
         task.canPause = kind != "blob"
         task.kind = kind
+        task.page = pageUrl
         active.add(0, task)
         notifyUi(true)
         run(task, bodyFor(task, blobReader))
@@ -281,7 +299,11 @@ object Downloads {
                         if ((e.code == 401 || e.code == 403 || e.code == 410) && task.kind != "blob") {
                             task.label = "Adres yenileniyor…"
                             notifyUi(false)
-                            val fresh = Streams.refresh(task.url, task.referer, task.cancel, true)
+                            val fresh = if (Resolver.enabled() && task.page.isNotEmpty()) {
+                                try { Resolver.resolve(task.page, task.cancel).url } catch (_: Throwable) { null }
+                            } else {
+                                Streams.refresh(task.url, task.referer, task.cancel, true)
+                            }
                             if (fresh != null && fresh != task.url) {
                                 task.url = fresh
                                 persist()
