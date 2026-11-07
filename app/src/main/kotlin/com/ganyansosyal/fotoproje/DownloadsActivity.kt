@@ -26,14 +26,38 @@ class DownloadsActivity : Activity() {
     private var showDone = false
     private val listener: () -> Unit = { render() }
 
-    private val bg get() = if (Store.dark) 0xFF202124.toInt() else 0xFFF1F3F4.toInt()
-    private val card get() = if (Store.dark) 0xFF303134.toInt() else 0xFFFFFFFF.toInt()
-    private val fg get() = if (Store.dark) 0xFFE8EAED.toInt() else 0xFF202124.toInt()
-    private val sub get() = if (Store.dark) 0xFF9AA0A6.toInt() else 0xFF5F6368.toInt()
-    private val line get() = if (Store.dark) 0xFF3C4043.toInt() else 0xFFDADCE0.toInt()
-    private val accent = 0xFF1A73E8.toInt()
+    private val dark get() = Store.dark
+    private val bg get() = if (dark) 0xFF121418.toInt() else 0xFFF4F6FA.toInt()
+    private val card get() = if (dark) 0xFF1C1F26.toInt() else 0xFFFFFFFF.toInt()
+    private val fg get() = if (dark) 0xFFEEF0F4.toInt() else 0xFF14171F.toInt()
+    private val sub get() = if (dark) 0xFF9AA3B2.toInt() else 0xFF667085.toInt()
+    private val line get() = if (dark) 0xFF2A2E38.toInt() else 0xFFE6E9F0.toInt()
+    private val track get() = if (dark) 0xFF2B303B.toInt() else 0xFFE6EAF2.toInt()
+    private val accent get() = if (dark) 0xFF8AB4F8.toInt() else 0xFF1A73E8.toInt()
+    private val accentText get() = if (dark) 0xFFA8C7FA.toInt() else 0xFF1557B0.toInt()
+    private val accentSoft get() = if (dark) 0xFF243049.toInt() else 0xFFE8F0FE.toInt()
+    private val danger get() = if (dark) 0xFFF28B82.toInt() else 0xFFC5221F.toInt()
+    private val dangerSoft get() = if (dark) 0xFF3A2424.toInt() else 0xFFFCE8E6.toInt()
+    private val onAccent get() = if (dark) 0xFF0B1220.toInt() else 0xFFFFFFFF.toInt()
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    private fun rounded(color: Int, r: Int, strokeColor: Int? = null): GradientDrawable =
+        GradientDrawable().apply {
+            cornerRadius = dp(r).toFloat()
+            setColor(color)
+            if (strokeColor != null) setStroke(dp(1), strokeColor)
+        }
+
+    /** Başlığa göre sabit bir renk geçişi (küçük resim yokken / ilerleme kartında). */
+    private fun thumbGradient(title: String): GradientDrawable {
+        val h = (Math.abs(title.hashCode()) % 360).toFloat()
+        val c1 = Color.HSVToColor(floatArrayOf(h, 0.46f, 0.55f))
+        val c2 = Color.HSVToColor(floatArrayOf((h + 45f) % 360f, 0.52f, 0.32f))
+        return GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(c1, c2)).apply {
+            cornerRadius = dp(16).toFloat()
+        }
+    }
 
     override fun onCreate(b: Bundle?) {
         setTheme(
@@ -50,33 +74,38 @@ class DownloadsActivity : Activity() {
         val top = LinearLayout(this)
         top.orientation = LinearLayout.HORIZONTAL
         top.gravity = Gravity.CENTER_VERTICAL
+        top.setPadding(dp(8), dp(8), dp(12), 0)
         val back = TextView(this)
         back.text = "‹"
         back.textSize = 30f
         back.setTextColor(fg)
         back.gravity = Gravity.CENTER
         back.setOnClickListener { finish() }
-        top.addView(back, LinearLayout.LayoutParams(dp(52), dp(52)))
+        top.addView(back, LinearLayout.LayoutParams(dp(44), dp(44)))
         val title = TextView(this)
         title.text = L.t("downloads")
-        title.textSize = 20f
+        title.textSize = 26f
         title.typeface = Typeface.DEFAULT_BOLD
         title.setTextColor(fg)
-        top.addView(title)
-        root.addView(top, LinearLayout.LayoutParams(-1, dp(52)))
+        top.addView(title, LinearLayout.LayoutParams(0, -2, 1f))
+        root.addView(top, LinearLayout.LayoutParams(-1, dp(56)))
 
+        // Hap biçimli sekme seçici
         val tabs = LinearLayout(this)
         tabs.orientation = LinearLayout.HORIZONTAL
+        tabs.setPadding(dp(4), dp(4), dp(4), dp(4))
+        tabs.background = rounded(track, 16)
         tabProg = tabView(L.t("progress")) { showDone = false; render() }
         tabDone = tabView(L.t("done")) { showDone = true; Downloads.markSeen(); render() }
-        tabs.addView(tabProg, LinearLayout.LayoutParams(0, dp(44), 1f))
-        tabs.addView(tabDone, LinearLayout.LayoutParams(0, dp(44), 1f))
-        root.addView(tabs, LinearLayout.LayoutParams(-1, dp(44)))
+        tabs.addView(tabProg, LinearLayout.LayoutParams(0, dp(44), 1f).apply { setMargins(dp(2), 0, dp(2), 0) })
+        tabs.addView(tabDone, LinearLayout.LayoutParams(0, dp(44), 1f).apply { setMargins(dp(2), 0, dp(2), 0) })
+        root.addView(tabs, LinearLayout.LayoutParams(-1, -2).apply { setMargins(dp(16), dp(12), dp(16), 0) })
 
         val sv = ScrollView(this)
+        sv.isVerticalScrollBarEnabled = false
         list = LinearLayout(this)
         list.orientation = LinearLayout.VERTICAL
-        list.setPadding(dp(14), dp(8), dp(14), dp(20))
+        list.setPadding(dp(16), dp(16), dp(16), dp(24))
         sv.addView(list)
         root.addView(sv, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
@@ -105,93 +134,148 @@ class DownloadsActivity : Activity() {
     }
 
     private fun style(t: TextView, on: Boolean) {
-        t.setTextColor(if (on) accent else sub)
-        t.typeface = if (on) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+        t.setTextColor(if (on) fg else sub)
+        t.typeface = Typeface.DEFAULT_BOLD
+        t.background = rounded(if (on) card else Color.TRANSPARENT, 12)
+        t.elevation = if (on) dp(1).toFloat() else 0f
     }
 
     private fun render() {
         style(tabProg, !showDone)
         style(tabDone, showDone)
-        tabDone.text = L.t("done") + if (Downloads.unseen > 0) " (${Downloads.unseen})" else ""
+        tabProg.text = L.t("progress") + if (Downloads.active.isNotEmpty()) "  ${Downloads.active.size}" else ""
+        tabDone.text = L.t("done") + if (Downloads.unseen > 0) "  ${Downloads.unseen}" else ""
         list.removeAllViews()
         if (!showDone) {
-            if (Downloads.active.isEmpty()) empty(L.t("noActive")) else for (t in Downloads.active) list.addView(activeRow(t))
+            if (Downloads.active.isEmpty()) empty(L.t("noActive"), "⤓") else for (t in Downloads.active) list.addView(activeRow(t))
         } else {
-            if (Downloads.done.isEmpty()) empty(L.t("noDownloads")) else for (t in Downloads.done) list.addView(doneRow(t))
+            if (Downloads.done.isEmpty()) empty(L.t("noDownloads"), "▶") else for (t in Downloads.done) list.addView(doneRow(t))
         }
     }
 
-    private fun empty(txt: String) {
+    private fun empty(txt: String, symbol: String) {
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
+        col.gravity = Gravity.CENTER_HORIZONTAL
+        col.setPadding(0, dp(110), 0, 0)
+        val icon = TextView(this)
+        icon.text = symbol
+        icon.textSize = 34f
+        icon.gravity = Gravity.CENTER
+        icon.setTextColor(accentText)
+        icon.background = rounded(accentSoft, 28)
+        col.addView(icon, LinearLayout.LayoutParams(dp(84), dp(84)))
         val t = TextView(this)
         t.text = txt
-        t.setTextColor(sub)
+        t.setTextColor(fg)
+        t.typeface = Typeface.DEFAULT_BOLD
         t.gravity = Gravity.CENTER
-        t.textSize = 15f
-        list.addView(t, LinearLayout.LayoutParams(-1, dp(260)))
+        t.textSize = 17f
+        col.addView(t, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(16) })
+        list.addView(col, LinearLayout.LayoutParams(-1, -2))
     }
 
     private fun cardBox(): LinearLayout {
         val c = LinearLayout(this)
         c.orientation = LinearLayout.VERTICAL
-        c.setPadding(dp(16), dp(12), dp(12), dp(12))
-        c.background = GradientDrawable().apply {
-            cornerRadius = dp(20).toFloat()
-            setColor(card)
-            setStroke(dp(1), line)
-        }
+        c.setPadding(dp(14), dp(14), dp(14), dp(14))
+        c.background = rounded(card, 22, line)
         val lp = LinearLayout.LayoutParams(-1, -2)
-        lp.setMargins(0, dp(5), 0, dp(5))
+        lp.setMargins(0, dp(6), 0, dp(6))
         c.layoutParams = lp
         return c
     }
 
-    private fun action(txt: String, click: () -> Unit): TextView {
+    /** Yumuşak renkli, 44dp yüksekliğinde yuvarlak düğme. */
+    private fun pill(txt: String, fgc: Int, bgc: Int, click: () -> Unit): TextView {
         val b = TextView(this)
         b.text = txt
         b.textSize = 14f
-        b.setTextColor(accent)
-        b.setPadding(dp(12), dp(8), dp(4), dp(8))
+        b.typeface = Typeface.DEFAULT_BOLD
+        b.setTextColor(fgc)
+        b.gravity = Gravity.CENTER
+        b.setPadding(dp(16), 0, dp(16), 0)
+        b.background = rounded(bgc, 14)
         b.setOnClickListener { click() }
+        b.layoutParams = LinearLayout.LayoutParams(-2, dp(44)).apply { leftMargin = dp(8) }
         return b
+    }
+
+    private fun actionRow(): LinearLayout {
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.END
+        return row
     }
 
     private fun activeRow(t: DownloadTask): View {
         val c = cardBox()
         val failed = t.status == DlStatus.FAILED
         val paused = t.status == DlStatus.PAUSED
+        val p = t.progress
+
+        val head = LinearLayout(this)
+        head.orientation = LinearLayout.HORIZONTAL
+        head.gravity = Gravity.CENTER_VERTICAL
+
+        // Sol: renkli kutu + yüzde
+        val tb = FrameLayout(this)
+        tb.background = thumbGradient(t.title)
+        val pct = TextView(this)
+        pct.text = if (failed) "!" else if (p < 0) "…" else "${(p.coerceIn(0.0, 1.0) * 100).toInt()}%"
+        pct.setTextColor(Color.WHITE)
+        pct.typeface = Typeface.DEFAULT_BOLD
+        pct.textSize = 15f
+        pct.gravity = Gravity.CENTER
+        tb.addView(pct, FrameLayout.LayoutParams(-1, -1))
+        head.addView(tb, LinearLayout.LayoutParams(dp(64), dp(64)).apply { rightMargin = dp(12) })
+
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
         val name = TextView(this)
         name.text = t.title
         name.maxLines = 1
         name.ellipsize = android.text.TextUtils.TruncateAt.END
         name.setTextColor(fg)
-        name.textSize = 16f
-        c.addView(name)
+        name.typeface = Typeface.DEFAULT_BOLD
+        name.textSize = 15f
+        col.addView(name)
+        val meta = TextView(this)
+        meta.textSize = 12.5f
         if (failed) {
-            val e = TextView(this)
-            e.text = L.t("failed") + ": " + (t.error ?: "")
-            e.setTextColor(0xFFD93025.toInt())
-            e.maxLines = 3
-            e.textSize = 13f
-            c.addView(e)
+            meta.text = L.t("failed") + ": " + (t.error ?: "")
+            meta.setTextColor(danger)
+            meta.maxLines = 2
         } else {
-            val pb = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
-            val p = t.progress
-            pb.isIndeterminate = !paused && p < 0
-            pb.max = 1000
-            pb.progress = if (p < 0) 0 else (p.coerceIn(0.0, 1.0) * 1000).toInt()
-            c.addView(pb, LinearLayout.LayoutParams(-1, dp(14)).apply { topMargin = dp(8) })
-            val l = TextView(this)
-            l.text = if (t.label.isEmpty()) L.t("queued") else t.label
-            l.setTextColor(sub)
-            l.textSize = 12f
-            c.addView(l)
+            meta.text = if (t.label.isEmpty()) L.t("queued") else t.label
+            meta.setTextColor(sub)
         }
-        val row = LinearLayout(this)
-        row.gravity = Gravity.END
-        if (failed || paused) row.addView(action(L.t(if (failed) "retry" else "resume")) { Downloads.resume(t) })
-        else if (t.canPause) row.addView(action(L.t("pause")) { Downloads.pause(t) })
-        row.addView(action(L.t("cancel")) { if (failed) Downloads.removeFailed(t) else Downloads.cancel(t) })
-        c.addView(row)
+        col.addView(meta, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(3) })
+        head.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
+        c.addView(head)
+
+        // İlerleme çubuğu
+        if (!failed && p < 0 && !paused) {
+            val pb = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
+            pb.isIndeterminate = true
+            c.addView(pb, LinearLayout.LayoutParams(-1, dp(6)).apply { topMargin = dp(12) })
+        } else {
+            val barBox = LinearLayout(this)
+            barBox.orientation = LinearLayout.HORIZONTAL
+            barBox.background = rounded(track, 3)
+            val w = if (failed) 1000 else (p.coerceIn(0.0, 1.0) * 1000).toInt()
+            val fill = View(this)
+            fill.background = rounded(if (failed) danger else if (paused) sub else accent, 3)
+            barBox.addView(fill, LinearLayout.LayoutParams(0, -1, w.toFloat().coerceAtLeast(0f)))
+            barBox.addView(View(this), LinearLayout.LayoutParams(0, -1, (1000 - w).toFloat().coerceAtLeast(0f)))
+            c.addView(barBox, LinearLayout.LayoutParams(-1, dp(6)).apply { topMargin = dp(12) })
+        }
+
+        val row = actionRow()
+        if (failed || paused) row.addView(pill(L.t(if (failed) "retry" else "resume"), onAccent, accent) { Downloads.resume(t) })
+        else if (t.canPause) row.addView(pill(L.t("pause"), accentText, accentSoft) { Downloads.pause(t) })
+        row.addView(pill(L.t("cancel"), danger, dangerSoft) { if (failed) Downloads.removeFailed(t) else Downloads.cancel(t) })
+        c.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
         return c
     }
 
@@ -201,17 +285,27 @@ class DownloadsActivity : Activity() {
         top.orientation = LinearLayout.HORIZONTAL
         top.gravity = Gravity.CENTER_VERTICAL
 
-        // Küçük resim (videonun bir karesi)
+        // Küçük resim (videonun bir karesi) + oynat rozeti
+        val thumbBox = FrameLayout(this)
+        thumbBox.background = rounded(if (dark) 0xFF3C4043.toInt() else 0xFFE8EAED.toInt(), 16)
+        thumbBox.clipToOutline = true
         val thumb = android.widget.ImageView(this)
         thumb.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
-        thumb.background = GradientDrawable().apply {
-            cornerRadius = dp(10).toFloat()
-            setColor(if (Store.dark) 0xFF3C4043.toInt() else 0xFFE8EAED.toInt())
+        thumbBox.addView(thumb, FrameLayout.LayoutParams(-1, -1))
+        val badge = TextView(this)
+        badge.text = "▶"
+        badge.textSize = 12f
+        badge.setTextColor(Color.WHITE)
+        badge.gravity = Gravity.CENTER
+        badge.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(0x6B000000)
         }
-        thumb.clipToOutline = true
+        thumbBox.addView(badge, FrameLayout.LayoutParams(dp(32), dp(32), Gravity.CENTER))
         val p = t.path
         if (p != null) loadThumb(p, thumb)
-        top.addView(thumb, LinearLayout.LayoutParams(dp(88), dp(64)).apply { rightMargin = dp(12) })
+        thumbBox.setOnClickListener { openFile(t) }
+        top.addView(thumbBox, LinearLayout.LayoutParams(dp(104), dp(72)).apply { rightMargin = dp(14) })
 
         val col = LinearLayout(this)
         col.orientation = LinearLayout.VERTICAL
@@ -220,22 +314,26 @@ class DownloadsActivity : Activity() {
         name.maxLines = 2
         name.ellipsize = android.text.TextUtils.TruncateAt.END
         name.setTextColor(fg)
-        name.textSize = 16f
+        name.typeface = Typeface.DEFAULT_BOLD
+        name.textSize = 15f
         col.addView(name)
         val s = TextView(this)
         val sz = Media.fmtBytes(t.size)
         s.text = if (t.note == null) sz else "$sz · ${t.note}"
         s.setTextColor(sub)
-        s.textSize = 12f
-        col.addView(s)
+        s.textSize = 12.5f
+        col.addView(s, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(4) })
         top.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
         c.addView(top)
 
-        val row = LinearLayout(this)
-        row.gravity = Gravity.END
-        row.addView(action(L.t("share")) { shareFile(t) })
-        row.addView(action(L.t("delete")) { Downloads.deleteDone(t) })
-        c.addView(row)
+        val div = View(this)
+        div.setBackgroundColor(line)
+        c.addView(div, LinearLayout.LayoutParams(-1, 1).apply { topMargin = dp(12) })
+
+        val row = actionRow()
+        row.addView(pill(L.t("share"), accentText, accentSoft) { shareFile(t) })
+        row.addView(pill(L.t("delete"), danger, dangerSoft) { Downloads.deleteDone(t) })
+        c.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
         c.setOnClickListener { openFile(t) }
         return c
     }
