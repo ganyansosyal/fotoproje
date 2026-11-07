@@ -1162,7 +1162,11 @@ class BrowserActivity : Activity() {
                 if (blockAds && !req.isForMainFrame && AdBlock.isAd(u, req.url.host)) {
                     return AdBlock.empty()
                 }
-                noteNet(tb, u)
+                // Medya öğesi istekleri "Range" başlığı taşır: uzantısız adresler de aday olur
+                val ranged = try {
+                    req.requestHeaders?.keys?.any { it.equals("Range", true) } == true
+                } catch (_: Throwable) { false }
+                noteNet(tb, u, ranged)
                 return null
             }
 
@@ -1523,6 +1527,7 @@ class BrowserActivity : Activity() {
         val w = tb.web ?: return
         w.evaluateJavascript(Media.SCAN_JS) { raw ->
             val urls = ArrayList<String>()
+            val netHints = HashMap<String, String>()
             try {
                 val str = org.json.JSONTokener(raw ?: "null").nextValue() as? String
                 if (str != null) {
@@ -1533,14 +1538,14 @@ class BrowserActivity : Activity() {
             }
             synchronized(tb.netCands) {
                 val now = System.currentTimeMillis()
-                tb.netCands.filter { now - it.t < 120_000 }.forEach { urls.add(it.url) }
+                tb.netCands.filter { now - it.t < 120_000 }.forEach { urls.add(it.url); netHints[it.url] = it.kind }
             }
             val candidates = urls.distinct().take(100)
             if (candidates.isEmpty() || !tb.autoShow || tb.found.isNotEmpty()) return@evaluateJavascript
             val ref = tb.web?.url ?: tb.url
             Thread {
                 val list = try {
-                    Probe.probeAll(candidates, emptyMap(), ref).map {
+                    Probe.probeAll(candidates, netHints, ref).map {
                         FoundItem(it.url, it.kind, it.title, it.subtitle, it.height, it.duration, it.size, it.bw)
                     }
                 } catch (_: Throwable) {
@@ -1997,7 +2002,12 @@ class BrowserActivity : Activity() {
     }
 
     // ---- ağ seviyesinde aday adresler
-    private fun noteNet(tb: Tab, u: String) {
+    private val NOT_MEDIA_RE = Regex(
+        "\\.(js|mjs|css|png|jpe?g|gif|webp|avif|svg|ico|woff2?|ttf|otf|json|html?|txt|xml|map|vtt|srt|wasm)(?:$|[?#])",
+        RegexOption.IGNORE_CASE
+    )
+
+    private fun noteNet(tb: Tab, u: String, ranged: Boolean = false) {
         if (u.length > 2500) return
         if (BAD_RE.containsMatchIn(u) || SEG_RE.containsMatchIn(u)) return
         val match = MEDIA_RE.find(u)
@@ -2013,7 +2023,11 @@ class BrowserActivity : Activity() {
         }
         val kind = match?.groupValues?.get(1)?.ifEmpty { match.groupValues.getOrElse(2) { "" } }?.lowercase()
             ?.ifEmpty { inferred } ?: inferred
-        if (kind.isEmpty()) return
+        var kind2 = kind
+        if (kind2.isEmpty() && ranged && u.startsWith("http") && !NOT_MEDIA_RE.containsMatchIn(u)) {
+            kind2 = "sniff" // türü bilinmiyor: Probe ilk baytlara / Content-Type'a bakarak anlar
+        }
+        if (kind2.isEmpty()) return
         val now = System.currentTimeMillis()
         var isNew = true
         synchronized(tb.netCands) {
@@ -2025,7 +2039,7 @@ class BrowserActivity : Activity() {
                 }
             }
             if (isNew) {
-                tb.netCands.add(NetCand(u, kind, now))
+                tb.netCands.add(NetCand(u, kind2, now))
                 if (tb.netCands.size > 120) tb.netCands.removeAt(0)
             }
         }

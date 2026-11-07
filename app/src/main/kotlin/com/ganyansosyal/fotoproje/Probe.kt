@@ -61,7 +61,9 @@ object Probe {
     /** Uzantısı/ipucu olmayan adreste ilk baytlara bakarak biçimi bulur. */
     private fun sniffKind(url: String, referer: String): String? {
         try {
+            var ctype = ""
             val d = Http.get(url, Net.headers(url, referer), "bytes=0-1023", CancelFlag()) { c ->
+                ctype = (c.contentType ?: "").lowercase()
                 c.inputStream.use { ins ->
                     val buf = ByteArray(1024)
                     var n = 0
@@ -73,11 +75,18 @@ object Probe {
                     buf.copyOf(n)
                 }
             }
+            if (ctype.contains("mpegurl")) return "m3u8"
+            if (ctype.contains("dash+xml")) return "mpd"
             if (d.size < 8) return null
             val head = String(d, 0, minOf(d.size, 600), Charsets.ISO_8859_1)
             if (head.trimStart().startsWith("#EXTM3U")) return "m3u8"
             if (head.contains("<MPD")) return "mpd"
             if (d[4] == 0x66.toByte() && d[5] == 0x74.toByte() && d[6] == 0x79.toByte() && d[7] == 0x70.toByte()) return "mp4"
+            // moov / mdat / free / wide ile başlayan MP4 dosyaları
+            val box = String(d, 4, 4, Charsets.ISO_8859_1)
+            if (box == "moov" || box == "mdat" || box == "free" || box == "wide") return "mp4"
+            if (ctype.startsWith("video/webm")) return "webm"
+            if (ctype.startsWith("video/")) return "mp4"
             if (d[0] == 0x1A.toByte() && d[1] == 0x45.toByte() && d[2] == 0xDF.toByte() && d[3] == 0xA3.toByte()) return "webm"
         } catch (_: Throwable) {
         }
@@ -116,6 +125,12 @@ object Probe {
 
     private fun probeOne(url: String, hint: String, referer: String, children: MutableSet<String>): MediaInfo {
         var kind = Media.kind(url) ?: hint
+        if (kind == "sniff") {
+            // Ağdan uzantısız yakalanan adres: gerçekten video değilse aday olmaz
+            val k = sniffKind(url, referer)
+            if (k == null) return MediaInfo(url, "mp4").also { it.usable = false }
+            kind = k
+        }
         if (kind.isEmpty()) kind = sniffKind(url, referer) ?: "mp4"
         val info = MediaInfo(url, kind)
         try {
