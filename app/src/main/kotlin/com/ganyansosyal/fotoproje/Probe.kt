@@ -14,6 +14,8 @@ class MediaInfo(val url: String, var kind: String) {
     var size = 0L
     var usable = true
     var verified = false
+    /** İstek hata verdi ya da boyut/süre/iz hiç okunamadı: gerçek video olduğu doğrulanamadı. */
+    var failed = false
     /** true: sesli, false: sessiz (yalnızca görüntü), null: bilinmiyor */
     var audio: Boolean? = null
 
@@ -288,7 +290,7 @@ object Probe {
                 c.disconnect()
                 if (ct.startsWith("image/") || ct.startsWith("text/") || ct.contains("json")) info.usable = false
                 info.size = len
-                if (len in 1 until 150 * 1024) info.usable = false
+                if (len in 1 until 512 * 1024) info.usable = false
                 // Ağdan uzantısız yakalanan adres: küçük dosya parçadır, gerçek video sayılmaz
                 if (hint == "sniff" && len < 8L * 1024 * 1024) info.usable = false
                 Unit
@@ -309,6 +311,11 @@ object Probe {
             }
         } catch (_: Throwable) {
             info.duration = 0.0
+            info.failed = true
+        }
+        // Doğrudan dosyada boyut, süre ve iz bilgisi hiç alınamadıysa (genelde 403 / parça) güvenilmez
+        if (!info.isStream && kind != "blob" && info.usable && info.size <= 0 && info.duration <= 0 && info.height <= 0 && info.audio == null) {
+            info.failed = true
         }
         return info
     }
@@ -332,6 +339,8 @@ object Probe {
         val adPlaying = expectDur in 1.0..90.0 && longExists
         val strict = expectDur >= 5 && !adPlaying
         var ok = list.filter { it.usable && !synchronized(children) { children.contains(it.url) } }
+        // Bilgisi okunabilen adaylar varsa, okunamayanları (boş "VİDEO MP4" kutuları) listeden çıkar
+        if (ok.any { !it.failed }) ok = ok.filter { !it.failed || it.url == exactSrc }
         // Hem görüntü hem ses olan seçenek varsa sessiz (yalnızca görüntü) olanları gösterme
         if (ok.any { it.audio == true }) ok = ok.filter { it.audio != false }
         // Reklam oynuyorsa kısa (reklam/önizleme) adayları listeden çıkar
