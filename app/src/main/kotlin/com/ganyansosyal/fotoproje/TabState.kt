@@ -6,7 +6,7 @@ import androidx.webkit.ScriptHandler
 /** Dart'ın incelediği ve indirmeye hazır bulduğu video. */
 class FoundItem(
     val url: String, val kind: String, val title: String, val subtitle: String,
-    val height: Int = 0, val duration: Double = 0.0, val size: Long = 0L
+    val height: Int = 0, val duration: Double = 0.0, val size: Long = 0L, val bw: Int = 0
 )
 
 /** Ağ seviyesinde yakalanan medya adayı. */

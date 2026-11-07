@@ -40,7 +40,7 @@ object Backend {
                         done(items.map {
                             mapOf(
                                 "url" to it.url, "kind" to it.kind, "title" to it.title, "subtitle" to it.subtitle,
-                                "h" to it.height, "d" to it.duration, "s" to it.size
+                                "h" to it.height, "d" to it.duration, "s" to it.size, "bw" to it.bw
                             )
                         })
                     } catch (_: Throwable) {

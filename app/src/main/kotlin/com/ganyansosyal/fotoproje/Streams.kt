@@ -53,9 +53,11 @@ object Streams {
 
     /** Dönüş: ayrı ses dosyası yazıldı mı */
     fun hls(
-        url: String, path: String, audioPath: String, referer: String,
+        url0: String, path: String, audioPath: String, referer: String,
         report: Report, cancel: CancelFlag
     ): Boolean {
+        val want = url0.substringAfter("#fpq=", "").toIntOrNull()
+        val url = url0.substringBefore("#fpq=")
         val got = Net.fetchText(url, referer, cancel)
         val h = got.headers
         var pl = url
@@ -70,8 +72,9 @@ object Streams {
                 val b = Media.hlsAttr(ls[i], "BANDWIDTH")?.toIntOrNull() ?: 0
                 var j = i + 1
                 while (j < ls.size && (ls[j].isEmpty() || ls[j].startsWith("#"))) j++
-                if (j < ls.size && b > bw) {
-                    bw = b
+                val score = if (want != null && b == want) Int.MAX_VALUE else b
+                if (j < ls.size && score > bw) {
+                    bw = score
                     best = ls[j]
                     group = Media.hlsAttr(ls[i], "AUDIO")
                 }

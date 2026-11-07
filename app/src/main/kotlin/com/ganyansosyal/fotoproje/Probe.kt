@@ -4,7 +4,11 @@ import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 
 /** Bulunan bir video bağlantısının incelenmiş hâli (eski probe.dart). */
+class Variant(val bw: Int, val height: Int)
+
 class MediaInfo(val url: String, var kind: String) {
+    var variants: List<Variant> = emptyList()
+    var bw = 0
     var duration = 0.0
     var height = 0
     var size = 0L
@@ -87,6 +91,15 @@ object Probe {
                 var ls = text(url, referer).split('\n').map { it.trim() }
                 var base = url
                 if (ls.any { it.startsWith("#EXT-X-STREAM-INF") }) {
+                    // Ana listedeki tüm kalite seçeneklerini topla
+                    val vs = ArrayList<Variant>()
+                    for (l in ls) if (l.startsWith("#EXT-X-STREAM-INF")) {
+                        val b = Media.hlsAttr(l, "BANDWIDTH")?.toIntOrNull() ?: 0
+                        val r = Media.hlsAttr(l, "RESOLUTION")
+                        val hh = if (r != null && r.contains('x')) r.substringAfter('x').toIntOrNull() ?: 0 else 0
+                        if (b > 0 || hh > 0) vs.add(Variant(b, hh))
+                    }
+                    info.variants = vs.distinctBy { it.bw * 10000 + it.height }
                     for (i in ls.indices) {
                         val l = ls[i]
                         if (l.startsWith("#EXT-X-STREAM-INF")) {
@@ -208,11 +221,27 @@ object Probe {
             if (seen.add(key)) out.add(e)
         }
         // Aynı süreli, çözünürlüğü belli bir yayın varsa çözünürlüksüz olanı (ses/yan liste) gizle
-        return out.filter { e ->
+        val filtered = out.filter { e ->
             !(e.isStream && e.height == 0 && e.duration > 0 && out.any { o ->
                 o !== e && o.isStream && o.height > 0 &&
                     Math.abs(o.duration - e.duration) <= maxOf(4.0, e.duration * 0.04)
             })
         }
+        // HLS ana listesini kalite seçeneklerine aç (#fpq=<bant genişliği> ile seçilen kalite indirilir)
+        val res = ArrayList<MediaInfo>()
+        for (e in filtered) {
+            if (e.kind == "m3u8" && e.variants.isNotEmpty()) {
+                for (v in e.variants.sortedByDescending { it.bw }) {
+                    val m = MediaInfo(e.url.substringBefore("#fpq=") + "#fpq=" + v.bw, "m3u8")
+                    m.duration = e.duration
+                    m.height = v.height
+                    m.bw = v.bw
+                    m.size = if (e.duration > 0 && v.bw > 0) (v.bw / 8.0 * e.duration).toLong() else 0L
+                    m.verified = e.verified
+                    res.add(m)
+                }
+            } else res.add(e)
+        }
+        return res
     }
 }

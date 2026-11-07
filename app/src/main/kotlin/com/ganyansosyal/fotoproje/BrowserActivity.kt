@@ -1535,7 +1535,7 @@ class BrowserActivity : Activity() {
             Thread {
                 val list = try {
                     Probe.probeAll(urls, emptyMap(), ref).map {
-                        FoundItem(it.url, it.kind, it.title, it.subtitle, it.height, it.duration, it.size)
+                        FoundItem(it.url, it.kind, it.title, it.subtitle, it.height, it.duration, it.size, it.bw)
                     }
                 } catch (_: Throwable) {
                     emptyList()
@@ -2114,7 +2114,8 @@ class BrowserActivity : Activity() {
                             it["title"].toString(), it["subtitle"].toString(),
                             (it["h"] as? Number)?.toInt() ?: 0,
                             (it["d"] as? Number)?.toDouble() ?: 0.0,
-                            (it["s"] as? Number)?.toLong() ?: 0L
+                            (it["s"] as? Number)?.toLong() ?: 0L,
+                            (it["bw"] as? Number)?.toInt() ?: 0
                         )
                     }
                 } ?: emptyList()
@@ -2278,6 +2279,7 @@ class BrowserActivity : Activity() {
         val items = found.sortedWith(
             compareByDescending<FoundItem> { if (maxDur > 0 && it.duration > 0 && it.duration < maxDur * 0.5) 0 else 1 }
                 .thenByDescending { it.height }
+                .thenByDescending { it.bw }
                 .thenByDescending { it.size }
                 .thenByDescending { it.duration }
         )
@@ -2382,6 +2384,7 @@ class BrowserActivity : Activity() {
             }
             val label = when {
                 f.height > 0 -> "${f.height}P"
+                f.bw > 0 -> String.format("%.1f Mbps", f.bw / 1_000_000.0)
                 f.kind == "blob" -> if (tr) "KORUMALI" else "PROTECTED"
                 f.kind == "m4a" || f.kind == "mp3" || f.kind == "aac" || f.kind == "ogg" -> if (tr) "SES" else "AUDIO"
                 else -> if (tr) "VİDEO" else "VIDEO"
