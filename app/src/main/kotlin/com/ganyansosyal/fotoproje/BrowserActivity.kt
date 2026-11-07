@@ -2099,6 +2099,7 @@ class BrowserActivity : Activity() {
     }
 
     private fun probeArgs(tb: Tab): Map<String, Any?> {
+        try { tb.web?.settings?.userAgentString?.takeIf { it.isNotBlank() }?.let { Net.ua = it } } catch (_: Throwable) {}
         val now = System.currentTimeMillis()
         val net = synchronized(tb.netCands) { tb.netCands.filter { now - it.t < 90_000 } }
         val urls = LinkedHashSet<String>()
@@ -2154,20 +2155,10 @@ class BrowserActivity : Activity() {
 
             hlsExec.execute {
                 val expanded = ArrayList<FoundItem>()
-                original.forEach { item ->
-                    if (!isHlsUrl(item.url, item.kind)) {
-                        expanded.add(item)
-                    } else {
-                        val variants = readHlsMasterPlaylist(
-                            masterUrl = item.url,
-                            referer = referer,
-                            cookies = hlsUrlCookies[item.url].orEmpty(),
-                            original = item
-                        )
-                        // Master playlist değilse (veya okunamazsa) eski tek seçenek davranışı.
-                        if (variants.isEmpty()) expanded.add(item) else expanded.addAll(variants)
-                    }
-                }
+                // Kalite seçenekleri Probe'da "#fpq=<bant genişliği>" ile zaten açılıyor; Streams.hls
+                // bunu çözüp seçilen kaliteyi VE ayrı ses listesini birlikte indirir.
+                // (Burada medya listesine indirgemek sesi düşürüyordu.)
+                expanded.addAll(original)
 
                 val result = expanded.distinctBy { it.url }
                 runOnUiThread {
@@ -2292,6 +2283,7 @@ class BrowserActivity : Activity() {
 
     // ---- indirme
     private fun startDownload(tb: Tab, url: String, kind: String, name: String? = null) {
+        try { tb.web?.settings?.userAgentString?.takeIf { it.isNotBlank() }?.let { Net.ua = it } } catch (_: Throwable) {}
         dart(
             "download",
             mapOf(

@@ -4,7 +4,7 @@ import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 
 /** Bulunan bir video bağlantısının incelenmiş hâli (eski probe.dart). */
-class Variant(val bw: Int, val height: Int)
+class Variant(val bw: Int, val height: Int, val audio: Boolean = true)
 
 class MediaInfo(val url: String, var kind: String) {
     var variants: List<Variant> = emptyList()
@@ -14,6 +14,8 @@ class MediaInfo(val url: String, var kind: String) {
     var size = 0L
     var usable = true
     var verified = false
+    /** true: sesli, false: sessiz (yalnızca görüntü), null: bilinmiyor */
+    var audio: Boolean? = null
 
     val isStream get() = kind == "m3u8" || kind == "mpd"
     val host get() = hostOf(url)
@@ -24,6 +26,7 @@ class MediaInfo(val url: String, var kind: String) {
             if (height > 0) p.add("${height}p")
             if (duration > 0) p.add(Media.fmtDuration(duration))
             if (size > 0) p.add(Media.fmtBytes(size))
+            if (audio == false) p.add(if (L.code == "tr") "sessiz" else "no audio")
             if (p.isEmpty()) return if (kind == "blob") L.t("protected") else kind.uppercase()
             return p.joinToString(" · ")
         }
@@ -81,6 +84,36 @@ object Probe {
         return null
     }
 
+    /** Dosyanın görüntü / ses izi var mı (görüntü, ses). Okunamazsa null: bilinmiyor sayılır. */
+    private fun tracks(url: String, referer: String): Pair<Boolean, Boolean>? {
+        var res: Pair<Boolean, Boolean>? = null
+        val t = Thread {
+            val ex = android.media.MediaExtractor()
+            try {
+                ex.setDataSource(url.substringBefore("#"), Net.headers(url, referer))
+                var v = false
+                var a = false
+                for (i in 0 until ex.trackCount) {
+                    val m = ex.getTrackFormat(i).getString(android.media.MediaFormat.KEY_MIME) ?: continue
+                    if (m.startsWith("video/")) v = true
+                    if (m.startsWith("audio/")) a = true
+                }
+                res = Pair(v, a)
+            } catch (_: Throwable) {
+            } finally {
+                try { ex.release() } catch (_: Throwable) {}
+            }
+        }
+        t.isDaemon = true
+        t.start()
+        t.join(8000)
+        if (t.isAlive) return null
+        return res
+    }
+
+    private fun isAudioCodec(c: String) =
+        listOf("mp4a", "ac-3", "ec-3", "opus", "flac", "mp3", "vorbis").any { c.contains(it) }
+
     private fun probeOne(url: String, hint: String, referer: String, children: MutableSet<String>): MediaInfo {
         var kind = Media.kind(url) ?: hint
         if (kind.isEmpty()) kind = sniffKind(url, referer) ?: "mp4"
@@ -97,9 +130,23 @@ object Probe {
                         val b = Media.hlsAttr(l, "BANDWIDTH")?.toIntOrNull() ?: 0
                         val r = Media.hlsAttr(l, "RESOLUTION")
                         val hh = if (r != null && r.contains('x')) r.substringAfter('x').toIntOrNull() ?: 0 else 0
-                        if (b > 0 || hh > 0) vs.add(Variant(b, hh))
+                        // Ses var mı: ayrı ses grubunda adres varsa ya da CODECS'te ses kodeği varsa
+                        val codecs = Media.hlsAttr(l, "CODECS")?.lowercase()
+                        val grp = Media.hlsAttr(l, "AUDIO")
+                        val grpUri = grp != null && ls.any {
+                            it.startsWith("#EXT-X-MEDIA") && Media.hlsAttr(it, "TYPE") == "AUDIO" &&
+                                Media.hlsAttr(it, "GROUP-ID") == grp && !Media.hlsAttr(it, "URI").isNullOrEmpty()
+                        }
+                        val hasAudio = grpUri || (codecs?.let { isAudioCodec(it) } ?: true)
+                        if (b > 0 || hh > 0) vs.add(Variant(b, hh, hasAudio))
                     }
-                    info.variants = vs.distinctBy { it.bw * 10000 + it.height }
+                    // Çözünürlüğü olan satırlar varsa, çözünürlüksüz (ses / yan liste) satırlar kalite sayılmaz
+                    // Sesli seçenek varsa sessiz (yalnızca görüntü) olanlar listeden çıkar
+                    val voiced = if (vs.any { it.audio }) vs.filter { it.audio } else vs
+                    info.audio = voiced.any { it.audio }
+                    val withRes = voiced.filter { it.height > 0 }
+                    info.variants = (if (withRes.isNotEmpty()) withRes else voiced)
+                        .distinctBy { it.bw.toLong() * 100000 + it.height }
                     for (i in ls.indices) {
                         val l = ls[i]
                         if (l.startsWith("#EXT-X-STREAM-INF")) {
@@ -139,6 +186,12 @@ object Probe {
                     return info
                 }
                 val first = segs.first().lowercase().substringBefore('?')
+                val isAudioSeg = first.endsWith(".aac") || first.endsWith(".mp3") || first.endsWith(".m4a") ||
+                    first.endsWith(".ac3") || first.endsWith(".eac3")
+                if (isAudioSeg) {
+                    info.usable = false
+                    return info
+                }
                 val isText = first.endsWith(".vtt") || first.endsWith(".webvtt") || first.endsWith(".srt")
                 val isImg = first.endsWith(".jpg") || first.endsWith(".jpeg") || first.endsWith(".png") || first.endsWith(".webp")
                 if (isText || (isImg && ls.any { it.startsWith("#EXT-X-IMAGES-ONLY") })) {
@@ -159,11 +212,29 @@ object Probe {
                     ?: Media.isoSeconds(period?.getAttribute("duration")?.ifEmpty { null }) ?: 0.0
                 var h = 0
                 val reps = mpd.getElementsByTagName("Representation")
+                val bestBw = HashMap<Int, Int>() // çözünürlük -> en yüksek bant genişliği
                 for (i in 0 until reps.length) {
-                    val hh = (reps.item(i) as org.w3c.dom.Element).getAttribute("height").toIntOrNull() ?: 0
+                    val el = reps.item(i) as org.w3c.dom.Element
+                    val hh = el.getAttribute("height").toIntOrNull() ?: 0
                     if (hh > h) h = hh
+                    if (hh > 0) {
+                        val bb = el.getAttribute("bandwidth").toIntOrNull() ?: 0
+                        if (bb >= (bestBw[hh] ?: -1)) bestBw[hh] = bb
+                    }
                 }
                 info.height = h
+                var dashAudio = false
+                val sets = mpd.getElementsByTagName("AdaptationSet")
+                for (i in 0 until sets.length) {
+                    val el = sets.item(i) as org.w3c.dom.Element
+                    val rep0 = el.getElementsByTagName("Representation").item(0) as? org.w3c.dom.Element
+                    val mt = (el.getAttribute("mimeType").ifEmpty { el.getAttribute("contentType") }
+                        .ifEmpty { rep0?.getAttribute("mimeType") ?: "" }).lowercase()
+                    val cd = (el.getAttribute("codecs").ifEmpty { rep0?.getAttribute("codecs") ?: "" }).lowercase()
+                    if (mt.startsWith("audio") || (mt.isEmpty() && isAudioCodec(cd))) dashAudio = true
+                }
+                info.audio = dashAudio
+                info.variants = bestBw.entries.map { Variant(it.value, it.key) }
                 return info
             }
             // Doğrudan dosya: 1 baytlık aralık isteğiyle başlığa bak
@@ -178,6 +249,17 @@ object Probe {
                 info.size = len
                 if (len in 1 until 150 * 1024) info.usable = false
                 Unit
+            }
+            if (info.usable && kind != "blob") {
+                // Görüntü/ses izi kontrolü: yalnızca-ses dosyası aday olmaz, sessiz olan işaretlenir
+                val tr = tracks(url, referer)
+                if (tr != null) {
+                    if (!tr.first && tr.second) {
+                        info.usable = false
+                    } else {
+                        info.audio = tr.second
+                    }
+                }
             }
         } catch (_: Throwable) {
             info.duration = 0.0
@@ -198,6 +280,8 @@ object Probe {
         // Oynayan videonun süresi biliniyorsa (kısa klipler dâhil) eşleşmeyenleri ele
         val strict = expectDur >= 5
         var ok = list.filter { it.usable && !synchronized(children) { children.contains(it.url) } }
+        // Hem görüntü hem ses olan seçenek varsa sessiz (yalnızca görüntü) olanları gösterme
+        if (ok.any { it.audio == true }) ok = ok.filter { it.audio != false }
         val mismatch = HashSet<MediaInfo>()
         for (e in ok) {
             if (exactSrc.isNotEmpty() && e.url == exactSrc) {
@@ -227,17 +311,21 @@ object Probe {
                     Math.abs(o.duration - e.duration) <= maxOf(4.0, e.duration * 0.04)
             })
         }
-        // HLS ana listesini kalite seçeneklerine aç (#fpq=<bant genişliği> ile seçilen kalite indirilir)
+        // HLS ana listesi / DASH kalite seçeneklerine aç.
+        // Seçim "#fpq=<bant genişliği>_<yükseklik>" ile yapılır (Streams.hls / Streams.dash çözer).
         val res = ArrayList<MediaInfo>()
         for (e in filtered) {
-            if (e.kind == "m3u8" && e.variants.isNotEmpty()) {
-                for (v in e.variants.sortedByDescending { it.bw }) {
-                    val m = MediaInfo(e.url.substringBefore("#fpq=") + "#fpq=" + v.bw, "m3u8")
+            val expand = (e.kind == "m3u8" && e.variants.isNotEmpty()) ||
+                (e.kind == "mpd" && e.variants.isNotEmpty())
+            if (expand) {
+                for (v in e.variants.sortedWith(compareByDescending<Variant> { it.height }.thenByDescending { it.bw })) {
+                    val m = MediaInfo(e.url.substringBefore("#fpq=") + "#fpq=" + v.bw + "_" + v.height, e.kind)
                     m.duration = e.duration
                     m.height = v.height
                     m.bw = v.bw
                     m.size = if (e.duration > 0 && v.bw > 0) (v.bw / 8.0 * e.duration).toLong() else 0L
                     m.verified = e.verified
+                    m.audio = e.audio
                     res.add(m)
                 }
             } else res.add(e)

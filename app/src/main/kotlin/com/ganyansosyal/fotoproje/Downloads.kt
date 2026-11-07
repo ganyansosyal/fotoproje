@@ -371,8 +371,8 @@ object Downloads {
                 File(audioTmp).delete()
                 dest = d
                 sepAudio = null
-            } catch (_: Throwable) {
-                task.note = L.t("mergeFail")
+            } catch (e: Throwable) {
+                task.note = L.t("mergeFail") + " (" + (e.message ?: e.javaClass.simpleName) + ")"
                 d.delete()
             }
         }

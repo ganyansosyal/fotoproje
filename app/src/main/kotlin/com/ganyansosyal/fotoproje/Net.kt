@@ -11,6 +11,9 @@ object Net {
         "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) " +
             "Chrome/124.0.0.0 Mobile Safari/537.36"
 
+    /** İndirmelerde WebView'in gerçek User-Agent'ı kullanılır (CDN'ler belirteci UA'ya bağlayabilir). */
+    @Volatile var ua: String = UA
+
     class TextGot(val headers: Map<String, String>, val body: String)
 
     private val hdrIdx = ConcurrentHashMap<String, Int>()
@@ -25,7 +28,7 @@ object Net {
 
     fun headers(url: String, referer: String): Map<String, String> {
         val h = linkedMapOf(
-            "User-Agent" to UA,
+            "User-Agent" to ua,
             "Accept" to "*/*",
             "Accept-Language" to "tr-TR,tr;q=0.9,en;q=0.8"
         )
@@ -90,24 +93,19 @@ object Net {
         val vars = variants(url, referer)
         val key = hostOf(url) + "|" + referer
         val start = (hdrIdx[key] ?: 0).coerceIn(0, vars.size - 1)
-        var last: Throwable? = null
         for (k in vars.indices) {
             val i = (start + k) % vars.size
             try {
-                Http.get(url, vars[i], "bytes=0-0", cancel) { c ->
-                    // A successful response validates this exact header set.
-                    c.disconnect()
-                }
+                Http.get(url, vars[i], "bytes=0-0", cancel) { c -> c.disconnect() }
                 hdrIdx[key] = i
                 return vars[i]
             } catch (e: Throwable) {
                 if (e is CanceledEx) throw e
-                last = e
-                // Try alternate page-context headers only for common request
-                // negotiation failures. Do not silently pretend a 403 worked.
-                if (!retryOther(e)) throw e
+                // Hangi hata olursa olsun diğer başlık takımını dene (bazı siteler 404/405/416 da döner).
             }
         }
-        throw last ?: IOException("Video isteği doğrulanamadı")
+        // Hiçbiri doğrulanamadı: yine de sayfa başlıklarıyla asıl indirmeyi dene;
+        // gerçek hata (403 vb.) indirme sırasında açıkça görünür.
+        return vars.first()
     }
 }

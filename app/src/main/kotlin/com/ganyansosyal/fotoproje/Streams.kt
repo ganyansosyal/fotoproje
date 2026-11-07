@@ -56,7 +56,9 @@ object Streams {
         url0: String, path: String, audioPath: String, referer: String,
         report: Report, cancel: CancelFlag
     ): Boolean {
-        val want = url0.substringAfter("#fpq=", "").toIntOrNull()
+        val frag = url0.substringAfter("#fpq=", "")
+        val wantBw = frag.substringBefore('_').toIntOrNull()
+        val wantH = frag.substringAfter('_', "").toIntOrNull()
         val url = url0.substringBefore("#fpq=")
         val got = Net.fetchText(url, referer, cancel)
         val h = got.headers
@@ -66,22 +68,45 @@ object Streams {
         if (ls.any { it.startsWith("#EXT-X-STREAM-INF") }) {
             var best: String? = null
             var group: String? = null
-            var bw = -1
-            for (i in ls.indices) {
-                if (!ls[i].startsWith("#EXT-X-STREAM-INF")) continue
-                val b = Media.hlsAttr(ls[i], "BANDWIDTH")?.toIntOrNull() ?: 0
-                var j = i + 1
-                while (j < ls.size && (ls[j].isEmpty() || ls[j].startsWith("#"))) j++
-                val score = if (want != null && b == want) Int.MAX_VALUE else b
-                if (j < ls.size && score > bw) {
-                    bw = score
-                    best = ls[j]
-                    group = Media.hlsAttr(ls[i], "AUDIO")
+            if (wantBw != null) {
+                // Seçilen kalite: bant genişliği + çözünürlük birlikte eşleşir; yoksa yalnızca bant genişliği.
+                // Hiçbiri yoksa sessizce en yükseğe dönmek yerine hata verilir.
+                fun pick(needH: Boolean): Boolean {
+                    for (i in ls.indices) {
+                        if (!ls[i].startsWith("#EXT-X-STREAM-INF")) continue
+                        val b = Media.hlsAttr(ls[i], "BANDWIDTH")?.toIntOrNull() ?: 0
+                        val r = Media.hlsAttr(ls[i], "RESOLUTION")
+                        val h = if (r != null && r.contains('x')) r.substringAfter('x').toIntOrNull() ?: 0 else 0
+                        if (b != wantBw) continue
+                        if (needH && wantH != null && h != wantH) continue
+                        var j = i + 1
+                        while (j < ls.size && (ls[j].isEmpty() || ls[j].startsWith("#"))) j++
+                        if (j >= ls.size) continue
+                        best = ls[j]
+                        group = Media.hlsAttr(ls[i], "AUDIO")
+                        return true
+                    }
+                    return false
+                }
+                if (!pick(true)) pick(false)
+                if (best == null) throw IOException("Seçilen kalite artık listede yok. Videoyu yenileyip tekrar dene.")
+            } else {
+                var bw = -1
+                for (i in ls.indices) {
+                    if (!ls[i].startsWith("#EXT-X-STREAM-INF")) continue
+                    val b = Media.hlsAttr(ls[i], "BANDWIDTH")?.toIntOrNull() ?: 0
+                    var j = i + 1
+                    while (j < ls.size && (ls[j].isEmpty() || ls[j].startsWith("#"))) j++
+                    if (j < ls.size && b > bw) {
+                        bw = b
+                        best = ls[j]
+                        group = Media.hlsAttr(ls[i], "AUDIO")
+                    }
                 }
             }
             if (best == null) throw IOException("Video listesi bulunamadı")
             val master = pl
-            pl = Media.resolve(master, best)
+            pl = Media.resolve(master, best!!)
             if (group != null) {
                 var any: String? = null
                 var def: String? = null
@@ -169,9 +194,13 @@ object Streams {
     private val TPL = Regex("""\$(RepresentationID|Number|Bandwidth|Time)(?:%0(\d+)d)?\$""")
 
     fun dash(
-        url: String, path: String, audioPath: String, referer: String,
+        url0: String, path: String, audioPath: String, referer: String,
         report: Report, cancel: CancelFlag
     ): Boolean {
+        val frag = url0.substringAfter("#fpq=", "")
+        val wantBw = frag.substringBefore('_').toIntOrNull()
+        val wantH = frag.substringAfter('_', "").toIntOrNull()
+        val url = url0.substringBefore("#fpq=")
         val got = Net.fetchText(url, referer, cancel)
         val h = got.headers
         val mpd = parseXml(got.body)
@@ -200,9 +229,24 @@ object Streams {
         var ab = -1
         for (s in period.kids("AdaptationSet")) {
             for (r in s.kids("Representation")) {
-                val mime = r.attr("mimeType") ?: s.attr("mimeType") ?: s.attr("contentType") ?: ""
+                var mime = r.attr("mimeType") ?: s.attr("mimeType") ?: s.attr("contentType") ?: ""
+                if (mime.isEmpty()) {
+                    // mimeType yoksa codecs / boyut özniteliklerinden anla (ses akışı atlanıp sessiz inmesin)
+                    val cod = (r.attr("codecs") ?: s.attr("codecs") ?: "").lowercase()
+                    mime = when {
+                        cod.contains("mp4a") || cod.contains("opus") || cod.contains("ac-3") ||
+                            cod.contains("ec-3") || cod.contains("vorbis") -> "audio/mp4"
+                        r.hasAttribute("height") || r.hasAttribute("width") || cod.contains("avc") ||
+                            cod.contains("hvc") || cod.contains("hev") || cod.contains("vp9") ||
+                            cod.contains("vp0") || cod.contains("av01") -> "video/mp4"
+                        else -> ""
+                    }
+                }
                 val b = r.attr("bandwidth")?.toIntOrNull() ?: 0
-                if (mime.startsWith("video") && b > vb) {
+                val rh = (r.attr("height") ?: s.attr("height"))?.toIntOrNull() ?: 0
+                // Seçilen kalite (çözünürlük) varsa yalnızca ona uyan video temsilleri aday olur
+                val okQ = wantH == null || rh == wantH || (rh == 0 && wantH == 0)
+                if (mime.startsWith("video") && okQ && b > vb) {
                     vb = b; bestSet = s; bestRep = r
                 } else if (mime.startsWith("audio") && b > ab) {
                     ab = b; bestASet = s; bestARep = r
@@ -212,7 +256,10 @@ object Streams {
         if (bestRep == null && bestARep != null) {
             bestSet = bestASet; bestRep = bestARep; bestASet = null; bestARep = null
         }
-        if (bestSet == null || bestRep == null) throw IOException("Video bulunamadı")
+        if (bestSet == null || bestRep == null) {
+            if (wantH != null) throw IOException("Seçilen kalite artık listede yok. Videoyu yenileyip tekrar dene.")
+            throw IOException("Video bulunamadı")
+        }
         val hasAudio = bestASet != null && bestARep != null
 
         fun grab(s: Element, r: Element, out: String, label: String, start: Double, span: Double, rep: Report = report) {
