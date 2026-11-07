@@ -64,6 +64,18 @@ object Ytdlp {
         RegexOption.IGNORE_CASE
     )
 
+    private val XPOST = Regex("(?:x|twitter)\\.com/[A-Za-z0-9_]+/status/([0-9]+)", RegexOption.IGNORE_CASE)
+
+    /** Adaylar arasından X/Twitter tweet adresini döner (yt-dlp bu adresten doğru videoyu bulur); yoksa null. */
+    fun xPost(vararg urls: String): String? {
+        for (u in urls) {
+            if (!u.startsWith("http")) continue
+            val m = XPOST.find(u) ?: continue
+            return "https://x.com/i/status/" + m.groupValues[1]
+        }
+        return null
+    }
+
     /** Adaylar arasından gerçek gönderi (reel/video) adresini döner; yoksa null. */
     fun postUrl(vararg urls: String): String? = urls.firstOrNull { it.startsWith("http") && POST.containsMatchIn(it) }?.substringBefore("#")
 
@@ -139,20 +151,45 @@ object Ytdlp {
     ): Result {
         if (!ensure(ctx)) throw IOException("yt-dlp başlatılamadı: " + (initError ?: "?"))
         var why: String? = null
+        var silent: String? = null // sesi olmayan ama sağlam çıkan ilk sonuç (ikinci deneme de olmazsa bu verilir)
         for (attempt in 1..2) {
-            val path = runOnce(ctx, task, src, referer, attempt == 2, report)
+            val path = try {
+                runOnce(ctx, task, src, referer, attempt == 2, report, anyAudio = silent != null)
+            } catch (e: CanceledEx) {
+                throw e
+            } catch (e: Throwable) {
+                if (silent != null) return Result(silent, "yt-dlp #1 · " + describe(silent) + " · SES YOK")
+                throw e
+            }
             why = check(path)
-            if (why == null) return Result(path, "yt-dlp #$attempt · " + describe(path))
+            if (why == null) {
+                val tr = Mux.tracks(path)
+                if (tr != null && !tr.second) {
+                    // Görüntü var, ses izi yok: ses ayrı akışta olabilir. Her ses biçimini kabul ederek bir kez daha dene.
+                    if (attempt == 1) {
+                        val keep = File(ctx.cacheDir, "sil_" + File(path).name)
+                        silent = if (File(path).renameTo(keep)) keep.path else path
+                        report(-1.0, "Ses izi yok, yeniden deneniyor…")
+                        continue
+                    }
+                    // İkinci denemede de ses yok: kaynak gerçekten sessiz olabilir
+                    silent?.let { try { File(it).delete() } catch (_: Throwable) {} }
+                    return Result(path, "yt-dlp #$attempt · " + describe(path) + " · SES YOK")
+                }
+                silent?.let { try { File(it).delete() } catch (_: Throwable) {} }
+                return Result(path, "yt-dlp #$attempt · " + describe(path))
+            }
             // Bozuk çıktı: sil ve diğer yöntemi dene
             try { File(path).delete() } catch (_: Throwable) {}
             report(-1.0, "Dosya doğrulanamadı, yeniden deneniyor…")
         }
+        if (silent != null) return Result(silent, "yt-dlp #1 · " + describe(silent) + " · SES YOK")
         throw IOException("İndirilen dosya oynatılamıyor ($why)")
     }
 
     private fun runOnce(
         ctx: Context, task: DownloadTask, src: String, referer: String, second: Boolean,
-        report: (Double, String) -> Unit
+        report: (Double, String) -> Unit, anyAudio: Boolean = false
     ): String {
         val dir = ctx.cacheDir
         val base = "yt_${task.createdAt}"
@@ -161,7 +198,11 @@ object Ytdlp {
         val req = YoutubeDLRequest(src)
         req.addOption("--no-playlist")
         // H.264 + AAC (her telefonda oynar); olmazsa en iyi kombinasyon
-        req.addOption("-f", "bv*[vcodec^=avc1]+ba[acodec^=mp4a]/bv*[vcodec^=avc]+ba/b[vcodec^=avc1]/bv*+ba/b")
+        req.addOption(
+            "-f",
+            if (anyAudio) "bv*[vcodec^=avc]+ba/bv*+ba/b"
+            else "bv*[vcodec^=avc1]+ba[acodec^=mp4a]/bv*[vcodec^=avc]+ba/b[vcodec^=avc1]/bv*+ba/b"
+        )
         req.addOption("--merge-output-format", "mp4")
         req.addOption("-o", File(dir, "$base.%(ext)s").path)
         req.addOption("--no-mtime")
@@ -206,7 +247,7 @@ object Ytdlp {
                 .lastOrNull { it.contains("ERROR", true) }
                 ?.substringAfter("ERROR:")?.trim()
                 ?: (e.message ?: e.javaClass.simpleName).take(160)
-            throw IOException("yt-dlp: " + msg.take(200))
+            throw IOException("yt-dlp: " + msg.take(400))
         } finally {
             running = false
             watcher.interrupt()

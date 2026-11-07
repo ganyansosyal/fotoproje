@@ -35,6 +35,7 @@ class Tab(val id: Int, var url: String) {
     var pDur = 0.0
     var pLive = false
     var pH = 0
+    var pAd = false // oynayan şu an reklam mı (reklamken video adayları gösterilmez)
     var pSrc = ""
     var pRef: String? = null
     val pUrls = ArrayList<String>()

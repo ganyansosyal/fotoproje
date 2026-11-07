@@ -2028,6 +2028,8 @@ class BrowserActivity : Activity() {
         val segPath = u.substringBefore('?').substringBefore('#')
         val segQuery = if (u.contains('?')) "?" + u.substringAfter('?').substringBefore('#') else ""
         if (SEG_RE.containsMatchIn("/" + segPath.substringAfterLast('/') + segQuery)) return
+        // Reklam ağı / reklam yolu içeren adresler aday olmaz
+        if (AD_URL_RE.containsMatchIn(segPath)) return
         val match = MEDIA_RE.find(u)
         val lower = u.lowercase()
         // Uzantısı olmayan CDN adresleri: URL'nin bilinen medya parametrelerinden aday çıkar.
@@ -2074,6 +2076,7 @@ class BrowserActivity : Activity() {
         val id = m.optString("id")
         if (m.optBoolean("stop", false)) {
             if (id != tb.playerId) return
+            tb.pAd = false
             clearMedia(tb, keepNet = hasNet(tb))
             if (hasNet(tb)) scheduleProbe(tb)
             return
@@ -2084,6 +2087,7 @@ class BrowserActivity : Activity() {
         tb.pDur = dur
         if (m.optBoolean("show", false)) tb.autoShow = true
         tb.pLive = m.optBoolean("live", false)
+        tb.pAd = m.optBoolean("ad", false)
         tb.pH = m.optInt("h", 0)
         tb.pSrc = m.optString("src", "")
         val ref = m.optString("ref", "")
@@ -2199,7 +2203,8 @@ class BrowserActivity : Activity() {
                 // (Burada medya listesine indirgemek sesi düşürüyordu.)
                 expanded.addAll(original)
 
-                val result = expanded.distinctBy { it.url }
+                // Reklam oynarken bulunan akışlar reklamdır: liste boş kalır, reklam bitince yeniden incelenir
+                val result = if (tb.pAd) emptyList() else expanded.distinctBy { it.url }
                 runOnUiThread {
                     if (isFinishing || gen != tb.probeGen || (tb.playerId == null && !hasNet(tb))) {
                         onDone?.invoke(tb.found)
@@ -2943,6 +2948,11 @@ class BrowserActivity : Activity() {
             "\\.(m3u8|mpd|mp4|webm|mov|m4v|mkv|flv|3gp|3g2|ogv|avi|wmv|mpg|mpeg|f4v|asf|m2ts|mts|m4a|aac|mp3)(?:\$|[?#/])|[?&]mime_type=video_(mp4|webm)", RegexOption.IGNORE_CASE
         )
         private val EXT_RE = Regex("\\.(mp4|webm|mov|m4v|mkv|flv|3gp|3g2|ogv|avi|wmv|mpg|mpeg|f4v|asf|m2ts|mts)\$")
+        private val AD_URL_RE = Regex(
+            "(doubleclick|googlesyndication|googleadservices|imasdk|adservice|adsystem|adnxs|adsrvr|pubmatic|" +
+                "[/_.-]ads?[/_.-]|(^|[/_.-])(vast|vpaid|preroll|midroll|postroll)([/_.-]|\$))",
+            RegexOption.IGNORE_CASE
+        )
         private val SEG_RE = Regex(
             "((seg|segment|chunk|frag|fragment)[-_.]?\\d|/init[-_.][^/]*\$|[?&](bytestart|byterange|range|sq|seg|segment|chunk)=)",
             RegexOption.IGNORE_CASE

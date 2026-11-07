@@ -190,8 +190,9 @@ object Downloads {
             val yt = Ytdlp.isYoutube(task.url, referer)
             val social = Ytdlp.isSocial(task.url, referer)
             // blob: (MSE) videolar adresten indirilemez; Instagram/Facebook/YouTube'da sayfa adresi kullanılır
-            if (kind != "blob" || yt || social) {
-                val post = if (social) Ytdlp.postUrl(referer, task.page) else null
+            val xPost = if (!social && !yt) Ytdlp.xPost(referer, task.page) else null
+            if (kind != "blob" || yt || social || xPost != null) {
+                val post = if (social) Ytdlp.postUrl(referer, task.page) else xPost
                 val ytPage = if (yt) Ytdlp.youtubePage(referer, task.page) else null
                 if ((social && post == null) || (yt && ytPage == null)) {
                     throw IOException(
@@ -250,11 +251,11 @@ object Downloads {
                     } catch (e: Throwable) {
                         if (task.cancel.on) throw CanceledEx()
                         // Instagram/Facebook/YouTube: eski yöntem sessiz/bozuk video üretiyordu, net hata göster
-                        if (social || yt || kind == "blob") {
+                        if (social || yt || (kind == "blob" && xPost == null)) {
                             if (ytNote != null) throw IOException("NewPipe: " + ytNote + " | " + (e.message ?: "?"))
                             throw e
                         }
-                        task.note = "yt-dlp olmadı (" + (e.message ?: "?").take(80) + "), eski yöntem"
+                        task.note = "yt-dlp olmadı (" + (e.message ?: "?").take(400) + "), eski yöntem"
                     }
                 }
             }

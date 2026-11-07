@@ -583,6 +583,11 @@ object Probe {
                 cands = filtered.sortedBy { if (it.duration > 0) Math.abs(it.duration - expectDur) else 1e9 }
             }
         }
+        // Reklam akışları kısa olur: uzun (>= 5 dk) bir video varsa kısa (< 2 dk) adaylar listeden çıkar
+        if (cands.any { it.duration >= 300 }) {
+            val keep = cands.filter { it.duration <= 0 || it.duration >= 120 }
+            if (keep.isNotEmpty()) cands = keep
+        }
         // Oynayan videonun süresi biliniyorsa, süresi okunamayan adayın süresi olarak göster
         for (e in cands) {
             if (e.duration <= 0 && expectDur > 0 && (e.url == exactSrc || cands.size == 1)) e.duration = expectDur
