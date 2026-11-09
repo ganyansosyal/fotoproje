@@ -7,7 +7,9 @@ import android.graphics.Path
 import android.widget.TextView
 
 /** Alt çubuk için çizgi (outline) ikon. Rengi metin rengiyle (tema) aynıdır; 24x24 ızgarada çizilir. */
-class VecIcon(ctx: Context, private val kind: Int, private val sizeDp: Float = 28f) : TextView(ctx) {
+class VecIcon(ctx: Context, kind0: Int, private val sizeDp: Float = 28f) : TextView(ctx) {
+    var kind: Int = kind0
+        set(v) { field = v; invalidate() }
     private val d = resources.displayMetrics.density
     private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -24,6 +26,8 @@ class VecIcon(ctx: Context, private val kind: Int, private val sizeDp: Float = 2
         const val FORWARD = 5
         const val SHARE = 6
         const val TRASH = 7
+        const val MAXIMIZE = 8
+        const val MINIMIZE = 9
     }
 
     override fun onDraw(c: Canvas) {
@@ -81,6 +85,26 @@ class VecIcon(ctx: Context, private val kind: Int, private val sizeDp: Float = 2
                 path.quadTo(6.1f, 21f, 8f, 21f); path.lineTo(16f, 21f)
                 path.quadTo(17.9f, 21f, 18f, 19f); path.lineTo(19f, 7f)
                 path.moveTo(9f, 7f); path.lineTo(9f, 4f); path.lineTo(15f, 4f); path.lineTo(15f, 7f)
+                c.drawPath(path, p)
+            }
+            MAXIMIZE -> {
+                path.reset()
+                path.moveTo(16f, 4f); path.lineTo(20f, 4f); path.lineTo(20f, 8f)
+                path.moveTo(14f, 10f); path.lineTo(20f, 4f)
+                path.moveTo(8f, 20f); path.lineTo(4f, 20f); path.lineTo(4f, 16f)
+                path.moveTo(4f, 20f); path.lineTo(10f, 14f)
+                c.drawPath(path, p)
+            }
+            MINIMIZE -> {
+                path.reset()
+                path.moveTo(5f, 9f); path.lineTo(9f, 9f); path.lineTo(9f, 5f)
+                path.moveTo(3f, 3f); path.lineTo(9f, 9f)
+                path.moveTo(5f, 15f); path.lineTo(9f, 15f); path.lineTo(9f, 19f)
+                path.moveTo(3f, 21f); path.lineTo(9f, 15f)
+                path.moveTo(19f, 9f); path.lineTo(15f, 9f); path.lineTo(15f, 5f)
+                path.moveTo(15f, 9f); path.lineTo(21f, 3f)
+                path.moveTo(19f, 15f); path.lineTo(15f, 15f); path.lineTo(15f, 19f)
+                path.moveTo(15f, 15f); path.lineTo(21f, 21f)
                 c.drawPath(path, p)
             }
             SETTINGS -> {

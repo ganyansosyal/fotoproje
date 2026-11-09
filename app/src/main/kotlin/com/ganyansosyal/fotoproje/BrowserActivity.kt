@@ -123,6 +123,8 @@ class BrowserActivity : Activity() {
     private lateinit var tabBox: TextView
     private lateinit var perfView: TextView
     private lateinit var exitFullBtn: TextView
+    private lateinit var fsBtn: FsButton
+    private val fsSeen = HashMap<Int, String>()
     private lateinit var tabsLayer: FrameLayout
     private lateinit var tabsPanel: LinearLayout
     private val tintViews = ArrayList<TextView>()
@@ -409,6 +411,20 @@ class BrowserActivity : Activity() {
             FrameLayout.LayoutParams(dp(36), dp(36)).apply {
                 gravity = Gravity.END or Gravity.TOP
                 topMargin = dp(10)
+                rightMargin = dp(10)
+            }
+        )
+
+        // ---- yüzen "Tam ekran" hapı (sosyal sitelerde sağdan kayar)
+        fsBtn = FsButton(this) { setFullMode(!fullMode) }
+        content.addView(
+            fsBtn,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                gravity = Gravity.END or Gravity.TOP
+                topMargin = barH + dp(18)
                 rightMargin = dp(10)
             }
         )
@@ -1624,6 +1640,7 @@ class BrowserActivity : Activity() {
         updateFab()
         updateNav()
         updateProgress()
+        updateFsBtn(tb, tb.url)
     }
 
     private fun toggleBookmark() {
@@ -1928,7 +1945,14 @@ class BrowserActivity : Activity() {
         bottom.visibility = vis
         line.visibility = vis
         updateFab()
-        exitFullBtn.visibility = if (on) View.VISIBLE else View.GONE
+        exitFullBtn.visibility = View.GONE
+        fsBtn.setFull(on)
+        (fsBtn.layoutParams as FrameLayout.LayoutParams).let {
+            it.topMargin = (if (on) 0 else barH) + dp(18)
+            fsBtn.layoutParams = it
+        }
+        if (on) { fsBtn.showQuiet(); fsBtn.flash() }
+        else cur?.let { updateFsBtn(it, it.url) } ?: fsBtn.hideNow()
         barShown = true
         acc = 0
         bar.translationY = 0f
@@ -2010,6 +2034,49 @@ class BrowserActivity : Activity() {
      */
     private val socialSeen = HashMap<Int, String>()
     private fun checkSocial(tb: Tab, url: String?) {
+        checkSocial0(tb, url)
+        updateFsBtn(tb, url)
+    }
+
+    /** Tam ekran hapının gösterileceği site grubu (yoksa null). */
+    private fun fsKey(url: String?): String? {
+        val h = try { java.net.URI(url ?: return null).host?.lowercase() ?: return null } catch (_: Throwable) { return null }
+        fun d(x: String) = h == x || h.endsWith(".$x")
+        return when {
+            d("instagram.com") -> "instagram"
+            d("x.com") || d("twitter.com") -> "x"
+            d("facebook.com") || d("fb.com") || d("fb.watch") -> "facebook"
+            d("youtube.com") || d("youtu.be") -> "youtube"
+            else -> null
+        }
+    }
+
+    private fun updateFsBtn(tb: Tab, url: String?) {
+        if (tb !== cur) return
+        if (customView != null) { fsBtn.hideNow(); return }
+        if (fullMode) { fsBtn.showQuiet(); return }
+        val k = if (tb.isHome) null else fsKey(url ?: tb.url)
+        if (k == null) { fsSeen.remove(tb.id); fsBtn.hideNow(); return }
+        fsBtn.setFull(false)
+        if (fsSeen[tb.id] != k) {
+            fsSeen[tb.id] = k
+            fsBtn.hideNow()
+            fsSlideWhenFree(0)
+        } else fsBtn.showQuiet()
+    }
+
+    /** Karşılama paneli açıkken bekle, kapanınca hapı kaydır. */
+    private fun fsSlideWhenFree(tries: Int) {
+        if (SocialIntro.isShowing && tries < 40) {
+            fsBtn.postDelayed({ fsSlideWhenFree(tries + 1) }, 500)
+            return
+        }
+        val tb = cur ?: return
+        if (fullMode || customView != null || tb.isHome || fsKey(tb.url) == null) return
+        fsBtn.slideIn()
+    }
+
+    private fun checkSocial0(tb: Tab, url: String?) {
         if (tb !== cur || tb.isHome || fullMode || customView != null) return
         val b = SocialIntro.brandName(url)
         if (b == null) { socialSeen.remove(tb.id); return }
