@@ -255,7 +255,6 @@ class SettingsActivity : Activity() {
         )
         header(L.t("help"))
         group(
-            row(L.t("howTo")) { info(L.t("howTo"), L.t("howToText")) },
             row(L.t("feedback")) { feedback() },
             row(L.t("privacy")) { info(L.t("privacy"), L.t("privacyText")) },
             row(APP_VERSION)

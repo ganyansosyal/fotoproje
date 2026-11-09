@@ -209,8 +209,8 @@ object LinkSheet {
             box.addView(gap(12))
             val hint = label(
                 tr(
-                    "TikTok, Instagram, X ve diğer sitelerin linklerini yapıştır. Video bulununca seçenekler açılır.",
-                    "Paste links from TikTok, Instagram, X and other sites. Options open when a video is found."
+                    "Video bağlantısını yapıştır. Video bulununca seçenekler açılır.",
+                    "Paste a video link. Options open when a video is found."
                 ), 12f, sub
             )
             hint.gravity = Gravity.CENTER
