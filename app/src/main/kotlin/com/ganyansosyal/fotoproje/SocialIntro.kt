@@ -19,32 +19,17 @@ import android.widget.TextView
 
 /**
  * Sosyal medya (Instagram / X / Facebook / TikTok / Threads) açılınca sağdan kayarak gelen
- * tam ekran karşılama paneli. Her site için uygulama açıldıktan sonra bir kez gösterilir.
+ * tam ekran karşılama paneli ("Kâğıt" tasarım sistemi, bkz. Theme.kt). Her site için uygulama açıldıktan sonra bir kez gösterilir.
  * Kapatmak için: "Başla" düğmesi, sağa kaydırma ya da geri tuşu.
  */
 object SocialIntro {
-    private class Brand(val name: String, val glyph: String, val colors: IntArray, val accent: Int)
+    private class Brand(val name: String, val glyph: String)
 
-    private val IG = Brand(
-        "Instagram", "IG",
-        intArrayOf(0xFF833AB4.toInt(), 0xFFFD1D1D.toInt(), 0xFFFCB045.toInt()), 0xFFC13584.toInt()
-    )
-    private val X = Brand(
-        "X", "X",
-        intArrayOf(0xFF000000.toInt(), 0xFF0B1620.toInt(), 0xFF12344D.toInt()), 0xFF1D9BF0.toInt()
-    )
-    private val FB = Brand(
-        "Facebook", "f",
-        intArrayOf(0xFF1877F2.toInt(), 0xFF0F4FB8.toInt(), 0xFF0A1F4D.toInt()), 0xFF1877F2.toInt()
-    )
-    private val TT = Brand(
-        "TikTok", "♪",
-        intArrayOf(0xFF010101.toInt(), 0xFF1B0F2E.toInt(), 0xFF0E3B44.toInt()), 0xFFFE2C55.toInt()
-    )
-    private val TH = Brand(
-        "Threads", "@",
-        intArrayOf(0xFF000000.toInt(), 0xFF171717.toInt(), 0xFF2B2B2B.toInt()), 0xFF101010.toInt()
-    )
+    private val IG = Brand("Instagram", "IG")
+    private val X = Brand("X", "X")
+    private val FB = Brand("Facebook", "f")
+    private val TT = Brand("TikTok", "♪")
+    private val TH = Brand("Threads", "@")
 
     private val shown = HashSet<String>()
     private var view: View? = null
@@ -75,6 +60,7 @@ object SocialIntro {
 
     private fun show(act: Activity, b: Brand) {
         val tr = L.code == "tr"
+        val th = Theme.of(Store.dark)
         val dm = act.resources.displayMetrics
         fun dp(v: Int) = (v * dm.density).toInt()
         val screenW = dm.widthPixels
@@ -83,7 +69,6 @@ object SocialIntro {
         fun rounded(fill: Int, r: Int, stroke: Int = 0, sw: Int = 0) = GradientDrawable().apply {
             setColor(fill); cornerRadius = dp(r).toFloat(); if (sw > 0) setStroke(sw, stroke)
         }
-
         fun tv(s: String, sp: Float, color: Int, bold: Boolean = false, center: Boolean = false) = TextView(act).apply {
             text = s; setTextSize(TypedValue.COMPLEX_UNIT_SP, sp); setTextColor(color)
             if (bold) typeface = Typeface.DEFAULT_BOLD
@@ -92,35 +77,17 @@ object SocialIntro {
 
         val ov = FrameLayout(act)
         ov.isClickable = true
-        ov.background = GradientDrawable(GradientDrawable.Orientation.TL_BR, b.colors)
-
-        // Arka planda yavaşça süzülen ışık halkaları
-        fun blob(size: Int, x: Int, y: Int, a: Int, dx: Float, dy: Float, ms: Long) {
-            val v = View(act)
-            v.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.argb(a, 255, 255, 255)) }
-            ov.addView(v, FrameLayout.LayoutParams(dp(size), dp(size)))
-            v.translationX = dp(x).toFloat(); v.translationY = dp(y).toFloat()
-            val ax = ObjectAnimator.ofFloat(v, View.TRANSLATION_X, dp(x).toFloat(), dp(x).toFloat() + dx * dm.density)
-            val ay = ObjectAnimator.ofFloat(v, View.TRANSLATION_Y, dp(y).toFloat(), dp(y).toFloat() + dy * dm.density)
-            for (an in listOf(ax, ay)) {
-                an.duration = ms; an.repeatMode = ValueAnimator.REVERSE; an.repeatCount = ValueAnimator.INFINITE
-                an.interpolator = android.view.animation.AccelerateDecelerateInterpolator()
-                anims.add(an); an.start()
-            }
-        }
-        blob(280, -90, -60, 38, 60f, 90f, 7000)
-        blob(220, 220, 520, 30, -80f, -70f, 8500)
-        blob(140, 250, 120, 24, -40f, 60f, 6000)
+        ov.setBackgroundColor(th.bg)
 
         val col = LinearLayout(act)
         col.orientation = LinearLayout.VERTICAL
         col.gravity = Gravity.CENTER_HORIZONTAL
-        col.setPadding(dp(28), dp(24), dp(28), dp(24))
-        ov.addView(col, FrameLayout.LayoutParams(-1, -1).apply { gravity = Gravity.CENTER })
+        col.setPadding(dp(24), dp(24), dp(24), dp(24))
+        ov.addView(col, FrameLayout.LayoutParams(-1, -1))
         ov.setOnApplyWindowInsetsListener { _, ins ->
             col.setPadding(
-                dp(28), maxOf(ins.systemWindowInsetTop, dp(24)),
-                dp(28), maxOf(ins.systemWindowInsetBottom, dp(24))
+                dp(24), maxOf(ins.systemWindowInsetTop, dp(24)),
+                dp(24), maxOf(ins.systemWindowInsetBottom, dp(24))
             )
             ins
         }
@@ -130,24 +97,20 @@ object SocialIntro {
             col.addView(v, LinearLayout.LayoutParams(w, -2).apply { topMargin = dp(topGap) })
             items.add(v)
         }
+        col.addView(View(act), LinearLayout.LayoutParams(0, 0, 1f))
 
-        val spacerTop = View(act)
-        col.addView(spacerTop, LinearLayout.LayoutParams(0, 0, 1f))
-
-        // Cam görünümlü logo dairesi
+        // Logo kutusu: ince çizgili, keskin köşeli
         val badge = FrameLayout(act)
-        badge.background = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL; setColor(0x33FFFFFF); setStroke(dp(2), 0x66FFFFFF)
-        }
-        badge.addView(tv(b.glyph, 38f, Color.WHITE, true, true), FrameLayout.LayoutParams(-1, -1))
-        col.addView(badge, LinearLayout.LayoutParams(dp(104), dp(104)))
+        badge.background = rounded(th.surface, Theme.R, th.line, dp(1))
+        badge.addView(tv(b.glyph, 30f, th.accent, true, true), FrameLayout.LayoutParams(-1, -1))
+        col.addView(badge, LinearLayout.LayoutParams(dp(84), dp(84)))
         items.add(badge)
 
-        add(tv(if (tr) "${b.name}'a hoş geldin" else "Welcome to ${b.name}", 29f, Color.WHITE, true, true), 26)
+        add(tv(if (tr) "${b.name}'a hoş geldin" else "Welcome to ${b.name}", 26f, th.fg, true, true), 24)
         add(
             tv(
                 if (tr) "Gez, kaydır, beğendiğin videoyu yakala." else "Scroll, explore, grab the videos you love.",
-                16f, 0xCCFFFFFF.toInt(), false, true
+                15f, th.mut, false, true
             ), 8
         )
 
@@ -155,29 +118,27 @@ object SocialIntro {
             val r = LinearLayout(act)
             r.orientation = LinearLayout.HORIZONTAL
             r.gravity = Gravity.CENTER_VERTICAL
-            r.setPadding(dp(18), dp(14), dp(18), dp(14))
-            r.background = rounded(0x26FFFFFF, 20, 0x33FFFFFF, dp(1))
-            r.addView(tv(icon, 20f, Color.WHITE, true, true), LinearLayout.LayoutParams(dp(34), -2))
-            r.addView(tv(text, 15.5f, Color.WHITE), LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(10) })
+            r.setPadding(dp(16), dp(14), dp(16), dp(14))
+            r.background = rounded(th.surface, Theme.R, th.line, dp(1))
+            r.addView(tv(icon, 18f, th.accent, true, true), LinearLayout.LayoutParams(dp(30), -2))
+            r.addView(tv(text, 15f, th.fg), LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(10) })
             return r
         }
         add(row("▶", if (tr) "Videoyu oynat" else "Play the video"), 30, -1)
-        add(row("↓", if (tr) "İndir düğmesine dokun" else "Tap the download button"), 10, -1)
-        add(row("✓", if (tr) "Galerine kaydedilsin" else "It lands in your gallery"), 10, -1)
+        add(row("↓", if (tr) "İndir düğmesine dokun" else "Tap the download button"), 8, -1)
+        add(row("✓", if (tr) "Galerine kaydedilsin" else "It lands in your gallery"), 8, -1)
 
-        val spacerMid = View(act)
-        col.addView(spacerMid, LinearLayout.LayoutParams(0, 0, 1f))
+        col.addView(View(act), LinearLayout.LayoutParams(0, 0, 1f))
 
-        val go = tv(if (tr) "Başla" else "Let's go", 17f, b.accent, true, true)
-        go.setPadding(0, dp(16), 0, dp(16))
-        go.background = rounded(Color.WHITE, 30)
-        go.elevation = dp(6).toFloat()
+        val go = tv(if (tr) "Başla" else "Let's go", 16f, th.onAccent, true, true)
+        go.setPadding(0, dp(15), 0, dp(15))
+        go.background = rounded(th.accent, Theme.R)
         go.setOnClickListener { dismiss() }
         add(go, 0, -1)
         add(
             tv(
                 if (tr) "Sağa kaydırarak da kapatabilirsin" else "Swipe right to close",
-                12f, 0x99FFFFFF.toInt(), false, true
+                12f, th.mut, false, true
             ), 12
         )
 

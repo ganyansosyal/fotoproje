@@ -27,18 +27,19 @@ class DownloadsActivity : Activity() {
     private val listener: () -> Unit = { render() }
 
     private val dark get() = Store.dark
-    private val bg get() = if (dark) 0xFF121418.toInt() else 0xFFF4F6FA.toInt()
-    private val card get() = if (dark) 0xFF1C1F26.toInt() else 0xFFFFFFFF.toInt()
-    private val fg get() = if (dark) 0xFFEEF0F4.toInt() else 0xFF14171F.toInt()
-    private val sub get() = if (dark) 0xFF9AA3B2.toInt() else 0xFF667085.toInt()
-    private val line get() = if (dark) 0xFF2A2E38.toInt() else 0xFFE6E9F0.toInt()
-    private val track get() = if (dark) 0xFF2B303B.toInt() else 0xFFE6EAF2.toInt()
-    private val accent get() = if (dark) 0xFF8AB4F8.toInt() else 0xFF1A73E8.toInt()
-    private val accentText get() = if (dark) 0xFFA8C7FA.toInt() else 0xFF1557B0.toInt()
-    private val accentSoft get() = if (dark) 0xFF243049.toInt() else 0xFFE8F0FE.toInt()
-    private val danger get() = if (dark) 0xFFF28B82.toInt() else 0xFFC5221F.toInt()
-    private val dangerSoft get() = if (dark) 0xFF3A2424.toInt() else 0xFFFCE8E6.toInt()
-    private val onAccent get() = if (dark) 0xFF0B1220.toInt() else 0xFFFFFFFF.toInt()
+    private val th get() = Theme.of(dark)
+    private val bg get() = th.bg
+    private val card get() = th.surface
+    private val fg get() = th.fg
+    private val sub get() = th.mut
+    private val line get() = th.line
+    private val track get() = th.surface2
+    private val accent get() = th.accent
+    private val accentText get() = th.accent
+    private val accentSoft get() = th.accentSoft
+    private val danger get() = th.danger
+    private val dangerSoft get() = th.dangerSoft
+    private val onAccent get() = th.onAccent
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
@@ -284,7 +285,7 @@ class DownloadsActivity : Activity() {
 
         // Küçük resim (videonun bir karesi) + oynat rozeti
         val thumbBox = FrameLayout(this)
-        thumbBox.background = rounded(if (dark) 0xFF3C4043.toInt() else 0xFFE8EAED.toInt(), 16)
+        thumbBox.background = rounded(th.surface2, Theme.R)
         thumbBox.clipToOutline = true
         val thumb = android.widget.ImageView(this)
         thumb.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
@@ -390,9 +391,9 @@ class DownloadsActivity : Activity() {
         val h = 240
         val bm = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
         val c = android.graphics.Canvas(bm)
-        c.drawColor(if (Store.dark) 0xFF3C4043.toInt() else 0xFFDADCE0.toInt())
+        c.drawColor(Theme.of(Store.dark).surface2)
         val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
-        p.color = if (Store.dark) 0xFF9AA0A6.toInt() else 0xFF5F6368.toInt()
+        p.color = Theme.of(Store.dark).mut
         val path = android.graphics.Path()
         path.moveTo(w * 0.4f, h * 0.3f)
         path.lineTo(w * 0.4f, h * 0.7f)

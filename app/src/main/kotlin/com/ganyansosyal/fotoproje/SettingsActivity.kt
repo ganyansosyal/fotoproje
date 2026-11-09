@@ -21,12 +21,13 @@ import android.widget.Toast
 class SettingsActivity : Activity() {
     private lateinit var box: LinearLayout
 
-    private val bg get() = if (Store.dark) 0xFF202124.toInt() else 0xFFF1F3F4.toInt()
-    private val card get() = if (Store.dark) 0xFF303134.toInt() else 0xFFFFFFFF.toInt()
-    private val fg get() = if (Store.dark) 0xFFE8EAED.toInt() else 0xFF202124.toInt()
-    private val sub get() = if (Store.dark) 0xFF9AA0A6.toInt() else 0xFF5F6368.toInt()
-    private val line get() = if (Store.dark) 0xFF3C4043.toInt() else 0xFFDADCE0.toInt()
-    private val accent = 0xFF1A73E8.toInt()
+    private val th get() = Theme.of(Store.dark)
+    private val bg get() = th.bg
+    private val card get() = th.surface
+    private val fg get() = th.fg
+    private val sub get() = th.mut
+    private val line get() = th.line
+    private val accent get() = th.accent
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 

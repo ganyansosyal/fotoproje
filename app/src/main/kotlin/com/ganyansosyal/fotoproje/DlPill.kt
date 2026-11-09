@@ -42,7 +42,7 @@ class DlPill(private val act: Activity, private val onTap: () -> Unit) {
         box.orientation = LinearLayout.VERTICAL
         box.setPadding(dp(16), dp(10), dp(16), dp(10))
         box.background = GradientDrawable().apply {
-            setColor(0xEB141414.toInt()); cornerRadius = dp(18).toFloat()
+            setColor(0xF2161A18.toInt()); cornerRadius = dp(Theme.R_PILL).toFloat()
             setStroke(dp(1), 0x33FFFFFF)
         }
         box.elevation = dp(10).toFloat()
@@ -55,9 +55,9 @@ class DlPill(private val act: Activity, private val onTap: () -> Unit) {
         line2.maxLines = 1
         line2.ellipsize = TextUtils.TruncateAt.MIDDLE
         bar.max = 1000
-        bar.progressTintList = ColorStateList.valueOf(0xFF22C55E.toInt())
+        bar.progressTintList = ColorStateList.valueOf(Theme.DARK.accent)
         bar.progressBackgroundTintList = ColorStateList.valueOf(0x33FFFFFF)
-        bar.indeterminateTintList = ColorStateList.valueOf(0xFF22C55E.toInt())
+        bar.indeterminateTintList = ColorStateList.valueOf(Theme.DARK.accent)
         box.addView(line1, LinearLayout.LayoutParams(-2, -2))
         box.addView(line2, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(2) })
         box.addView(bar, LinearLayout.LayoutParams(-1, dp(4)).apply { topMargin = dp(8) })

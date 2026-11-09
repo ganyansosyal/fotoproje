@@ -14,10 +14,12 @@ object HomeHtml {
     }.filter { it.isNotEmpty() }
 
     fun build(dark: Boolean): String {
-        val bg = if (dark) "#202124" else "#ffffff"
-        val fg = if (dark) "#e8eaed" else "#202124"
-        val card = if (dark) "#303134" else "#f1f3f4"
-        val sub = if (dark) "#9aa0a6" else "#5f6368"
+        val th = Theme.of(dark)
+        val bg = Theme.hex(th.bg)
+        val fg = Theme.hex(th.fg)
+        val card = Theme.hex(th.surface)
+        val sub = Theme.hex(th.mut)
+        val line = Theme.hex(th.line)
         val tiles = StringBuilder()
         for (e in Store.homeSites()) {
             val name = e[0]
@@ -32,11 +34,11 @@ object HomeHtml {
             tiles.append("<a class=\"t\" href=\"${esc(u)}\"><div class=\"i\">$img</div><span>${esc(name)}</span></a>")
         }
         tiles.append(
-            "<a class=\"t\" href=\"#\" id=\"addfav\"><div class=\"i\" style=\"background:#5f6368;color:#fff\">+</div>" +
+            "<a class=\"t\" href=\"#\" id=\"addfav\"><div class=\"i\" style=\"background:$sub;color:$bg\">+</div>" +
                 "<span>${esc(L.t("add"))}</span></a>"
         )
         return TEMPLATE
-            .replace("@@bg@@", bg).replace("@@fg@@", fg).replace("@@card@@", card).replace("@@sub@@", sub)
+            .replace("@@bg@@", bg).replace("@@fg@@", fg).replace("@@card@@", card).replace("@@sub@@", sub).replace("@@line@@", line)
             .replace("@@tiles@@", tiles.toString())
             .replace("@@base@@", JSONObject.quote(Store.engineBase()))
             .replace("@@home@@", esc(L.t("home")))
@@ -53,12 +55,12 @@ body{padding:20px 16px 32px;min-height:100vh;box-sizing:border-box}
 h1{text-align:center;font-weight:600;font-size:22px;margin:22px 0 6px}
 p{text-align:center;margin:0 0 20px;color:@@sub@@;font-size:12px}
 form{max-width:520px;margin:0 auto 30px}
-input{width:100%;box-sizing:border-box;padding:11px 18px;border-radius:24px;border:0;
-background:@@card@@;color:@@fg@@;font-size:14px;outline:none}
+input{width:100%;box-sizing:border-box;padding:12px 16px;border-radius:8px;
+background:@@card@@;color:@@fg@@;font-size:14px;outline:none;border:1px solid @@line@@}
 .g{display:grid;grid-template-columns:repeat(4,1fr);gap:18px 8px;max-width:520px;margin:auto}
 .t{text-decoration:none;color:@@fg@@;text-align:center;font-size:11px;transform:translate3d(0,0,0);will-change:transform;transition:transform .15s ease-out}
 .t:active{transform:translate3d(0,0,0) scale(.92)}
-.i{width:46px;height:46px;border-radius:50%;margin:0 auto 5px;background:@@card@@;overflow:hidden;
+.i{width:46px;height:46px;border-radius:8px;border:1px solid @@line@@;margin:0 auto 5px;background:@@card@@;overflow:hidden;
 display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:600}
 .i img{width:26px;height:26px;object-fit:contain;opacity:0;transition:opacity .2s}
 .i img.ok,.i img.show{opacity:1}

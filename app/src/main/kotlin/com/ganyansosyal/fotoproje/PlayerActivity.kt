@@ -57,7 +57,7 @@ class PlayerActivity : Activity() {
     private lateinit var speedBtn: TextView
     private lateinit var subBtn: TextView
 
-    private val accent = Color.parseColor("#FF8A3D")
+    private val accent = Theme.DARK.accent // oynatıcı hep koyu
     private val h = Handler(Looper.getMainLooper())
     private var path = ""
     private var isAudio = false

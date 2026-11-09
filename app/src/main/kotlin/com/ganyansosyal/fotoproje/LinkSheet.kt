@@ -36,15 +36,16 @@ object LinkSheet {
     }
 
     private class Sheet(val act: Activity, val dark: Boolean, val openOther: (String) -> Unit) {
-        val bg = if (dark) 0xFF303134.toInt() else 0xFFFFFFFF.toInt()
-        val fg = if (dark) 0xFFE8EAED.toInt() else 0xFF202124.toInt()
-        val sub = if (dark) 0xFF9AA0A6.toInt() else 0xFF5F6368.toInt()
-        val card = if (dark) 0xFF3C4043.toInt() else 0xFFF1F3F4.toInt()
-        val line = if (dark) 0xFF5F6368.toInt() else 0xFFDADCE0.toInt()
-        val acc = if (dark) 0xFF8AB4F8.toInt() else 0xFF1A73E8.toInt()
-        val accBg = if (dark) 0xFF2B3A55.toInt() else 0xFFE8F0FE.toInt()
-        val onAcc = if (dark) 0xFF202124.toInt() else 0xFFFFFFFF.toInt()
-        val red = 0xFFD93025.toInt()
+        private val th = Theme.of(dark)
+        val bg = th.bg
+        val fg = th.fg
+        val sub = th.mut
+        val card = th.surface
+        val line = th.line
+        val acc = th.accent
+        val accBg = th.accentSoft
+        val onAcc = th.onAccent
+        val red = th.danger
 
         val dlg = Dialog(act)
         val box = LinearLayout(act)
@@ -76,7 +77,7 @@ object LinkSheet {
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
             setTextColor(onAcc)
-            background = rounded(acc, 24)
+            background = rounded(acc, Theme.R)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(48)
             )
@@ -153,7 +154,7 @@ object LinkSheet {
             val pill = LinearLayout(act)
             pill.orientation = LinearLayout.HORIZONTAL
             pill.gravity = Gravity.CENTER_VERTICAL
-            pill.background = rounded(card, 28, if (err != null) red else line, 1)
+            pill.background = rounded(card, Theme.R, if (err != null) red else line, 1)
             pill.setPadding(dp(18), 0, dp(8), 0)
             pill.addView(label("\uD83D\uDD0E", 17f, sub))
 
@@ -175,7 +176,7 @@ object LinkSheet {
             act2.typeface = Typeface.DEFAULT_BOLD
             act2.gravity = Gravity.CENTER
             act2.setTextColor(acc)
-            act2.background = rounded(accBg, 20)
+            act2.background = rounded(accBg, Theme.R)
             act2.setPadding(dp(14), 0, dp(14), 0)
             fun refresh() {
                 act2.text = if (et.text.isNullOrEmpty()) tr("Yapıştır", "Paste") else "\u2715"

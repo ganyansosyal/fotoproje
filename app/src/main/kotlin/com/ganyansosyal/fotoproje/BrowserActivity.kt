@@ -339,7 +339,7 @@ class BrowserActivity : Activity() {
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
         progress.max = 100
         progress.visibility = View.GONE
-        progress.progressTintList = ColorStateList.valueOf(0xFF1A73E8.toInt())
+        progress.progressTintList = ColorStateList.valueOf(Theme.LIGHT.accent)
         bar.addView(
             progress,
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(2))
@@ -435,7 +435,7 @@ class BrowserActivity : Activity() {
         fab.setTextColor(0xFFFFFFFF.toInt())
         fab.background = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
-            setColor(0xFF1A73E8.toInt())
+            setColor(Theme.LIGHT.accent)
         }
         fab.elevation = dpf(6)
         fab.setOnClickListener {
@@ -547,7 +547,7 @@ class BrowserActivity : Activity() {
         dlBadge.visibility = View.GONE
         val busy = Downloads.active.isNotEmpty()
         if (busy && dlBlink == null) {
-            dlIcon.setTextColor(0xFFE53935.toInt())
+            dlIcon.setTextColor(Theme.of(dark).danger)
             dlBlink = ValueAnimator.ofFloat(1f, 0.3f).apply {
                 duration = 700
                 repeatCount = ValueAnimator.INFINITE
@@ -600,7 +600,8 @@ class BrowserActivity : Activity() {
         (urlBox.background as GradientDrawable).setColor(p.field)
         themeFg = p.fg
         for (b in tintViews) b.setTextColor(p.fg)
-        if (dlBlink != null) dlIcon.setTextColor(0xFFE53935.toInt())
+        if (dlBlink != null) dlIcon.setTextColor(Theme.of(dark).danger)
+        progress.progressTintList = ColorStateList.valueOf(Theme.of(dark).accent)
         tabBox.setTextColor(p.fg)
         (tabBox.background as GradientDrawable).setStroke(dp(2), p.fg)
         updateStar()
@@ -961,7 +962,7 @@ class BrowserActivity : Activity() {
         all.text = t("closeAll")
         all.textSize = 14f
         all.gravity = Gravity.CENTER
-        all.setTextColor(0xFFD93025.toInt())
+        all.setTextColor(Theme.of(dark).danger)
         all.setOnClickListener {
             hideTabs()
             closeAllTabs()
@@ -974,8 +975,8 @@ class BrowserActivity : Activity() {
         card.orientation = LinearLayout.VERTICAL
         card.background = GradientDrawable().apply {
             setColor(p.field)
-            cornerRadius = dpf(14)
-            setStroke(dp(2), if (tb === cur) 0xFF1A73E8.toInt() else p.line)
+            cornerRadius = dpf(Theme.R)
+            setStroke(dp(if (tb === cur) 2 else 1), if (tb === cur) Theme.of(dark).accent else p.line)
         }
         // üst: başlık + ✕
         val top = LinearLayout(this)
@@ -1584,7 +1585,7 @@ class BrowserActivity : Activity() {
         val tb = cur
         val on = tb != null && !tb.isHome && bookmarks.contains(tb.url)
         starBtn.text = if (on) "★" else "☆"
-        starBtn.setTextColor(if (on) 0xFFF9AB00.toInt() else pal.fg)
+        starBtn.setTextColor(if (on) Theme.of(dark).star else pal.fg)
     }
 
     private fun updateNav() {
@@ -2003,7 +2004,8 @@ class BrowserActivity : Activity() {
 
     /** Sekme YouTube'da mı? (m.youtube.com, youtu.be, youtube-nocookie.com ...) */
     private fun isYtTab(tb: Tab?): Boolean {
-        val u = tb?.web?.url ?: tb?.url ?: return false
+        // DİKKAT: noteNet arka plan iş parçacığından çağrılır; WebView.getUrl() yalnızca ana iş parçacığında olur.
+        val u = tb?.url ?: return false
         val h = try { Uri.parse(u).host?.lowercase() ?: "" } catch (_: Throwable) { "" }
         return h == "youtu.be" || h == "youtube.com" || h.endsWith(".youtube.com") ||
             h == "youtube-nocookie.com" || h.endsWith(".youtube-nocookie.com")
@@ -2549,10 +2551,11 @@ class BrowserActivity : Activity() {
     private fun showFoundSheet(tb: Tab, found: List<FoundItem>) {
         val p = pal
         val tr = L.code == "tr"
-        val acc = if (dark) 0xFF8AB4F8.toInt() else 0xFF1A73E8.toInt()
-        val onAcc = if (dark) 0xFF202124.toInt() else 0xFFFFFFFF.toInt()
-        val chipBg = if (dark) 0xFF3C4043.toInt() else 0xFFFFFFFF.toInt()
-        val thumbBg = if (dark) 0xFF4C6EA8.toInt() else 0xFF82AAFF.toInt()
+        val th = Theme.of(dark)
+        val acc = th.accent
+        val onAcc = th.onAccent
+        val chipBg = th.surface
+        val thumbBg = th.surface2
 
         // Kısa klipleri (fragman/reklam) geride tut, kalan içinde en yüksek çözünürlük + en büyük dosya önce gelir
         val items = sortedFound(found)
@@ -2579,7 +2582,7 @@ class BrowserActivity : Activity() {
         root.setPadding(dp(18), dp(10), dp(18), dp(14))
         root.background = GradientDrawable().apply {
             setColor(p.bg)
-            val r = dpf(24)
+            val r = dpf(Theme.R_SHEET)
             cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
         }
         val handle = View(this)
@@ -2610,7 +2613,7 @@ class BrowserActivity : Activity() {
         head.orientation = LinearLayout.HORIZONTAL
         head.gravity = Gravity.CENTER_VERTICAL
         val thumb = FrameLayout(this)
-        thumb.background = rounded(thumbBg, 14)
+        thumb.background = rounded(thumbBg, Theme.R)
         thumb.clipToOutline = true
         // Önizleme resmi: seçili videonun gerçek karesi (alınamazsa mavi kutu + ▶ kalır)
         val thumbImg = android.widget.ImageView(this)
@@ -2623,7 +2626,7 @@ class BrowserActivity : Activity() {
         val durText = items.firstOrNull { it.duration > 0 }?.let { Media.fmtDuration(it.duration) }
         if (durText != null) {
             val badge = tv(durText, 12f, Color.WHITE, true)
-            badge.background = rounded(0xCC1F2A44.toInt(), 8)
+            badge.background = rounded(0xCC161A18.toInt(), 6)
             badge.setPadding(dp(8), dp(2), dp(8), dp(2))
             thumb.addView(badge, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END))
         }
@@ -2683,7 +2686,7 @@ class BrowserActivity : Activity() {
         fun paint() {
             for (i in chips.indices) {
                 val on = i == sel
-                chips[i].background = if (on) rounded(chipBg, 14, acc, 2) else rounded(chipBg, 14, p.line, 2)
+                chips[i].background = if (on) rounded(chipBg, Theme.R, acc, 2) else rounded(chipBg, Theme.R, p.line, 1)
                 ticks[i].visibility = if (on) View.VISIBLE else View.GONE
             }
         }
@@ -2949,14 +2952,8 @@ class BrowserActivity : Activity() {
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE
 
-        private val LIGHT = Pal(
-            0xFFFFFFFF.toInt(), 0xFF202124.toInt(), 0xFFF1F3F4.toInt(),
-            0xFF5F6368.toInt(), 0xFFDADCE0.toInt()
-        )
-        private val DARK = Pal(
-            0xFF202124.toInt(), 0xFFE8EAED.toInt(), 0xFF303134.toInt(),
-            0xFF9AA0A6.toInt(), 0xFF3C4043.toInt()
-        )
+        private val LIGHT = Theme.LIGHT.let { Pal(it.bg, it.fg, it.surface2, it.mut, it.line) }
+        private val DARK = Theme.DARK.let { Pal(it.bg, it.fg, it.surface2, it.mut, it.line) }
 
         private const val DESKTOP_UA =
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) " +
@@ -3081,11 +3078,11 @@ class DlFabView(ctx: android.content.Context) : android.view.View(ctx) {
         if (on) {
             // dışa yayılan halka
             val rr = r + ring * (width / 2f - r - 2f * d)
-            ringP.color = 0x16C060 or ((((1f - ring) * 200).toInt()) shl 24)
+            ringP.color = (Theme.of(Store.dark).accent and 0xFFFFFF) or ((((1f - ring) * 200).toInt()) shl 24)
             c.drawCircle(cx, cy, rr, ringP)
             // parlayan yeşil ışıma (gölge katmanı)
-            fill.setShadowLayer((7f + 8f * pulse) * d, 0f, 0f, 0xFF2BE07A.toInt())
-            fill.color = 0xFF16C060.toInt()
+            fill.setShadowLayer((7f + 8f * pulse) * d, 0f, 0f, Theme.of(Store.dark).accent)
+            fill.color = Theme.of(Store.dark).accent
         } else {
             fill.setShadowLayer(4f * d, 0f, 1.5f * d, 0x55000000)
             fill.color = 0xB39E9E9E.toInt()
