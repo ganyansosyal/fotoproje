@@ -19,7 +19,7 @@ import android.widget.TextView
 
 /**
  * Sosyal medya (Instagram / X / Facebook / TikTok / Threads) açılınca sağdan kayarak gelen
- * tam ekran karşılama paneli ("Kâğıt" tasarım sistemi, bkz. Theme.kt). Her site için uygulama açıldıktan sonra bir kez gösterilir.
+ * tam ekran karşılama paneli ("Kâğıt" tasarım sistemi, bkz. Theme.kt). Her site için siteye her girişte gösterilir.
  * Kapatmak için: "Başla" düğmesi, sağa kaydırma ya da geri tuşu.
  */
 object SocialIntro {
@@ -31,7 +31,6 @@ object SocialIntro {
     private val TT = Brand("TikTok", "♪")
     private val TH = Brand("Threads", "@")
 
-    private val shown = HashSet<String>()
     private var view: View? = null
     private val anims = ArrayList<Animator>()
 
@@ -50,12 +49,14 @@ object SocialIntro {
         }
     }
 
-    /** Sosyal medya adresiyse (ve bu uygulama açılışında henüz gösterilmediyse) paneli açar. */
-    fun maybeShow(act: Activity, url: String?) {
-        if (view != null || act.isFinishing) return
-        val b = brandFor(url) ?: return
-        if (!shown.add(b.name)) return
-        try { show(act, b) } catch (_: Throwable) { view = null }
+    /** Adres bir sosyal medya sitesiyse marka adı, değilse null. */
+    fun brandName(url: String?): String? = brandFor(url)?.name
+
+    /** Sosyal medya adresiyse paneli açar; açtıysa true döner. (Ne zaman açılacağına çağıran karar verir.) */
+    fun maybeShow(act: Activity, url: String?): Boolean {
+        if (view != null || act.isFinishing) return false
+        val b = brandFor(url) ?: return false
+        return try { show(act, b); true } catch (_: Throwable) { view = null; false }
     }
 
     private fun show(act: Activity, b: Brand) {

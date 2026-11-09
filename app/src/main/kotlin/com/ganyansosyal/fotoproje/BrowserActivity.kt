@@ -1150,7 +1150,7 @@ class BrowserActivity : Activity() {
                     updateProgress()
                     updateFab()
                     // Instagram / X / Facebook ... açılınca sağdan kayan karşılama paneli
-                    if (!tb.isHome && !fullMode && customView == null) SocialIntro.maybeShow(this@BrowserActivity, n)
+                    checkSocial(tb, n)
                 }
                 if (!docStart) injectNow(tb)
             }
@@ -1168,6 +1168,7 @@ class BrowserActivity : Activity() {
                 if (tb === cur) {
                     updateProgress()
                     updateNav()
+                    checkSocial(tb, view?.url ?: tb.url)
                 }
                 scheduleSave()
                 // Otomatik tarama kapalı: video yalnızca gerçekten oynarken ya da butona basılınca aranır
@@ -1184,6 +1185,7 @@ class BrowserActivity : Activity() {
                     updateStar()
                     updateFab()
                     updateNav()
+                    checkSocial(tb, n)
                 }
                 scheduleSave()
             }
@@ -2000,6 +2002,19 @@ class BrowserActivity : Activity() {
     // =====================================================================
     private fun toast(m: String) {
         Toast.makeText(this, m, Toast.LENGTH_SHORT).show()
+    }
+
+    /**
+     * Sosyal medya karşılama paneli: sekme bir sosyal medya sitesine GİRDİĞİNDE (önceki sayfa başka siteydi,
+     * ya da uygulama açılışında geri yüklendi) bir kez açılır. Aynı sitede gezerken tekrar çıkmaz.
+     */
+    private val socialSeen = HashMap<Int, String>()
+    private fun checkSocial(tb: Tab, url: String?) {
+        if (tb !== cur || tb.isHome || fullMode || customView != null) return
+        val b = SocialIntro.brandName(url)
+        if (b == null) { socialSeen.remove(tb.id); return }
+        if (socialSeen[tb.id] == b) return
+        if (SocialIntro.maybeShow(this, url)) socialSeen[tb.id] = b
     }
 
     /** Sekme YouTube'da mı? (m.youtube.com, youtu.be, youtube-nocookie.com ...) */
