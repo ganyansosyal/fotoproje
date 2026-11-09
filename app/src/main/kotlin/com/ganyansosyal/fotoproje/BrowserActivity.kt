@@ -2047,6 +2047,7 @@ class BrowserActivity : Activity() {
             d("x.com") || d("twitter.com") -> "x"
             d("facebook.com") || d("fb.com") || d("fb.watch") -> "facebook"
             d("youtube.com") || d("youtu.be") -> "youtube"
+            d("tiktok.com") -> "tiktok"
             else -> null
         }
     }
