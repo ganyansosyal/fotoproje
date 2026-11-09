@@ -424,6 +424,7 @@ class BrowserActivity : Activity() {
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply {
                 gravity = Gravity.END or Gravity.TOP
+                topMargin = barH + dp(18)
                 rightMargin = dp(10)
             }
         )
@@ -1164,8 +1165,8 @@ class BrowserActivity : Activity() {
                     updateStar()
                     updateProgress()
                     updateFab()
-                    // Instagram / X / Facebook ... açılınca sağdan kayan Tam ekran hapı
-                    updateFsBtn(tb, n)
+                    // Instagram / X / Facebook ... açılınca sağdan kayan karşılama paneli
+                    checkSocial(tb, n)
                 }
                 if (!docStart) injectNow(tb)
             }
@@ -1183,7 +1184,7 @@ class BrowserActivity : Activity() {
                 if (tb === cur) {
                     updateProgress()
                     updateNav()
-                    updateFsBtn(tb, view?.url ?: tb.url)
+                    checkSocial(tb, view?.url ?: tb.url)
                 }
                 scheduleSave()
                 // Otomatik tarama kapalı: video yalnızca gerçekten oynarken ya da butona basılınca aranır
@@ -1200,7 +1201,7 @@ class BrowserActivity : Activity() {
                     updateStar()
                     updateFab()
                     updateNav()
-                    updateFsBtn(tb, n)
+                    checkSocial(tb, n)
                 }
                 scheduleSave()
             }
@@ -1946,6 +1947,10 @@ class BrowserActivity : Activity() {
         updateFab()
         exitFullBtn.visibility = View.GONE
         fsBtn.setFull(on)
+        (fsBtn.layoutParams as FrameLayout.LayoutParams).let {
+            it.topMargin = (if (on) 0 else barH) + dp(18)
+            fsBtn.layoutParams = it
+        }
         if (on) { fsBtn.showQuiet(); fsBtn.flash() }
         else cur?.let { updateFsBtn(it, it.url) } ?: fsBtn.hideNow()
         barShown = true
@@ -1967,6 +1972,7 @@ class BrowserActivity : Activity() {
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
         when {
+            SocialIntro.isShowing -> SocialIntro.dismiss()
             customView != null -> exitFull()
             menuWin?.isShowing == true -> menuWin?.dismiss()
             tabsLayer.visibility == View.VISIBLE -> hideTabs()
@@ -2022,6 +2028,16 @@ class BrowserActivity : Activity() {
         Toast.makeText(this, m, Toast.LENGTH_SHORT).show()
     }
 
+    /**
+     * Sosyal medya karşılama paneli: sekme bir sosyal medya sitesine GİRDİĞİNDE (önceki sayfa başka siteydi,
+     * ya da uygulama açılışında geri yüklendi) bir kez açılır. Aynı sitede gezerken tekrar çıkmaz.
+     */
+    private val socialSeen = HashMap<Int, String>()
+    private fun checkSocial(tb: Tab, url: String?) {
+        checkSocial0(tb, url)
+        updateFsBtn(tb, url)
+    }
+
     /** Tam ekran hapının gösterileceği site grubu (yoksa null). */
     private fun fsKey(url: String?): String? {
         val h = try { java.net.URI(url ?: return null).host?.lowercase() ?: return null } catch (_: Throwable) { return null }
@@ -2046,14 +2062,27 @@ class BrowserActivity : Activity() {
         if (fsSeen[tb.id] != k) {
             fsSeen[tb.id] = k
             fsBtn.hideNow()
-            fsSlide()
+            fsSlideWhenFree(0)
         } else fsBtn.showQuiet()
     }
 
-    private fun fsSlide() {
+    /** Karşılama paneli açıkken bekle, kapanınca hapı kaydır. */
+    private fun fsSlideWhenFree(tries: Int) {
+        if (SocialIntro.isShowing && tries < 40) {
+            fsBtn.postDelayed({ fsSlideWhenFree(tries + 1) }, 500)
+            return
+        }
         val tb = cur ?: return
         if (fullMode || customView != null || tb.isHome || fsKey(tb.url) == null) return
         fsBtn.slideIn()
+    }
+
+    private fun checkSocial0(tb: Tab, url: String?) {
+        if (tb !== cur || tb.isHome || fullMode || customView != null) return
+        val b = SocialIntro.brandName(url)
+        if (b == null) { socialSeen.remove(tb.id); return }
+        if (socialSeen[tb.id] == b) return
+        if (SocialIntro.maybeShow(this, url)) socialSeen[tb.id] = b
     }
 
     /** Sekme YouTube'da mı? (m.youtube.com, youtu.be, youtube-nocookie.com ...) */
@@ -2553,6 +2582,10 @@ class BrowserActivity : Activity() {
     private val thumbMem = HashMap<String, Bitmap>()
     private val thumbBusy = HashSet<String>()
 
+    /** Instagram/Facebook/TikTok/X akışları: sayfa önceden başka videoları da yüklediği için dosyadan alınan kare yanlış video olabilir. */
+    private fun isFeedSite(u: String): Boolean =
+        Regex("(instagram\\.com|facebook\\.com|fb\\.watch|tiktok\\.com|x\\.com|twitter\\.com)", RegexOption.IGNORE_CASE).containsMatchIn(u)
+
     private fun grabFrame(f: FoundItem, ref: String): Bitmap? {
         if (f.kind == "blob" || f.kind == "mpd") return null
         val r = android.media.MediaMetadataRetriever()
@@ -2588,6 +2621,7 @@ class BrowserActivity : Activity() {
 
     /** Video bulunur bulunmaz en iyi seçeneğin karesini arka planda alır: sayfa açılınca hazır olur. */
     private fun prefetchThumb(tb: Tab, found: List<FoundItem>) {
+        if (isFeedSite(tb.pRef ?: tb.web?.url ?: tb.url)) return
         val f = sortedFound(found).firstOrNull() ?: return
         val key = f.url
         if (thumbMem.containsKey(key) || !thumbBusy.add(key)) return
@@ -2613,19 +2647,6 @@ class BrowserActivity : Activity() {
 
         // Kısa klipleri (fragman/reklam) geride tut, kalan içinde en yüksek çözünürlük + en büyük dosya önce gelir
         val items = sortedFound(found)
-
-        // Instagram/Facebook: indirme, sayfadaki oynayan videonun gönderi adresinden (yt-dlp) yapılır; ağdan yakalanan
-        // dosyalar başka (önceden yüklenen) bir videoya ait olabilir. Bu yüzden kalite kutusunda o dosyaların
-        // süre/boyut/çözünürlüğü GÖSTERİLMEZ: tek "en iyi" kutusu + oynayan videonun kendi süresi görünür.
-        val social = Ytdlp.isSocial(tb.url, tb.pRef ?: "")
-        val playDur = if (tb.pLive) 0.0 else tb.pDur
-        val shown: List<FoundItem> = if (social && items.isNotEmpty()) {
-            val tol = maxOf(1.5, playDur * 0.03)
-            listOf(
-                items.firstOrNull { playDur > 0.5 && it.duration > 0 && Math.abs(it.duration - playDur) <= tol }
-                    ?: items.first()
-            )
-        } else items
 
         fun rounded(fill: Int, r: Int, stroke: Int = 0, sw: Int = 0): GradientDrawable =
             GradientDrawable().apply {
@@ -2690,9 +2711,7 @@ class BrowserActivity : Activity() {
         val clap = tv("▶", 34f, Color.WHITE, true)
         clap.gravity = Gravity.CENTER
         thumb.addView(clap, FrameLayout.LayoutParams(-1, -1))
-        val durText = if (social) {
-            if (playDur > 0.5) Media.fmtDuration(playDur) else null
-        } else items.firstOrNull { it.duration > 0 }?.let { Media.fmtDuration(it.duration) }
+        val durText = items.firstOrNull { it.duration > 0 }?.let { Media.fmtDuration(it.duration) }
         if (durText != null) {
             val badge = tv(durText, 12f, Color.WHITE, true)
             badge.background = rounded(0xCC161A18.toInt(), 6)
@@ -2723,9 +2742,11 @@ class BrowserActivity : Activity() {
         }
         // Seçili videonun karesini alır: önce dosyadan, olmazsa sayfada oynayan videodan
         fun loadThumb(f: FoundItem) {
-            thumbCache[f.url]?.let { showThumb(it); return }
+            val feed = isFeedSite(thumbRef)
+            if (!feed) thumbCache[f.url]?.let { showThumb(it); return }
+            var snapShown = false
             val key = f.url
-            fun still() = dlg.isShowing && shown.getOrNull(sel)?.url == key && thumbImg.visibility != View.VISIBLE
+            fun still() = dlg.isShowing && items.getOrNull(sel)?.url == key && thumbImg.visibility != View.VISIBLE
             // 1) Sayfada oynayan videonun karesi: anında gelir
             tb.web?.evaluateJavascript("window.__fpSnap&&window.__fpSnap()") { raw ->
                 try {
@@ -2733,7 +2754,7 @@ class BrowserActivity : Activity() {
                     if (!str.isNullOrEmpty() && str.contains("base64,") && still()) {
                         val bytes = android.util.Base64.decode(str.substringAfter("base64,"), android.util.Base64.DEFAULT)
                         val sn = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                        if (sn != null) showThumb(sn)
+                        if (sn != null) { snapShown = true; showThumb(sn) }
                     }
                 } catch (_: Throwable) {
                 }
@@ -2745,8 +2766,9 @@ class BrowserActivity : Activity() {
                 ui.post {
                     thumbBusy.remove(key)
                     if (bm == null) return@post
+                    if (feed) return@post // akışta oynayan videonun karesi esas; dosya karesi başka video olabilir
                     thumbCache[key] = bm
-                    if (dlg.isShowing && shown.getOrNull(sel)?.url == key) showThumb(bm)
+                    if (dlg.isShowing && items.getOrNull(sel)?.url == key) showThumb(bm)
                 }
             }.start()
         }
@@ -2762,7 +2784,7 @@ class BrowserActivity : Activity() {
         val grid = LinearLayout(this)
         grid.orientation = LinearLayout.VERTICAL
         var row: LinearLayout? = null
-        for ((idx, f) in shown.withIndex()) {
+        for ((idx, f) in items.withIndex()) {
             if (idx % 3 == 0) {
                 row = LinearLayout(this)
                 row.orientation = LinearLayout.HORIZONTAL
@@ -2771,7 +2793,6 @@ class BrowserActivity : Activity() {
                 grid.addView(row, rp)
             }
             val label = when {
-                social -> if (tr) "EN İYİ" else "BEST"
                 f.height > 0 -> "${f.height}P"
                 f.bw > 0 -> String.format("%.1f Mbps", f.bw / 1_000_000.0)
                 f.kind == "blob" -> if (tr) "KORUMALI" else "PROTECTED"
@@ -2795,15 +2816,13 @@ class BrowserActivity : Activity() {
                 (f.bw.toDouble() * f.duration / 8.0).toLong().coerceAtLeast(1L)
             } else 0L
             val sz = when {
-                social -> ""
                 f.size > 0L -> Media.fmtBytes(f.size)
                 estimatedHlsBytes > 0L -> "≈ ${Media.fmtBytes(estimatedHlsBytes)}"
                 f.kind.equals("m3u8", ignoreCase = true) || f.kind.equals("mpd", ignoreCase = true) ->
                     if (tr) "Boyut bilinmiyor" else "Size unknown"
                 else -> ""
             }
-            val dShow = if (social) playDur else f.duration
-            val s = tv(if (dShow > 0.5) (if (sz.isEmpty()) "" else "$sz · ") + Media.fmtDuration(dShow) else sz, 14f, p.sub)
+            val s = tv(if (f.duration > 0) (if (sz.isEmpty()) "" else "$sz · ") + Media.fmtDuration(f.duration) else sz, 14f, p.sub)
             s.gravity = Gravity.CENTER
             inner.addView(s)
             chip.addView(inner, FrameLayout.LayoutParams(-1, -2))
@@ -2817,14 +2836,14 @@ class BrowserActivity : Activity() {
             chip.setOnClickListener {
                 sel = idx
                 paint()
-                loadThumb(shown[idx])
+                loadThumb(items[idx])
             }
             chips.add(chip)
             ticks.add(tick)
             val cp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             cp.leftMargin = if (idx % 3 == 0) 0 else dp(10)
             row!!.addView(chip, cp)
-            if (idx == shown.size - 1) {
+            if (idx == items.size - 1) {
                 // Son satırı boş kutularla doldur ki genişlikler eşit kalsın
                 var k = idx % 3 + 1
                 while (k < 3) {
@@ -2837,7 +2856,7 @@ class BrowserActivity : Activity() {
             }
         }
         paint()
-        if (shown.size > 9) {
+        if (items.size > 9) {
             val sv = ScrollView(this)
             sv.addView(grid)
             root.addView(sv, LinearLayout.LayoutParams(-1, (resources.displayMetrics.heightPixels * 0.34).toInt()))
@@ -2881,7 +2900,7 @@ class BrowserActivity : Activity() {
                 .show()
         }
         val dl = action("⤓", t("download"), acc) {
-            val f = shown[sel]
+            val f = items[sel]
             dlg.dismiss()
             startDownload(tb, f.url, f.kind, name, items)
         }
@@ -2897,7 +2916,7 @@ class BrowserActivity : Activity() {
             setGravity(Gravity.BOTTOM)
         }
         dlg.show()
-        loadThumb(shown[sel])
+        loadThumb(items[sel])
     }
 
     // =====================================================================
