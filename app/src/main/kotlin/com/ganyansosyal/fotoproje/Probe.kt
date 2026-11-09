@@ -571,7 +571,7 @@ object Probe {
         val filtered = ok.distinctBy { it.url }
         // Süzgeç değil, EŞLEŞTİRME: kullanıcının bastığı videonun süresi biliniyorsa yalnızca o videonun
         // dosyaları gösterilir (Instagram akışında önceden yüklenen başka videolar karışmasın).
-        // Eşleşen yoksa hiçbir şey saklanmaz; hepsi süreye yakınlık sırasıyla listelenir.
+        // Eşleşen yoksa liste boş kalır (başka video karışmaz).
         var cands = filtered
         if (expectDur > 0.5) {
             val tol = maxOf(1.5, expectDur * 0.03)
@@ -580,7 +580,9 @@ object Probe {
                 matches.forEach { it.verified = true }
                 cands = matches
             } else {
-                cands = filtered.sortedBy { if (it.duration > 0) Math.abs(it.duration - expectDur) else 1e9 }
+                // KESİN EŞLEŞME: süresi uyan dosya yoksa başka videoların dosyaları ASLA gösterilmez.
+                // Yalnızca oynatıcının kendi blob'u kalır; doğru dosya gelince (yeni adaylar) liste yeniden kurulur.
+                cands = filtered.filter { it.kind == "blob" }
             }
         }
         // Reklam akışları kısa olur: uzun (>= 5 dk) bir video varsa kısa (< 2 dk) adaylar listeden çıkar

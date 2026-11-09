@@ -86,11 +86,14 @@ class BrowserActivity : Activity() {
     private lateinit var dlBadge: TextView
     private lateinit var dlIcon: VecIcon
     private var dlBlink: ValueAnimator? = null
+    private val dlPill by lazy { DlPill(this) { openApp(1) } }
+    private fun refreshPill() { dlPill.update(fullMode || customView != null) }
     private var themeFg = Color.BLACK
     private val seenFail = HashSet<String>()
     private val dlListener: () -> Unit = {
         runOnUiThread {
             updateDlBadge()
+            refreshPill()
             // Adres süresi dolmuş (401/403/410) bir indirme başarısız olduysa bulunan listeyi yenile
             try {
                 for (t in ArrayList(Downloads.active)) {
@@ -1145,6 +1148,8 @@ class BrowserActivity : Activity() {
                     updateStar()
                     updateProgress()
                     updateFab()
+                    // Instagram / X / Facebook ... açılınca sağdan kayan karşılama paneli
+                    if (!tb.isHome && !fullMode && customView == null) SocialIntro.maybeShow(this@BrowserActivity, n)
                 }
                 if (!docStart) injectNow(tb)
             }
@@ -1521,6 +1526,7 @@ class BrowserActivity : Activity() {
     /** Sayfanın kaynağındaki video adreslerini bulup inceler; bulunursa indirme seçeneklerini açar. */
     private fun scanPage(tb: Tab, silent: Boolean = false) {
         val w = tb.web ?: return
+        if (isYtTab(tb) || tb.playerId == null) return // oynayan video yoksa / YouTube'da tarama yok
         w.evaluateJavascript(Media.SCAN_JS) { raw ->
             val urls = ArrayList<String>()
             val netHints = HashMap<String, String>()
@@ -1896,6 +1902,7 @@ class BrowserActivity : Activity() {
             )
         )
         window.decorView.systemUiVisibility = IMMERSIVE
+        refreshPill()
     }
 
     @Suppress("DEPRECATION")
@@ -1906,6 +1913,7 @@ class BrowserActivity : Activity() {
         customCb?.onCustomViewHidden()
         customCb = null
         window.decorView.systemUiVisibility = if (fullMode) IMMERSIVE else sysFlags()
+        refreshPill()
     }
 
     /** Tarayıcı tam ekran: üst/alt çubuklar ve sistem çubukları gizlenir, sayfa tüm ekranı kaplar. */
@@ -1926,6 +1934,7 @@ class BrowserActivity : Activity() {
         window.decorView.systemUiVisibility = if (on) IMMERSIVE else sysFlags()
         applyWebParams()
         root.requestApplyInsets()
+        refreshPill()
         if (perfOn) {
             (perfView.layoutParams as FrameLayout.LayoutParams).topMargin =
                 (if (on) 0 else barH) + dp(6)
@@ -1936,6 +1945,7 @@ class BrowserActivity : Activity() {
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
         when {
+            SocialIntro.isShowing -> SocialIntro.dismiss()
             customView != null -> exitFull()
             menuWin?.isShowing == true -> menuWin?.dismiss()
             tabsLayer.visibility == View.VISIBLE -> hideTabs()
@@ -1991,6 +2001,14 @@ class BrowserActivity : Activity() {
         Toast.makeText(this, m, Toast.LENGTH_SHORT).show()
     }
 
+    /** Sekme YouTube'da mı? (m.youtube.com, youtu.be, youtube-nocookie.com ...) */
+    private fun isYtTab(tb: Tab?): Boolean {
+        val u = tb?.web?.url ?: tb?.url ?: return false
+        val h = try { Uri.parse(u).host?.lowercase() ?: "" } catch (_: Throwable) { "" }
+        return h == "youtu.be" || h == "youtube.com" || h.endsWith(".youtube.com") ||
+            h == "youtube-nocookie.com" || h.endsWith(".youtube-nocookie.com")
+    }
+
     private fun kindOf(u: String): String? {
         if (u.startsWith("blob:")) return "blob"
         val l = u.lowercase()
@@ -2017,6 +2035,7 @@ class BrowserActivity : Activity() {
         requestHeaders: Map<String, String>? = null
     ) {
         if (u0.length > 2500) return
+        if (isYtTab(tb)) return // YouTube'da ağ adayı toplanmaz
         Net.rememberRequestHeaders(u0, requestHeaders)
         // Instagram/Facebook parça isteklerindeki bytestart/byteend atılır: tam dosya adresi aday olur
         val u = Media.unrange(u0)
@@ -2065,6 +2084,7 @@ class BrowserActivity : Activity() {
 
     // ---- oynatıcı bildirimi (hookJs'ten)
     private fun onPlayer(tb: Tab, raw: String) {
+        if (isYtTab(tb)) return // YouTube'da video algılanmaz
         val m = try {
             JSONObject(raw)
         } catch (_: Exception) {
@@ -2078,6 +2098,13 @@ class BrowserActivity : Activity() {
             return
         }
         val dur = m.optDouble("d", 0.0)
+        val newSrc = m.optString("src", "")
+        // Başka bir video oynamaya başladıysa (süre/kaynak değişti) önceki videonun sonucu hemen silinir
+        if (tb.playerId != null && (id != tb.playerId || Math.abs(dur - tb.pDur) > 0.5 || newSrc != tb.pSrc)) {
+            tb.found = emptyList()
+            tb.probeGen++
+            if (tb === cur) updateFab()
+        }
         if (id != tb.playerId || Math.abs(dur - tb.pDur) > 1) tb.bannerDone = false
         tb.playerId = id
         tb.pDur = dur
@@ -2165,7 +2192,7 @@ class BrowserActivity : Activity() {
                 return@dart
             }
 
-            val original = (r as? List<*>)?.mapNotNull { e ->
+            val original0 = (r as? List<*>)?.mapNotNull { e ->
                 (e as? Map<*, *>)?.let { item ->
                     val url = item["url"]?.toString().orEmpty()
                     if (url.isBlank()) return@let null
@@ -2181,6 +2208,13 @@ class BrowserActivity : Activity() {
                     )
                 }
             } ?: emptyList()
+
+            val wantDur = if (tb.pLive) 0.0 else tb.pDur
+            val original = if (wantDur > 0.5) {
+                val tol = maxOf(1.5, wantDur * 0.03)
+                original0.filter { it.kind == "blob" || it.duration <= 0 && it.url.startsWith("blob:") ||
+                    (it.duration > 0 && Math.abs(it.duration - wantDur) <= tol) }
+            } else original0
 
             // WebView verilerini ana thread üzerinde al; ağ isteğini arka planda yap.
             val referer = tb.pRef ?: tb.web?.url ?: tb.url
@@ -2312,7 +2346,7 @@ class BrowserActivity : Activity() {
 
     private fun updateFab() {
         val tb = cur ?: return
-        val on = tb.found.isNotEmpty()
+        val on = tb.found.isNotEmpty() && !isYtTab(tb)
         fabView.setOn(on)
         // Yuvarlak indirme düğmesi geri getirildi (sürüklenebilir; video bulununca kırmızı)
         fab.visibility = View.VISIBLE
@@ -2322,6 +2356,7 @@ class BrowserActivity : Activity() {
     private fun startDownload(
         tb: Tab, url: String, kind: String, name: String? = null, others: List<FoundItem> = emptyList()
     ) {
+        if (isYtTab(tb)) { toast(t("ytNoDl")); return }
         try { tb.web?.settings?.userAgentString?.takeIf { it.isNotBlank() }?.let { Net.ua = it } } catch (_: Throwable) {}
         dart(
             "download",
@@ -2414,15 +2449,14 @@ class BrowserActivity : Activity() {
 
     private fun onFabTap() {
         val tb = cur ?: return
+        // YouTube: indirme kapalı
+        if (isYtTab(tb)) {
+            toast(t("ytNoDl"))
+            return
+        }
+        // Oynayan video yoksa sayfa taranmaz (sayfadaki önizleme/reklam videoları bulunmasın)
         if (tb.playerId == null) {
-            // Oynatıcı DOM'da görünmese bile sayfa kaynaklarını ve ağ isteklerini tara.
-            if (tb.found.isNotEmpty()) {
-                showFound()
-                return
-            }
-            tb.autoShow = true
-            toast(t("checking"))
-            scanPage(tb)
+            toast(t("noVideo"))
             return
         }
         if (tb.found.isNotEmpty()) {
@@ -2446,6 +2480,7 @@ class BrowserActivity : Activity() {
 
     private fun showFound() {
         val tb = cur ?: return
+        if (isYtTab(tb)) { toast(t("ytNoDl")); return }
         if (tb.found.isEmpty()) {
             if (tb.playerId == null) {
                 toast(t("noVideo"))
@@ -2966,6 +3001,7 @@ class BrowserActivity : Activity() {
             "nameLbl" to "Ad", "addrLbl" to "Adres", "removeFavQ" to "Favorilerden kaldırılsın mı?",
             "removeFav" to "Kaldır", "tabs" to "Sekmeler", "closeAll" to "Tüm sekmeleri kapat",
             "noVideo" to "Video bulunamadı. Videoyu oynatıp tekrar dene.",
+            "ytNoDl" to "YouTube videoları indirilemez.",
             "checking" to "Videolar kontrol ediliyor...", "videoFound" to "Video bulundu",
             "getVideo" to "İndir", "downloadStarted" to "İndirme başladı", "failed" to "Başarısız",
             "blobFail" to "Blob okunamadı", "bookmarkAdded" to "Yer imi eklendi",
