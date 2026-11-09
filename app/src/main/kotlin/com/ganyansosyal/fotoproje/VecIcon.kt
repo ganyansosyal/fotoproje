@@ -22,6 +22,8 @@ class VecIcon(ctx: Context, private val kind: Int, private val sizeDp: Float = 2
         const val HOME = 3
         const val BACK = 4
         const val FORWARD = 5
+        const val SHARE = 6
+        const val TRASH = 7
     }
 
     override fun onDraw(c: Canvas) {
@@ -59,6 +61,26 @@ class VecIcon(ctx: Context, private val kind: Int, private val sizeDp: Float = 2
             FORWARD -> {
                 path.reset()
                 path.moveTo(9f, 5f); path.lineTo(16f, 12f); path.lineTo(9f, 19f)
+                c.drawPath(path, p)
+            }
+            SHARE -> {
+                c.drawCircle(6f, 12f, 3f, p)
+                c.drawCircle(18f, 6f, 3f, p)
+                c.drawCircle(18f, 18f, 3f, p)
+                path.reset()
+                path.moveTo(8.7f, 10.7f); path.lineTo(15.3f, 7.3f)
+                path.moveTo(8.7f, 13.3f); path.lineTo(15.3f, 16.7f)
+                c.drawPath(path, p)
+            }
+            TRASH -> {
+                path.reset()
+                path.moveTo(4f, 7f); path.lineTo(20f, 7f)
+                path.moveTo(10f, 11f); path.lineTo(10f, 17f)
+                path.moveTo(14f, 11f); path.lineTo(14f, 17f)
+                path.moveTo(5f, 7f); path.lineTo(6f, 19f)
+                path.quadTo(6.1f, 21f, 8f, 21f); path.lineTo(16f, 21f)
+                path.quadTo(17.9f, 21f, 18f, 19f); path.lineTo(19f, 7f)
+                path.moveTo(9f, 7f); path.lineTo(9f, 4f); path.lineTo(15f, 4f); path.lineTo(15f, 7f)
                 c.drawPath(path, p)
             }
             SETTINGS -> {

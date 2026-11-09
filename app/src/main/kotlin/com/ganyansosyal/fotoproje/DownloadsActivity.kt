@@ -277,8 +277,20 @@ class DownloadsActivity : Activity() {
         return c
     }
 
+    /** Yuvarlak, yumuşak renkli ikon düğme (40dp). */
+    private fun iconBtn(kind: Int, desc: String, fgc: Int, bgc: Int, click: () -> Unit): View {
+        val b = VecIcon(this, kind, 20f)
+        b.setTextColor(fgc)
+        b.contentDescription = desc
+        b.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(bgc) }
+        b.setOnClickListener { click() }
+        b.layoutParams = LinearLayout.LayoutParams(dp(40), dp(40)).apply { leftMargin = dp(8) }
+        return b
+    }
+
     private fun doneRow(t: DownloadTask): View {
         val c = cardBox()
+        c.setPadding(dp(12), dp(12), dp(12), dp(12))
         val top = LinearLayout(this)
         top.orientation = LinearLayout.HORIZONTAL
         top.gravity = Gravity.CENTER_VERTICAL
@@ -292,19 +304,20 @@ class DownloadsActivity : Activity() {
         thumbBox.addView(thumb, FrameLayout.LayoutParams(-1, -1))
         val badge = TextView(this)
         badge.text = "▶"
-        badge.textSize = 12f
+        badge.textSize = 11f
         badge.setTextColor(Color.WHITE)
         badge.gravity = Gravity.CENTER
         badge.background = GradientDrawable().apply {
             shape = GradientDrawable.OVAL
             setColor(0x6B000000)
         }
-        thumbBox.addView(badge, FrameLayout.LayoutParams(dp(32), dp(32), Gravity.CENTER))
+        thumbBox.addView(badge, FrameLayout.LayoutParams(dp(28), dp(28), Gravity.CENTER))
         val p = t.path
         if (p != null) loadThumb(p, thumb)
         thumbBox.setOnClickListener { openFile(t) }
-        top.addView(thumbBox, LinearLayout.LayoutParams(dp(104), dp(72)).apply { rightMargin = dp(14) })
+        top.addView(thumbBox, LinearLayout.LayoutParams(dp(84), dp(60)).apply { rightMargin = dp(12) })
 
+        // Başlık + yalnızca boyut (teknik not gösterilmez)
         val col = LinearLayout(this)
         col.orientation = LinearLayout.VERTICAL
         val name = TextView(this)
@@ -316,28 +329,28 @@ class DownloadsActivity : Activity() {
         name.textSize = 15f
         col.addView(name)
         val s = TextView(this)
-        val sz = Media.fmtBytes(t.size)
-        s.text = if (t.note == null) sz else "$sz · ${t.note}"
+        s.text = Media.fmtBytes(t.size)
         s.setTextColor(sub)
         s.textSize = 12.5f
-        col.addView(s, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(4) })
+        col.addView(s, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(2) })
         top.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
+
+        // Sağda ikon düğmeler: paylaş + sil
+        top.addView(iconBtn(VecIcon.SHARE, L.t("share"), accentText, accentSoft) { shareFile(t) })
+        top.addView(iconBtn(VecIcon.TRASH, L.t("delete"), danger, dangerSoft) { Downloads.deleteDone(t) })
+
         c.addView(top)
-
-        val div = View(this)
-        div.setBackgroundColor(line)
-        c.addView(div, LinearLayout.LayoutParams(-1, 1).apply { topMargin = dp(12) })
-
-        val row = actionRow()
-        row.addView(pill(L.t("share"), accentText, accentSoft) { shareFile(t) })
-        row.addView(pill(L.t("delete"), danger, dangerSoft) { Downloads.deleteDone(t) })
-        c.addView(row, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
         c.setOnClickListener { openFile(t) }
         return c
     }
 
     private fun loadThumb(path: String, iv: android.widget.ImageView) {
-        thumbCache[path]?.let { iv.setImageBitmap(it); return }
+        // Anahtar: yol + boyut + değişme zamanı. Eski video silinip aynı adla yenisi inince
+        // önbellekteki ESKİ kare gösteriliyordu.
+        val f0 = File(path)
+        val key = path + "|" + f0.length() + "|" + f0.lastModified()
+        thumbCache[key]?.let { iv.setImageBitmap(it); return }
+        iv.setImageDrawable(null)
         Thread {
             var bmp: android.graphics.Bitmap? = null
             // 1) MediaMetadataRetriever: birkaç farklı zamanı ve seçeneği dene
@@ -380,7 +393,7 @@ class DownloadsActivity : Activity() {
                 bmp = placeholder()
             }
             val out = bmp!!
-            thumbCache[path] = out
+            thumbCache[key] = out
             runOnUiThread { iv.setImageBitmap(out) }
         }.start()
     }

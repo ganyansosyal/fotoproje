@@ -1,7 +1,7 @@
 package com.ganyansosyal.fotoproje
 
 /**
- * Tasarım sistemi "Kâğıt": açık kırık beyaz zemin (koyu modda sıcak mürekkep), deniz yeşili vurgu,
+ * Tasarım sistemi "Kâğıt": saf beyaz zemin (koyu modda sıcak mürekkep), deniz yeşili vurgu,
  * ince çizgiler ve keskin (8dp) köşeler. Tüm ekranlar renkleri BURADAN alır; elle renk yazma.
  * Renk değiştirmek için yalnızca bu dosyayı düzenle.
  */
@@ -22,8 +22,8 @@ object Theme {
     )
 
     val LIGHT = P(
-        bg = 0xFFF7F6F2.toInt(), surface = 0xFFFFFFFF.toInt(), surface2 = 0xFFECEBE5.toInt(),
-        fg = 0xFF161A18.toInt(), mut = 0xFF66706B.toInt(), line = 0xFFD9D8D0.toInt(),
+        bg = 0xFFFFFFFF.toInt(), surface = 0xFFFFFFFF.toInt(), surface2 = 0xFFF1F1F1.toInt(),
+        fg = 0xFF161A18.toInt(), mut = 0xFF66706B.toInt(), line = 0xFFE2E2E2.toInt(),
         accent = 0xFF0F766E.toInt(), onAccent = 0xFFFFFFFF.toInt(), accentSoft = 0xFFDCEEEB.toInt(),
         danger = 0xFFB42318.toInt(), dangerSoft = 0xFFFBE9E7.toInt(), star = 0xFFB7791F.toInt()
     )
