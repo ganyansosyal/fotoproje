@@ -194,6 +194,8 @@ object Media {
    urls=urls.slice(-40);
    if(!urls.length&&/^blob:/i.test(src)) urls=[src];
   }
+  // Yalnızca X: akıştaki videonun adresi eskidiği için süre eşleşmesi boş kalırsa, oynatıcının kendi blob'u yedek kalsın (indirme tweet adresinden yapılır)
+  if(xHost()&&/^blob:/i.test(src)&&urls.indexOf(src)<0) urls.push(src);
   var o={d:live?0:Math.round(d*10)/10, live:live, w:v.videoWidth||0, h:v.videoHeight||0,
    src:direct?src:'', ref:permalink(v), urls:urls, hints:hints, show:showFor===v, ad:adNow(v)};
   var s=JSON.stringify(o); if(s===last) return; last=s; send(o); if(showFor===v) showFor=null; }

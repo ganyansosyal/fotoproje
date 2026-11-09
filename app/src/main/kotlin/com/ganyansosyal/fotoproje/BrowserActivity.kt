@@ -1165,7 +1165,6 @@ class BrowserActivity : Activity() {
                     updateStar()
                     updateProgress()
                     updateFab()
-                    // Instagram / X / Facebook ... açılınca sağdan kayan karşılama paneli
                     checkSocial(tb, n)
                 }
                 if (!docStart) injectNow(tb)
@@ -1972,7 +1971,6 @@ class BrowserActivity : Activity() {
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
         when {
-            SocialIntro.isShowing -> SocialIntro.dismiss()
             customView != null -> exitFull()
             menuWin?.isShowing == true -> menuWin?.dismiss()
             tabsLayer.visibility == View.VISIBLE -> hideTabs()
@@ -2028,13 +2026,7 @@ class BrowserActivity : Activity() {
         Toast.makeText(this, m, Toast.LENGTH_SHORT).show()
     }
 
-    /**
-     * Sosyal medya karşılama paneli: sekme bir sosyal medya sitesine GİRDİĞİNDE (önceki sayfa başka siteydi,
-     * ya da uygulama açılışında geri yüklendi) bir kez açılır. Aynı sitede gezerken tekrar çıkmaz.
-     */
-    private val socialSeen = HashMap<Int, String>()
     private fun checkSocial(tb: Tab, url: String?) {
-        checkSocial0(tb, url)
         updateFsBtn(tb, url)
     }
 
@@ -2066,23 +2058,10 @@ class BrowserActivity : Activity() {
         } else fsBtn.showQuiet()
     }
 
-    /** Karşılama paneli açıkken bekle, kapanınca hapı kaydır. */
     private fun fsSlideWhenFree(tries: Int) {
-        if (SocialIntro.isShowing && tries < 40) {
-            fsBtn.postDelayed({ fsSlideWhenFree(tries + 1) }, 500)
-            return
-        }
         val tb = cur ?: return
         if (fullMode || customView != null || tb.isHome || fsKey(tb.url) == null) return
         fsBtn.slideIn()
-    }
-
-    private fun checkSocial0(tb: Tab, url: String?) {
-        if (tb !== cur || tb.isHome || fullMode || customView != null) return
-        val b = SocialIntro.brandName(url)
-        if (b == null) { socialSeen.remove(tb.id); return }
-        if (socialSeen[tb.id] == b) return
-        if (SocialIntro.maybeShow(this, url)) socialSeen[tb.id] = b
     }
 
     /** Sekme YouTube'da mı? (m.youtube.com, youtu.be, youtube-nocookie.com ...) */
