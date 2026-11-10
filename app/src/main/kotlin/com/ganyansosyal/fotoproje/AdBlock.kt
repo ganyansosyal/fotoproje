@@ -21,15 +21,92 @@ object AdBlock {
         "mgid.com", "popads.net", "propellerads.com", "exoclick.com",
         "juicyads.com", "adsterra.com", "admob.com", "ads.yahoo.com",
         "advertising.com", "casalemedia.com", "serving-sys.com", "teads.tv",
-        "zedo.com"
+        "zedo.com",
+        // Ek reklam ağları ve izleyiciler (yalnızca reklam/izleme; siteyi bozmayacak olanlar)
+        "adsafeprotected.com", "2mdn.net", "adcolony.com", "applovin.com", "inmobi.com",
+        "smaato.net", "vungle.com", "chartboost.com", "mopub.com", "bidswitch.net",
+        "33across.com", "indexww.com", "sharethrough.com", "triplelift.com", "lijit.com",
+        "sovrn.com", "contextweb.com", "adsymptotic.com", "demdex.net", "krxd.net",
+        "bluekai.com", "rlcdn.com", "everesttech.net", "tapad.com", "agkn.com",
+        "mathtag.com", "yieldlab.net", "adition.com", "improvedigital.com", "gumgum.com",
+        "media.net", "revcontent.com", "zemanta.com", "onetag-sys.com", "id5-sync.com",
+        "liadm.com", "doubleverify.com", "hotjar.com", "ads-twitter.com",
+        "analytics.twitter.com", "ads.tiktok.com", "analytics.tiktok.com", "an.facebook.com",
+        "admatic.com.tr", "adnxs-simple.com", "adservice.google.com.tr"
     )
     private val paths = listOf("facebook.net/en_US/fbevents.js")
+
+    // ---- İnternetten indirilen hazır liste (Peter Lowe's ad server list) ----
+    // Arka planda indirilir/okunur; sayfa açılışını ve kaydırmayı etkilemez. Hazır olana kadar yukarıdaki yerel liste çalışır.
+    @Volatile private var extra: Set<String> = emptySet()
+    private const val LIST_URL = "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext"
+    private const val MAX_AGE_MS = 7L * 24 * 3600 * 1000
+    private const val MAX_BYTES = 3_000_000
+    // Bunlar listede olsa bile asla engellenmez (siteleri bozar)
+    private val NEVER = hashSetOf(
+        "x.com", "twitter.com", "twimg.com", "t.co", "facebook.com", "fbcdn.net", "instagram.com",
+        "cdninstagram.com", "tiktok.com", "youtube.com", "youtu.be", "ytimg.com", "googlevideo.com",
+        "google.com", "googleapis.com", "gstatic.com", "googleusercontent.com", "cloudfront.net",
+        "akamaihd.net", "amazonaws.com", "github.com", "microsoft.com", "apple.com", "localhost"
+    )
+    private val DOMAIN = Regex("^[a-z0-9][a-z0-9._-]*\\.[a-z]{2,}$")
+
+    private fun parse(text: String): Set<String> {
+        val out = HashSet<String>()
+        for (line0 in text.lineSequence()) {
+            val line = line0.substringBefore('#').trim()
+            if (line.isEmpty()) continue
+            val h = line.split(Regex("\\s+")).last().lowercase()
+            if (h in NEVER || !DOMAIN.matches(h)) continue
+            out.add(h)
+        }
+        return out
+    }
+
+    /** Arka plan iş parçacığından çağrılır. Kayıtlı listeyi okur; yoksa ya da bir haftadan eskiyse yeniler. */
+    fun init(ctx: android.content.Context) {
+        try {
+            val f = java.io.File(ctx.filesDir, "adlist.txt")
+            if (f.exists()) {
+                val s = parse(f.readText())
+                if (s.size > 500) extra = s
+            }
+            if (f.exists() && System.currentTimeMillis() - f.lastModified() < MAX_AGE_MS) return
+            val c = java.net.URL(LIST_URL).openConnection() as java.net.HttpURLConnection
+            c.connectTimeout = 10000
+            c.readTimeout = 20000
+            try {
+                if (c.responseCode != 200) return
+                val out = java.io.ByteArrayOutputStream()
+                val buf = ByteArray(8192)
+                c.inputStream.use { ins ->
+                    while (true) {
+                        val n = ins.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        if (out.size() > MAX_BYTES) return
+                    }
+                }
+                val text = out.toString("UTF-8")
+                val s = parse(text)
+                if (s.size < 500) return // bozuk/boş yanıt: eski liste kalsın
+                val tmp = java.io.File(ctx.filesDir, "adlist.tmp")
+                tmp.writeText(text)
+                if (!tmp.renameTo(f)) { f.writeText(text); tmp.delete() }
+                extra = s
+            } finally {
+                c.disconnect()
+            }
+        } catch (_: Throwable) {
+        }
+    }
 
     /** Reklam/izleyici adresi mi? Regex yok: alan adı sonekleri küme araması ile denenir. */
     fun isAd(url: String, host: String?): Boolean {
         var h = host ?: return false
+        val ex = extra
         while (h.isNotEmpty()) {
-            if (hosts.contains(h)) return true
+            if (hosts.contains(h) || ex.contains(h)) return true
             val i = h.indexOf('.')
             if (i < 0) break
             h = h.substring(i + 1)

@@ -339,7 +339,7 @@ class BrowserActivity : Activity() {
         )
 
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
-        progress.max = 100
+        progress.max = 1000
         progress.visibility = View.GONE
         progress.progressTintList = ColorStateList.valueOf(Theme.LIGHT.accent)
         bar.addView(
@@ -1118,6 +1118,10 @@ class BrowserActivity : Activity() {
         ws.setSupportMultipleWindows(true)
         ws.javaScriptCanOpenWindowsAutomatically = true
         ws.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+        // Güvenli tarama kontrolü kapalı: her sayfada "site zararlı mı" sorusunun bekleme süresi gider (Android 8+)
+        if (Build.VERSION.SDK_INT >= 26) ws.setSafeBrowsingEnabled(false)
+        // Ekran dışı alan da önceden çizilir: kaydırınca resimler/yazılar hazır gelir (Android 6+)
+        if (Build.VERSION.SDK_INT >= 23) ws.offscreenPreRaster = true
         if (mobileUa.isEmpty()) mobileUa = ws.userAgentString.replace("; wv", "")
         ws.userAgentString = if (tb.desktop) DESKTOP_UA else mobileUa
 
@@ -1611,10 +1615,43 @@ class BrowserActivity : Activity() {
         fwdBtn.alpha = if (w != null && w.canGoForward()) 1f else 0.35f
     }
 
+    private var progAnim: android.animation.ObjectAnimator? = null
+    private var progFinishing = false
+
+    private fun animateProgress(to: Int) {
+        progAnim?.cancel()
+        progAnim = android.animation.ObjectAnimator.ofInt(progress, "progress", progress.progress, to).apply {
+            duration = 350
+            interpolator = DecelerateInterpolator()
+            start()
+        }
+    }
+
     private fun updateProgress() {
         val tb = cur ?: return
-        progress.progress = tb.progress
-        progress.visibility = if (tb.loading && tb.progress < 100) View.VISIBLE else View.GONE
+        val loading = tb.loading && tb.progress < 100
+        if (loading) {
+            // Yeni yükleme: çubuk gizliyse ya da sönüyorsa baştan başlar
+            val fresh = progress.visibility != View.VISIBLE || progFinishing || progress.alpha < 0.99f
+            progFinishing = false
+            progress.animate().cancel()
+            if (fresh) { progAnim?.cancel(); progress.progress = 0 }
+            progress.alpha = 1f
+            progress.visibility = View.VISIBLE
+            animateProgress(maxOf(tb.progress, 6) * 10)
+        } else if (progress.visibility == View.VISIBLE && !progFinishing) {
+            // Bitti: sonuna kadar dolar, sonra yavaşça söner
+            progFinishing = true
+            animateProgress(1000)
+            progress.animate().alpha(0f).setStartDelay(300).setDuration(300).withEndAction {
+                if (progFinishing) {
+                    progFinishing = false
+                    progress.visibility = View.GONE
+                    progress.alpha = 1f
+                    progress.progress = 0
+                }
+            }.start()
+        }
         if (::reloadBtn.isInitialized) {
             // yüklenirken ✕ (durdur), bitince ⟳ (yenile)
             reloadBtn.text = if (tb.loading && tb.progress < 100) "✕" else "⟳"

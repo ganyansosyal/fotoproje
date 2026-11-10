@@ -18,6 +18,12 @@ class App : Application() {
             }
             old?.uncaughtException(t, e)
         }
+        // WebView'u önceden ısıt: ilk sayfa açılışındaki hazırlık süresi kısalır
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            try { android.webkit.WebView(this).destroy() } catch (_: Throwable) {}
+        }
+        // Hazır reklam listesi: arka planda, düşük öncelikle indirilir/okunur
+        Thread { AdBlock.init(this) }.apply { priority = Thread.MIN_PRIORITY }.start()
         Store.init(this)
         Downloads.load()
         FavIcons.load()
