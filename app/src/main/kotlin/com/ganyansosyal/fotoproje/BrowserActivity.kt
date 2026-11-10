@@ -272,7 +272,14 @@ class BrowserActivity : Activity() {
         }
 
         // ---- sayfa alanı
-        content = FrameLayout(this)
+        val sn = SwipeNav(this)
+        sn.canBack = { cur?.web?.canGoBack() == true }
+        sn.canFwd = { cur?.web?.canGoForward() == true }
+        sn.onBack = { cur?.web?.let { if (it.canGoBack()) it.goBack() } }
+        sn.onFwd = { cur?.web?.let { if (it.canGoForward()) it.goForward() } }
+        sn.allowed = { tabsLayer.visibility != View.VISIBLE }
+        sn.isDark = { dark }
+        content = sn
         content.clipChildren = true
         root.addView(
             content,
@@ -795,6 +802,7 @@ class BrowserActivity : Activity() {
     private fun destroyWeb(tb: Tab) {
         val w = tb.web
         if (w != null) {
+            if (!tb.isHome) tb.restore = snapState(w) ?: tb.restore
             (w.parent as? ViewGroup)?.removeView(w)
             try {
                 w.stopLoading()
@@ -820,9 +828,40 @@ class BrowserActivity : Activity() {
                 tb.isHome = true
                 loadHome(tb)
             } else {
-                tb.web?.loadUrl(tb.url)
+                val st = tb.restore
+                tb.restore = null
+                val ok = st != null && try { tb.web?.restoreState(st) != null } catch (_: Throwable) { false }
+                if (!ok) tb.web?.loadUrl(tb.url)
             }
         }
+    }
+
+    private fun snapState(w: WebView): android.os.Bundle? = try {
+        val b = android.os.Bundle()
+        val l = w.saveState(b)
+        if (l != null && l.size > 0) b else null
+    } catch (_: Throwable) { null }
+
+    private fun stateFile(i: Int) = java.io.File(java.io.File(filesDir, "ts").apply { mkdirs() }, "$i.bin")
+
+    private fun writeState(i: Int, b: android.os.Bundle) {
+        val pc = android.os.Parcel.obtain()
+        try {
+            pc.writeBundle(b)
+            stateFile(i).writeBytes(pc.marshall())
+        } finally { pc.recycle() }
+    }
+
+    private fun readState(i: Int): android.os.Bundle? {
+        val f = stateFile(i)
+        if (!f.exists()) return null
+        val pc = android.os.Parcel.obtain()
+        return try {
+            val by = f.readBytes()
+            pc.unmarshall(by, 0, by.size)
+            pc.setDataPosition(0)
+            pc.readBundle(WebView::class.java.classLoader)
+        } catch (_: Throwable) { null } finally { pc.recycle() }
     }
 
     private fun attachWeb(w: WebView) {
@@ -1063,6 +1102,10 @@ class BrowserActivity : Activity() {
                 o.put("u", u)
                 o.put("t", tb.title)
                 o.put("d", tb.desktop)
+                if (!tb.isHome) {
+                    val st = tb.web?.let { snapState(it) } ?: tb.restore
+                    if (st != null) { writeState(arr.length(), st); o.put("s", true) }
+                }
                 if (tb === cur) ci = arr.length()
                 arr.put(o)
             }
@@ -1082,6 +1125,7 @@ class BrowserActivity : Activity() {
                     val tb = makeTab(o.optString("u", HOME))
                     tb.title = o.optString("t", "")
                     tb.desktop = o.optBoolean("d", false)
+                    if (o.optBoolean("s", false)) tb.restore = readState(i)
                     tabs.add(tb)
                 }
                 idx = prefs.getInt("cur", 0)

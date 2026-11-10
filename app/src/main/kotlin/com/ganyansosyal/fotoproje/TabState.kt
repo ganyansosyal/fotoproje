@@ -18,6 +18,7 @@ class NetCand(val url: String, val kind: String, var t: Long)
  */
 class Tab(val id: Int, var url: String) {
     var web: WebView? = null
+    var restore: android.os.Bundle? = null // kaydedilmiş WebView geçmişi (geri/ileri listesi)
     var title = ""
     var desktop = false
     var isHome = false
