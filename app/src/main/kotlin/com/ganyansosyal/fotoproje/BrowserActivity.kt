@@ -1459,6 +1459,11 @@ class BrowserActivity : Activity() {
         }
         when (name) {
             "player" -> onPlayer(tb, arr.optString(0))
+            // JS hook'u yeni video adayı buldu (oynatıcı beklemeden)
+            "cand" -> {
+                val cu = arr.optString(0)
+                if (cu.startsWith("http")) noteNet(tb, cu, false, null, arr.optString(1))
+            }
             "perf" -> if (tb === cur) onPerf(arr.optInt(0), arr.optInt(1), arr.optInt(2))
             // Ana sayfa düğmeleri yalnızca ana sayfada geçerlidir
             "addFav" -> if (tb.isHome) showAddFav()
@@ -2204,7 +2209,8 @@ class BrowserActivity : Activity() {
 
     private fun noteNet(
         tb: Tab, u0: String, ranged: Boolean = false,
-        requestHeaders: Map<String, String>? = null
+        requestHeaders: Map<String, String>? = null,
+        forceKind: String = ""
     ) {
         if (u0.length > 2500) return
         if (isYtTab(tb)) return // YouTube'da ağ adayı toplanmaz
@@ -2235,6 +2241,7 @@ class BrowserActivity : Activity() {
         if (kind2.isEmpty() && ranged && u.startsWith("http") && !NOT_MEDIA_RE.containsMatchIn(u)) {
             kind2 = "sniff" // türü bilinmiyor: Probe ilk baytlara / Content-Type'a bakarak anlar
         }
+        if (kind2.isEmpty() && forceKind.isNotEmpty()) kind2 = forceKind // JS hook'u içerikten tanıdı
         if (kind2.isEmpty()) return
         val now = System.currentTimeMillis()
         var isNew = true

@@ -60,9 +60,13 @@ object Media {
  function good(u){ if(!u||SEGQ.test(u)) return false;
   var p=u.split('#')[0].split('?')[0]; return !SEGN.test(p.substring(p.lastIndexOf('/')+1)); }
  // Adaylar sadece kaydedilir; Flutter'a oynatıcı açılınca bildirilir.
+ // Yeni adayı hemen yerel tarafa bildirir (oynatıcıya tıklanmasını beklemez).
+ var pushed={}, pushN=0;
+ function push(u,k){ try{ if(pushed[u]||pushN>400) return; pushed[u]=1; pushN++;
+   window.flutter_inappwebview.callHandler('cand',u,k||''); }catch(e){} }
  function note(u,k){ u=norm(u); if(u) u=unrange(u); if(!u||!good(u)) return; var now=Date.now();
   for(var i=0;i<cand.length;i++){ if(cand[i].u===u){ cand[i].t=now; if(k&&!cand[i].k) cand[i].k=k; poke(); return; } }
-  cand.push({u:u,k:k||'',t:now}); if(cand.length>60) cand.shift(); poke(); }
+  cand.push({u:u,k:k||'',t:now}); if(cand.length>60) cand.shift(); push(u,k); poke(); }
  function ctype(c,u,cr,cl){ c=(c||'').toLowerCase(); if(!u) return;
   if(c.indexOf('mpegurl')>-1){ note(u,'m3u8'); return; }
   if(c.indexOf('dash+xml')>-1){ note(u,'mpd'); return; }
@@ -91,6 +95,11 @@ object Media {
  function igPage(){ if(!igHost()) return; try{ var ss=document.querySelectorAll('script[type="application/json"]');
    for(var i=0;i<ss.length;i++) igScan(ss[i].textContent); }catch(e){} }
  if(igHost()){ window.addEventListener('load',function(){ setTimeout(igPage,800); setTimeout(igPage,3000); }); }
+ // Genel API taraması: JSON yanıtlarının içine gömülü .m3u8/.mpd/.mp4 adresleri (tüm siteler).
+ function apiScan(t){ try{ if(!t||t.length<20||t.length>2000000) return;
+   t=String(t).replace(/\\u0026/g,'&').replace(/\\\//g,'/');
+   var re=/https?:\/\/[^"'\s<>\\]+?\.(?:m3u8|mpd|mp4)(?:\?[^"'\s<>\\]*)?(?=["'\\\s<>]|${'$'})/gi, m, n=0;
+   while((m=re.exec(t))&&n++<30) note(m[0],/\.m3u8/i.test(m[0])?'m3u8':/\.mpd/i.test(m[0])?'mpd':'mp4'); }catch(e){} }
  var xo=XMLHttpRequest.prototype.open;
  XMLHttpRequest.prototype.open=function(m,u){ var x=this;
   try{ if(RE.test(String(u))) note(u);
@@ -99,6 +108,7 @@ object Media {
     var cl=parseInt(x.getResponseHeader('content-length')||'0',10)||0;
     ctype(c,ru,x.getResponseHeader('content-range'),x.getResponseHeader('content-length'));
     if(igHost()&&/json|javascript|text/i.test(c)){ var rt0=x.responseType; if(rt0===''||rt0==='text') igScan(x.responseText); }
+    else if(/json/i.test(c)&&cl<1500000){ var rt1=x.responseType; if(rt1===''||rt1==='text') apiScan(x.responseText); }
     if(!sniffOK(c)||cl>1500000) return;
     var rt=x.responseType;
     if(rt===''||rt==='text') sniff((x.responseText||'').slice(0,512),ru);
@@ -114,6 +124,7 @@ object Media {
    var cl=parseInt(r.headers.get('content-length')||'0',10)||0;
    ctype(c,ru,r.headers.get('content-range'),r.headers.get('content-length'));
    if(igHost()&&/json|javascript|text/i.test(c)){ try{ r.clone().text().then(igScan).catch(function(){}); }catch(e){} }
+   else if(/json/i.test(c)&&cl<1500000){ try{ r.clone().text().then(apiScan).catch(function(){}); }catch(e){} }
    if(!sniffOK(c)||cl>1500000||!r.body) return;
    var rd=r.clone().body.getReader();
    rd.read().then(function(s){ try{rd.cancel();}catch(e){}
