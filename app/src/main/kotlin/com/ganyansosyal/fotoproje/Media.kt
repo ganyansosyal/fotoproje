@@ -175,10 +175,10 @@ object Media {
    if(q.width>0&&q.height>0&&q.right>r.left&&q.left<r.right&&q.bottom>r.top&&q.top<r.bottom) return true;
   }
  }catch(e){} return false; }
- setInterval(function(){ if(act) sched(50); },1500);
+ setInterval(function(){ if(act) sched(50); },800);
  function report(){ ft=0; var v=act; if(!v) return;
   if(!alive(v)){ stop(); return; }
-  var d=v.duration; if(isNaN(d)){ sched(600); return; }
+  var d=v.duration; if(isNaN(d)){ sched(200); return; }
   if(!qual(v)) return;
   var live=!isFinite(d), src=v.currentSrc||'', urls=[], hints={}, i;
   var direct=/^https?:/i.test(src)&&good(src);
@@ -202,11 +202,12 @@ object Media {
  function onEv(e){ var v=e.target; if(!v||v.tagName!=='VIDEO') return; var t=e.type;
   if(t==='loadstart'){ t0.set(v,Date.now()); if(v===act) last=''; return; }
   if(t==='emptied'||t==='abort'){ if(v===act) stop(); return; }
-  if(t==='durationchange'||t==='loadedmetadata'){ if(v===act){ last=''; sched(400); return; } if(v.paused) return; }
+  if(t==='durationchange'||t==='loadedmetadata'){ if(v===act){ last=''; sched(100); return; } if(v.paused) return; }
   if(!qual(v)) return;
   if(act!==v){ act=v; last=''; }
   if(!wd) wd=setInterval(function(){ if(act&&!alive(act)) stop(); },2000);
-  sched(300);
+  sched(80);
+  setTimeout(function(){ if(act===v) sched(10); },1200);
   setTimeout(function(){ if(act===v) sched(10); },2500);
   setTimeout(function(){ if(act===v) sched(10); },6000); }
  ['loadstart','playing','durationchange','loadedmetadata','emptied','abort'].forEach(function(n){

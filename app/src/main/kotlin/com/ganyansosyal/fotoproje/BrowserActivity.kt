@@ -2251,7 +2251,7 @@ class BrowserActivity : Activity() {
                 if (tb.netCands.size > 120) tb.netCands.removeAt(0)
             }
         }
-        if (isNew && tb.playerId != null) ui.post { scheduleProbe(tb) }
+        if (isNew && tb.playerId != null && tb.found.isEmpty()) ui.post { scheduleProbe(tb) }
     }
 
     // ---- oynatıcı bildirimi (hookJs'ten)
@@ -2329,7 +2329,7 @@ class BrowserActivity : Activity() {
         ui.removeCallbacks(r)
         if (tb.playerId == null) return
         // Video açılır açılmaz bulunsun: oynatıcı beklenmez, ağdan gelen adaylar hemen incelenir
-        ui.postDelayed(r, if (tb.playerId == null) 400 else 600)
+        ui.postDelayed(r, 150)
     }
 
     private fun probeArgs(tb: Tab): Map<String, Any?> {
@@ -2358,8 +2358,14 @@ class BrowserActivity : Activity() {
         }
 
         val gen = ++tb.probeGen
+        val startDur = tb.pDur
+        val startSrc = tb.pSrc
+        val startId = tb.playerId
+        // Video değişmediyse (yalnızca yeni aday geldiyse) sonuç atılmaz
+        fun stale() = tb.playerId == null || tb.playerId != startId ||
+            Math.abs(tb.pDur - startDur) > 0.5 || tb.pSrc != startSrc
         dart("probe", probeArgs(tb), { r ->
-            if (gen != tb.probeGen || tb.playerId == null) {
+            if (stale()) {
                 onDone?.invoke(tb.found)
                 return@dart
             }
@@ -2404,7 +2410,7 @@ class BrowserActivity : Activity() {
                 // Reklam oynarken bulunan akışlar reklamdır: liste boş kalır, reklam bitince yeniden incelenir
                 val result = if (tb.pAd) emptyList() else expanded.distinctBy { it.url }
                 runOnUiThread {
-                    if (isFinishing || gen != tb.probeGen || tb.playerId == null) {
+                    if (isFinishing || stale() || (gen != tb.probeGen && tb.found.isNotEmpty())) {
                         onDone?.invoke(tb.found)
                         return@runOnUiThread
                     }

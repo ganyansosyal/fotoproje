@@ -1,7 +1,10 @@
 package com.ganyansosyal.fotoproje
 
 import java.util.concurrent.Callable
+import java.util.concurrent.ExecutorCompletionService
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.ConcurrentHashMap
 
 /** Bulunan bir video bağlantısının incelenmiş hâli (eski probe.dart). */
 class Variant(val bw: Int, val height: Int, val audio: Boolean = true)
@@ -55,6 +58,32 @@ class MediaInfo(val url: String, var kind: String) {
 object Probe {
     private val pool = Executors.newFixedThreadPool(6) // aynı anda en çok 6 istek
 
+    /** İncelenmiş adresler: aynı adres tekrar incelenmez (akış sürekli yeni aday getirse de hızlı kalır). */
+    private class Cached(val info: MediaInfo, val t: Long)
+    private val cache = ConcurrentHashMap<String, Cached>()
+    private val childUrls: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    private fun copyOf(e: MediaInfo): MediaInfo {
+        val m = MediaInfo(e.url, e.kind)
+        m.variants = e.variants; m.bw = e.bw; m.duration = e.duration; m.height = e.height
+        m.size = e.size; m.usable = e.usable; m.audioOnly = e.audioOnly; m.mp4Read = e.mp4Read
+        m.audio = e.audio
+        return m
+    }
+
+    private fun probeCached(u: String, hint: String, referer: String): MediaInfo {
+        val c = cache[u]
+        val now = System.currentTimeMillis()
+        if (c != null && now - c.t < 300_000) return copyOf(c.info)
+        val r = probeOne(u, hint, referer, childUrls)
+        // Süresi okunamayan sonuç (geçici hata olabilir) önbelleğe alınmaz
+        if (r.duration > 0 || !r.usable || r.kind == "blob") {
+            if (cache.size > 300) cache.clear()
+            cache[u] = Cached(copyOf(r), now)
+        }
+        return r
+    }
+
     /** Teşhis günlüğü: <uygulama dosyaları>/probe_log.txt (yalnızca host+yol yazılır, sorgu/token yazılmaz). */
     private fun short(u: String): String =
         u.substringBefore('?').substringBefore('#').let { if (it.length > 140) it.take(140) + "…" else it }
@@ -92,7 +121,7 @@ object Probe {
             } catch (e: Throwable) {
                 if (e is CanceledEx) throw e
                 last = e
-                if (k < tries - 1) try { Thread.sleep(700L * (k + 1)) } catch (_: InterruptedException) { break }
+                if (k < tries - 1) try { Thread.sleep(300L * (k + 1)) } catch (_: InterruptedException) { break }
             }
         }
         throw last ?: java.io.IOException("İstek başarısız")
@@ -131,7 +160,7 @@ object Probe {
         }
         t.isDaemon = true
         t.start()
-        t.join(8000)
+        t.join(3500)
         if (t.isAlive) return null
         return res
     }
@@ -152,7 +181,7 @@ object Probe {
         }
         t.isDaemon = true
         t.start()
-        t.join(8000)
+        t.join(3500)
         return if (t.isAlive) 0.0 else out
     }
 
@@ -549,11 +578,34 @@ object Probe {
         urls: List<String>, hints: Map<String, String>, referer: String,
         expectDur: Double = 0.0, exactSrc: String = "", height: Int = 0
     ): List<MediaInfo> {
-        val children = HashSet<String>()
-        val futures = urls.distinct().take(30).map { u ->
-            pool.submit(Callable { probeOne(u, hints[u] ?: "", referer, children) })
+        // En yeni adaylar önce (oynayan videonun dosyası genelde en sondadır), oynatıcının kendi adresi en önde
+        val ordered = urls.distinct().reversed().sortedByDescending { it == exactSrc && exactSrc.isNotEmpty() }.take(30)
+        val cs = ExecutorCompletionService<MediaInfo?>(pool)
+        for (u in ordered) cs.submit(Callable { try { probeCached(u, hints[u] ?: "", referer) } catch (_: Throwable) { null } })
+        val list = ArrayList<MediaInfo>()
+        val tolE = maxOf(1.5, expectDur * 0.03)
+        fun isMatch(e: MediaInfo) = e.usable && (e.url == exactSrc && exactSrc.isNotEmpty() ||
+            e.duration > 0 && Math.abs(e.duration - expectDur) <= tolE)
+        val t0 = System.currentTimeMillis()
+        var left = ordered.size
+        var matchAt = 0L
+        while (left > 0) {
+            val waitMs = when {
+                // Eşleşen dosya bulundu: ayrı ses dosyası için kısa bir süre daha bekle, sonra göster
+                matchAt > 0 -> 900 - (System.currentTimeMillis() - matchAt)
+                // Eşleşme yok: en çok 7 sn bekle; geride kalanlar arka planda önbelleğe dolar
+                else -> 7000 - (System.currentTimeMillis() - t0)
+            }
+            if (waitMs <= 0) break
+            val f = cs.poll(waitMs, TimeUnit.MILLISECONDS) ?: break
+            left--
+            val e = try { f.get() } catch (_: Throwable) { null } ?: continue
+            list.add(e)
+            if (expectDur > 0.5 && matchAt == 0L && isMatch(e)) matchAt = System.currentTimeMillis()
+            // Süre bilinmiyorsa (ör. canlı/bilinmeyen) ilk kullanılabilir dosyada da hızlanır
+            if (expectDur <= 0.5 && matchAt == 0L && e.usable && e.duration > 0) matchAt = System.currentTimeMillis()
         }
-        val list = futures.map { try { it.get() } catch (_: Throwable) { null } }.filterNotNull()
+        val children = childUrls
         val log = ArrayList<String>()
         log.add("referer=" + short(referer) + " expectDur=" + expectDur + " exactSrc=" + short(exactSrc))
         log.add("aday=" + urls.distinct().take(100).size + " incelenen=" + list.size)
