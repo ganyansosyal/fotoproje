@@ -71,6 +71,17 @@ object Probe {
         return m
     }
 
+    private val inflight: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    /** Arka plan ısınması: henüz oynamayan (önceden yüklenen) sıradaki videoların dosyalarını önceden inceler,
+     *  böylece kullanıcı o videoya geçince sonuç önbellekten anında gelir. */
+    fun warm(u: String, hint: String, referer: String) {
+        if (cache.containsKey(u) || !inflight.add(u)) return
+        pool.submit {
+            try { probeCached(u, hint, referer) } catch (_: Throwable) {} finally { inflight.remove(u) }
+        }
+    }
+
     private fun probeCached(u: String, hint: String, referer: String): MediaInfo {
         val c = cache[u]
         val now = System.currentTimeMillis()

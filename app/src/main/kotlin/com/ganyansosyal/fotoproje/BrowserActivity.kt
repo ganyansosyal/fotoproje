@@ -2251,7 +2251,11 @@ class BrowserActivity : Activity() {
                 if (tb.netCands.size > 120) tb.netCands.removeAt(0)
             }
         }
-        if (isNew && tb.playerId != null && tb.found.isEmpty()) ui.post { scheduleProbe(tb) }
+        if (isNew && tb.playerId != null) {
+            if (tb.found.isEmpty()) ui.post { scheduleProbe(tb) }
+            // Sonuç varken gelen adaylar sıradaki videonundur: arka planda önceden incele (kaydırınca anında bulunur)
+            else Probe.warm(u, kind2, tb.pRef ?: tb.url)
+        }
     }
 
     // ---- oynatıcı bildirimi (hookJs'ten)
