@@ -34,6 +34,10 @@ Derleme: `.github/workflows/build.yml` → `gradle :app:assembleRelease` → `ap
 - Uygulama doğrudan `BrowserActivity` ile açılır (Flutter motoru beklemek yok).
 - YouTube: `youtube_explode_dart` yerine NewPipeExtractor (JitPack, `v0.24.4`).
 
+- Video sniffer güçlendirildi: JS hook'u (`Media.HOOK_JS`) bulduğu her yeni adayı `callHandler('cand', url, kind)` ile
+  hemen Kotlin'e bildirir (`onJs` -> `noteNet(..., forceKind)`); JSON API yanıtlarındaki `.m3u8/.mpd/.mp4` adresleri
+  tüm sitelerde taranır (`apiScan`). Ağ katmanı (`shouldInterceptRequest` -> `noteNet`) aynen korundu.
+
 ## Bilinen durum / uyarılar
 - **Kod derlenip denenmedi** (taşıma ortamında Kotlin derleyicisi / ağ yoktu). İlk build'de hata çıkabilir; log'a göre düzelt.
 - NewPipeExtractor sürümü (`v0.24.4`) doğrulanmadı; JitPack'te yoksa güncel etiketi kullan. `Downloader` arayüzü sürüme göre
