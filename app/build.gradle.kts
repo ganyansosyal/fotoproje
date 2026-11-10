@@ -11,7 +11,7 @@ android {
         applicationId = "com.ganyansosyal.fotoproje"
         minSdk = 24
         targetSdk = 36
-        versionCode = 31
+        versionCode = 32
         versionName = "1.0.0"
         // yt-dlp + ffmpeg yalnızca gerçek telefon işlemcileri için (APK boyutunu küçültür)
         ndk { abiFilters += setOf("arm64-v8a", "armeabi-v7a") }
