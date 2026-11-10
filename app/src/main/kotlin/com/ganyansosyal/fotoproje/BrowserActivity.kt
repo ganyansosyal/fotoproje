@@ -1596,7 +1596,7 @@ class BrowserActivity : Activity() {
     /** Sayfanın kaynağındaki video adreslerini bulup inceler; bulunursa indirme seçeneklerini açar. */
     private fun scanPage(tb: Tab, silent: Boolean = false) {
         val w = tb.web ?: return
-        if (isYtTab(tb) || tb.playerId == null) return // oynayan video yoksa / YouTube'da tarama yok
+        if (isYtTab(tb)) return // YouTube'da tarama yok
         w.evaluateJavascript(Media.SCAN_JS) { raw ->
             val urls = ArrayList<String>()
             val netHints = HashMap<String, String>()
@@ -1616,8 +1616,8 @@ class BrowserActivity : Activity() {
             if ((!silent && !tb.autoShow) || tb.found.isNotEmpty()) return@evaluateJavascript
             if (silent && candidates.isEmpty()) return@evaluateJavascript
             if (candidates.isEmpty()) {
-                tb.autoShow = false
-                if (tb === cur) toast(t("noVideo"))
+                // Sayfada/ağda hiçbir şey yok: sayfayı (HTML, iframe, script) arka planda indirip tara
+                pageScanFallback(tb)
                 return@evaluateJavascript
             }
             val ref = tb.web?.url ?: tb.url
@@ -1641,12 +1641,44 @@ class BrowserActivity : Activity() {
                         tb.autoShow = false
                         if (tb === cur) { updateFab(); showFound() }
                     } else if (list.isEmpty() && tb.autoShow && tb.found.isEmpty()) {
-                        tb.autoShow = false
-                        if (tb === cur) toast(t("noVideo"))
+                        pageScanFallback(tb)
                     }
                 }
             }.start()
         }
+    }
+
+    /**
+     * Son çare: WebView'den bağımsız olarak sayfanın HTML'ini, iframe'lerini ve oynatıcı script'lerini
+     * indirip içindeki video adreslerini bulur. Oynatıcı hata verip hiç açılmayan videolar için.
+     */
+    private fun pageScanFallback(tb: Tab) {
+        val page = tb.web?.url ?: tb.url
+        if (!page.startsWith("http")) {
+            tb.autoShow = false
+            if (tb === cur) toast(t("noVideo"))
+            return
+        }
+        Thread {
+            val hits = try { PageScan.scan(page, true) { isFinishing } } catch (_: Throwable) { emptyList() }
+            val list = if (hits.isEmpty()) emptyList() else try {
+                Probe.probeAll(hits.map { it.url }, emptyMap(), page).map {
+                    FoundItem(it.url, it.kind, it.title, it.subtitle, it.height, it.duration, it.size, it.bw)
+                }
+            } catch (_: Throwable) {
+                emptyList()
+            }
+            ui.post {
+                tb.autoShow = false
+                if (list.isNotEmpty() && tb.found.isEmpty()) {
+                    tb.found = list
+                    prefetchThumb(tb, list)
+                    if (tb === cur) { updateFab(); showFound() }
+                } else if (tb.found.isEmpty() && tb === cur) {
+                    toast(t("noVideo"))
+                }
+            }
+        }.start()
     }
 
     private fun updateStar() {
@@ -2251,8 +2283,12 @@ class BrowserActivity : Activity() {
                 if (tb.netCands.size > 120) tb.netCands.removeAt(0)
             }
         }
-        if (isNew && tb.playerId != null) ui.post { scheduleProbe(tb) }
+        // Oynatıcı hiç başlamasa (hata/engel) bile ağdan gelen adaylar incelenir
+        if (isNew) ui.post { scheduleProbe(tb) }
     }
+
+    /** İncelenecek bir şey var mı: oynatıcı bildirdi ya da ağdan/JSON'dan taze aday geldi. */
+    private fun canProbe(tb: Tab): Boolean = tb.playerId != null || hasNet(tb)
 
     // ---- oynatıcı bildirimi (hookJs'ten)
     private fun onPlayer(tb: Tab, raw: String) {
@@ -2260,6 +2296,11 @@ class BrowserActivity : Activity() {
         val m = try {
             JSONObject(raw)
         } catch (_: Exception) {
+            return
+        }
+        // Sayfanın JSON/API yanıtında bulunan video adresleri: oynatıcı başlamasa bile aday olur
+        m.optJSONArray("cand")?.let { a ->
+            for (i in 0 until a.length()) noteNet(tb, a.optString(i))
             return
         }
         val id = m.optString("id")
@@ -2327,7 +2368,9 @@ class BrowserActivity : Activity() {
     private fun scheduleProbe(tb: Tab) {
         val r = tb.probeRun ?: Runnable { runProbe(tb, null) }.also { tb.probeRun = it }
         ui.removeCallbacks(r)
-        if (tb.playerId == null) return
+        if (!canProbe(tb)) return
+        // Oynatıcı yokken sonuç zaten bulunduysa tekrar tekrar incelenmez
+        if (tb.playerId == null && tb.found.isNotEmpty()) return
         // Video açılır açılmaz bulunsun: oynatıcı beklenmez, ağdan gelen adaylar hemen incelenir
         ui.postDelayed(r, if (tb.playerId == null) 400 else 600)
     }
@@ -2352,14 +2395,14 @@ class BrowserActivity : Activity() {
     }
 
     private fun runProbe(tb: Tab, onDone: ((List<FoundItem>) -> Unit)?) {
-        if (tb.playerId == null) {
+        if (!canProbe(tb)) {
             onDone?.invoke(emptyList())
             return
         }
 
         val gen = ++tb.probeGen
         dart("probe", probeArgs(tb), { r ->
-            if (gen != tb.probeGen || tb.playerId == null) {
+            if (gen != tb.probeGen || !canProbe(tb)) {
                 onDone?.invoke(tb.found)
                 return@dart
             }
@@ -2410,14 +2453,15 @@ class BrowserActivity : Activity() {
                 val result = if (tb.pAd) expanded.filter { isDmContent(it.url) }.distinctBy { it.url }
                 else expanded.distinctBy { it.url }
                 runOnUiThread {
-                    if (isFinishing || gen != tb.probeGen || tb.playerId == null) {
+                    if (isFinishing || gen != tb.probeGen || !canProbe(tb)) {
                         onDone?.invoke(tb.found)
                         return@runOnUiThread
                     }
                     tb.found = result
                     prefetchThumb(tb, result)
                     if (tb === cur) updateFab()
-                    if (result.isNotEmpty() && !tb.bannerDone) {
+                    // Oynatıcı yokken bulunanlar sessizce hazır tutulur (düğmeye basınca listelenir)
+                    if (result.isNotEmpty() && !tb.bannerDone && tb.playerId != null) {
                         tb.bannerDone = true
                         if (tb === cur) toast(t("videoFound"))
                     }
@@ -2641,11 +2685,7 @@ class BrowserActivity : Activity() {
             toast(t("ytNoDl"))
             return
         }
-        // Oynayan video yoksa sayfa taranmaz (sayfadaki önizleme/reklam videoları bulunmasın)
-        if (tb.playerId == null) {
-            toast(t("noVideo"))
-            return
-        }
+        // Oynatıcı hata verse / hiç başlamasa da bulunanlara, ağ kayıtlarına ve sayfa kaynağına bakılır
         if (tb.found.isNotEmpty()) {
             showFound() // bulunan videoları seçenek olarak göster
             return
@@ -2669,10 +2709,6 @@ class BrowserActivity : Activity() {
         val tb = cur ?: return
         if (isYtTab(tb)) { toast(t("ytNoDl")); return }
         if (tb.found.isEmpty()) {
-            if (tb.playerId == null) {
-                toast(t("noVideo"))
-                return
-            }
             toast(t("checking"))
             probeThenScan(tb)
             return
