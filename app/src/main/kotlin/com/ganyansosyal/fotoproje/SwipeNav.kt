@@ -77,12 +77,14 @@ class SwipeNav(ctx: Context) : FrameLayout(ctx) {
             }
             MotionEvent.ACTION_MOVE -> if (side != 0 && !dragging) {
                 val p = if (side < 0) e.x - downX else downX - e.x
-                if (p > slop && p > Math.abs(e.y - downY)) {
+                val dy = Math.abs(e.y - downY)
+                // Yalnızca belirgin yatay çekiş geri/ileri sayılır; dikey kayma hemen iptal eder
+                if (p > slop * 2 && p > dy * 2.5f) {
                     dragging = true
                     parent?.requestDisallowInterceptTouchEvent(true)
                     return true
                 }
-                if (Math.abs(e.y - downY) > slop * 2) side = 0
+                if (dy > slop) side = 0
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> side = 0
         }

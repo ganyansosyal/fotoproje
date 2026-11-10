@@ -1165,7 +1165,7 @@ class BrowserActivity : Activity() {
         // Güvenli tarama kontrolü kapalı: her sayfada "site zararlı mı" sorusunun bekleme süresi gider (Android 8+)
         if (Build.VERSION.SDK_INT >= 26) ws.setSafeBrowsingEnabled(false)
         // Ekran dışı alan da önceden çizilir: kaydırınca resimler/yazılar hazır gelir (Android 6+)
-        if (Build.VERSION.SDK_INT >= 23) ws.offscreenPreRaster = true
+        // offscreenPreRaster kapalı: zayıf telefonlarda kaydırmayı ağırlaştırıyordu
         if (mobileUa.isEmpty()) mobileUa = ws.userAgentString.replace("; wv", "")
         ws.userAgentString = if (tb.desktop) DESKTOP_UA else mobileUa
 
@@ -1365,6 +1365,10 @@ class BrowserActivity : Activity() {
             }
         }
 
+        w.setOnTouchListener { _, e ->
+            if (tb === cur) onWebTouch(e.actionMasked)
+            false
+        }
         if (Build.VERSION.SDK_INT >= 23) {
             w.setOnScrollChangeListener { _, _, y, _, oldY ->
                 if (tb === cur) onScrolled(y, oldY)
@@ -1735,6 +1739,9 @@ class BrowserActivity : Activity() {
             }
             updateStar()
             toast(t(if (wasOn) "bookmarkRemoved" else "bookmarkAdded"))
+            // Yıldız: ana sayfadaki "Sık kullandığın siteler" listesine de ekler / kaldırır
+            if (wasOn) dart("removeFavorite", mapOf("url" to tb.url), { reloadHomeTabs() })
+            else dart("addFavorite", mapOf("name" to "", "url" to tb.url), { reloadHomeTabs() })
         }, { toast(t("failed")) })
     }
 
@@ -1751,9 +1758,29 @@ class BrowserActivity : Activity() {
         if ((d > 0) != (acc > 0)) acc = 0
         acc += d
         if (acc > dp(40)) {
-            setBar(false)
+            setBarSoft(false)
         } else if (acc < -dp(16)) {
-            setBar(true)
+            setBarSoft(true)
+        }
+    }
+
+    // Parmak ekrandayken WebView'ı kaydırmak dokunuş koordinatını kaydırıp titreme yapar:
+    // parmak varken yalnızca istek not edilir, parmak kalkınca uygulanır.
+    private var touching = false
+    private var pendingBar: Boolean? = null
+
+    private fun setBarSoft(show: Boolean) {
+        if (touching) pendingBar = show else setBar(show)
+    }
+
+    private fun onWebTouch(action: Int) {
+        when (action) {
+            android.view.MotionEvent.ACTION_DOWN -> { touching = true; pendingBar = null }
+            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                touching = false
+                pendingBar?.let { setBar(it) }
+                pendingBar = null
+            }
         }
     }
 
