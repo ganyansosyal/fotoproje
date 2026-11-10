@@ -1,4 +1,4 @@
-name: Build APK
+name: Build AAB + APK
 
 on:
   workflow_dispatch:
@@ -18,15 +18,33 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: APK derle
+      - name: Keystore hazirla (secret varsa)
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> $GITHUB_ENV
+          fi
+
+      - name: AAB + APK derle
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           set +e
-          gradle :app:assembleRelease --no-daemon > build.log 2>&1
+          gradle :app:bundleRelease :app:assembleRelease --no-daemon > build.log 2>&1
           code=$?
           echo "=========== HATA OZETI ==========="
           grep -E "^e: |What went wrong|Could not|error:" -A4 build.log | head -60
           echo "=========== OZET SONU ==========="
           exit $code
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: play-aab
+          path: app/build/outputs/bundle/release/app-release.aab
 
       - uses: actions/upload-artifact@v4
         with:
