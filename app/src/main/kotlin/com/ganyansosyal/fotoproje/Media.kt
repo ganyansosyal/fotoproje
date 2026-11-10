@@ -91,15 +91,6 @@ object Media {
  function igPage(){ if(!igHost()) return; try{ var ss=document.querySelectorAll('script[type="application/json"]');
    for(var i=0;i<ss.length;i++) igScan(ss[i].textContent); }catch(e){} }
  if(igHost()){ window.addEventListener('load',function(){ setTimeout(igPage,800); setTimeout(igPage,3000); }); }
- // Genel: API/JSON yanıtında yazılı video adresleri (oynatıcı hata verip hiç oynamasa bile adres yanıtta durur).
- // Bulunan adresler oynatıcı beklenmeden Kotlin'e "cand" olarak bildirilir.
- var JRE=/https?:\/\/[^"'\s<>\\]+?\.(?:m3u8|mpd|mp4)(?:\?[^"'\s<>\\]*)?/gi;
- function jscan(t){ try{ if(!t||t.length>1500000) return; t=String(t);
-   t=t.replace(/\\u002F/gi,'/').replace(/\\\//g,'/').replace(/\\u0026/gi,'&').replace(/&amp;/g,'&');
-   var m, n=0, out=[]; JRE.lastIndex=0;
-   while((m=JRE.exec(t))&&n++<12){ var u=norm(m[0]); if(u&&good(u)){ note(u,''); out.push(u); } }
-   if(out.length) send({cand:out});
-  }catch(e){} }
  var xo=XMLHttpRequest.prototype.open;
  XMLHttpRequest.prototype.open=function(m,u){ var x=this;
   try{ if(RE.test(String(u))) note(u);
@@ -108,7 +99,6 @@ object Media {
     var cl=parseInt(x.getResponseHeader('content-length')||'0',10)||0;
     ctype(c,ru,x.getResponseHeader('content-range'),x.getResponseHeader('content-length'));
     if(igHost()&&/json|javascript|text/i.test(c)){ var rt0=x.responseType; if(rt0===''||rt0==='text') igScan(x.responseText); }
-    if(/json|javascript|text\/plain/i.test(c)&&cl<1500000){ var rt1=x.responseType; if(rt1===''||rt1==='text') jscan(x.responseText); }
     if(!sniffOK(c)||cl>1500000) return;
     var rt=x.responseType;
     if(rt===''||rt==='text') sniff((x.responseText||'').slice(0,512),ru);
@@ -124,7 +114,6 @@ object Media {
    var cl=parseInt(r.headers.get('content-length')||'0',10)||0;
    ctype(c,ru,r.headers.get('content-range'),r.headers.get('content-length'));
    if(igHost()&&/json|javascript|text/i.test(c)){ try{ r.clone().text().then(igScan).catch(function(){}); }catch(e){} }
-   if(/json|javascript|text\/plain/i.test(c)&&cl<1500000){ try{ r.clone().text().then(jscan).catch(function(){}); }catch(e){} }
    if(!sniffOK(c)||cl>1500000||!r.body) return;
    var rd=r.clone().body.getReader();
    rd.read().then(function(s){ try{rd.cancel();}catch(e){}

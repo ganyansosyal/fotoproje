@@ -17,8 +17,8 @@ object PageScan {
      */
     const val ENABLED = false
 
-    // Yalnızca gerçek video uzantıları: URL yolu bilinen video uzantısıyla bitmeli (sorgu dizisine bakılmaz)
-    private val MEDIA = Pattern.compile("\\.(m3u8|mpd|mp4|webm|mov|m4v|mkv|flv|3gp|3g2|ogv|avi|wmv|mpg|mpeg|f4v|asf|m2ts|mts)$", Pattern.CASE_INSENSITIVE)
+    // Yalnızca gerçek video uzantıları: URL yolu .mp4 veya .m3u8 ile bitmeli (sorgu dizisine bakılmaz)
+    private val MEDIA = Pattern.compile("\\.(m3u8|mp4)$", Pattern.CASE_INSENSITIVE)
     private val AD = Pattern.compile(
         "(doubleclick|googlesyndication|imasdk|adservice|adsystem|adnxs|taboola|outbrain|[/_.-]ads?[/_.-]|" +
             "advert|preroll|midroll|vast|vpaid|tracking|beacon|analytics|thumb|sprite|storyboard|preview)",
@@ -29,10 +29,10 @@ object PageScan {
     )
     private val ABS = Pattern.compile("https?://[^\\s\"'<>\\\\)\\]}]+")
     private val REL = Pattern.compile(
-        "[\"'(]((?:/|\\.\\./|\\./)?[^\"'\\s<>()]+?\\.(?:m3u8|mpd|mp4|webm|mov|m4v|mkv|flv|3gp|3g2|ogv|avi|wmv|mpg|mpeg|f4v|asf|m2ts|mts)(?:\\?[^\"'\\s<>()]*)?)[\"')]",
+        "[\"'(]((?:/|\\.\\./|\\./)?[^\"'\\s<>()]+?\\.(?:m3u8|mp4)(?:\\?[^\"'\\s<>()]*)?)[\"')]",
         Pattern.CASE_INSENSITIVE
     )
-    private val PROTO = Pattern.compile("[\"'](//[^\"'\\s<>]+?\\.(?:m3u8|mpd|mp4|webm|mov|m4v|mkv|flv|3gp|3g2|ogv|avi|wmv|mpg|mpeg|f4v|asf|m2ts|mts)[^\"'\\s<>]*)[\"']", Pattern.CASE_INSENSITIVE)
+    private val PROTO = Pattern.compile("[\"'](//[^\"'\\s<>]+?\\.(?:m3u8|mp4)[^\"'\\s<>]*)[\"']", Pattern.CASE_INSENSITIVE)
     private val IFRAME = Pattern.compile("<iframe[^>]+?(?:src|data-src)=[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE)
     private val SCRIPT = Pattern.compile("<script[^>]+?src=[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE)
     private val SKIP_JS = Pattern.compile("(jquery|bootstrap|gtag|fbevents|analytics|adsbygoogle)", Pattern.CASE_INSENSITIVE)

@@ -65,17 +65,11 @@ object Net {
         ""
     }
 
-    /** İndirilebilir video/akış uzantıları (tek kaynak). */
-    val VIDEO_EXT = setOf(
-        "m3u8", "mpd", "mp4", "webm", "mov", "m4v", "mkv", "flv", "3gp", "3g2",
-        "ogv", "avi", "wmv", "mpg", "mpeg", "f4v", "asf", "m2ts", "mts"
-    )
-
     private fun noteMediaUrl(u: String) {
         if (!u.startsWith("http")) return
         val key = pathKey(u)
         val ext = key.substringAfterLast('.', "").lowercase()
-        if (key.isEmpty() || ext !in VIDEO_EXT) return
+        if (key.isEmpty() || (ext != "mp4" && ext != "m3u8")) return
         synchronized(seenMedia) { seenMedia[key] = Seen(u.substringBefore("#"), System.currentTimeMillis()) }
     }
 
@@ -96,7 +90,7 @@ object Net {
 
     // ---- Protokol seviyesinde tür algılama (uzantı gerekmez, platformdan bağımsız)
 
-    /** Content-Type başlığından akış türü: m3u8 / mpd / mp4 / webm / mov / mkv / 3gp / flv ...; tanınmazsa null. */
+    /** Content-Type başlığından akış türü: m3u8 / mpd / mp4 / webm; tanınmazsa null. */
     fun kindFromContentType(ct: String?): String? {
         val t = ct?.substringBefore(';')?.trim()?.lowercase().orEmpty()
         return when {
@@ -104,18 +98,8 @@ object Net {
             t == "video/mp2t" || t.contains("mpeg2") -> null // TS parçası: video değil, parça
             t.contains("mpegurl") -> "m3u8"                    // application/vnd.apple.mpegurl, x-mpegurl
             t.contains("dash+xml") -> "mpd"
-            t == "video/mp4" -> "mp4"
-            t == "video/x-m4v" -> "m4v"
+            t == "video/mp4" || t == "video/x-m4v" -> "mp4"
             t == "video/webm" -> "webm"
-            t == "video/quicktime" -> "mov"
-            t == "video/x-matroska" || t == "video/matroska" -> "mkv"
-            t == "video/3gpp" -> "3gp"
-            t == "video/3gpp2" -> "3g2"
-            t == "video/x-flv" || t == "video/flv" -> "flv"
-            t == "video/ogg" -> "ogv"
-            t == "video/x-msvideo" || t == "video/avi" -> "avi"
-            t == "video/x-ms-wmv" || t == "video/x-ms-asf" -> "wmv"
-            t == "video/mpeg" -> "mpg"
             else -> null // octet-stream, text/plain vb.: ilk baytlara bakılır
         }
     }
@@ -127,27 +111,10 @@ object Net {
         if (head.trimStart().startsWith("#EXTM3U")) return "m3u8"
         if (head.contains("<MPD")) return "mpd"
         val box = String(d, 4, 4, Charsets.ISO_8859_1)
-        if (box == "ftyp") {
-            // Marka: qt   -> mov, 3gp/3g2 -> 3gp, M4V  -> m4v, F4V  -> f4v, diğerleri mp4
-            val brand = if (n >= 12) String(d, 8, 4, Charsets.ISO_8859_1) else ""
-            return when {
-                brand.startsWith("qt") -> "mov"
-                brand.startsWith("3g2") -> "3g2"
-                brand.startsWith("3g") -> "3gp"
-                brand.startsWith("M4V") -> "m4v"
-                brand.startsWith("F4V") -> "f4v"
-                else -> "mp4"
-            }
-        }
-        if (box == "moov" || box == "mdat" || box == "free" || box == "wide") return "mp4"
+        if (box == "ftyp" || box == "moov" || box == "mdat" || box == "free" || box == "wide") return "mp4"
         if (d[0] == 0x1A.toByte() && d[1] == 0x45.toByte() && d[2] == 0xDF.toByte() && d[3] == 0xA3.toByte()) {
-            // EBML: doctype "webm" ise webm, değilse (matroska) mkv
-            return if (head.contains("webm")) "webm" else "mkv"
+            return "webm"
         }
-        if (head.startsWith("FLV") && d[3] == 0x01.toByte()) return "flv"
-        if (head.startsWith("OggS")) return "ogv"
-        if (head.startsWith("RIFF") && head.length >= 12 && head.substring(8, 12) == "AVI ") return "avi"
-        if (d[0] == 0x30.toByte() && d[1] == 0x26.toByte() && d[2] == 0xB2.toByte() && d[3] == 0x75.toByte()) return "wmv"
         return null
     }
 

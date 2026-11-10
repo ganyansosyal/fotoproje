@@ -71,9 +71,9 @@ object Resolver {
             val url = o.optString("url").trim()
             if (!url.startsWith("http")) throw IOException("Çözümleyici geçerli adres döndürmedi")
             val kind = when (val e = extOf(url)) {
-                in Net.VIDEO_EXT -> e
-                else -> o.optString("kind").lowercase().takeIf { it in Net.VIDEO_EXT }
-                    ?: throw IOException("Desteklenmeyen tür")
+                "mp4", "m3u8" -> e
+                else -> o.optString("kind").lowercase().takeIf { it == "mp4" || it == "m3u8" }
+                    ?: throw IOException("Desteklenmeyen tür (yalnızca .mp4 / .m3u8)")
             }
             return Result(
                 url, kind,

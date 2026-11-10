@@ -462,7 +462,7 @@ object Probe {
                 // Boyut / süre eşiği yok: video biçimindeki her dosya aday olur
                 Unit
             }
-            if (info.usable && kind in setOf("mp4", "m4v", "mov", "3gp", "3g2", "f4v")) {
+            if (info.usable && kind in setOf("mp4", "m4v", "mov", "3gp")) {
                 // Önce MP4 başlığından oku (hızlı, güvenilir): süre, çözünürlük, görüntü/ses izi
                 val mi = mp4Info(url, referer)
                 if (mi != null) {
