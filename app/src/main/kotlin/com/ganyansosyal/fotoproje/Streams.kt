@@ -41,7 +41,7 @@ object Streams {
             }
             if (body.contains("#EXT-X-STREAM-INF")) return u // ana liste
         }
-        return m3u8.firstOrNull() ?: list.firstOrNull { ext(it) == "mp4" }
+        return m3u8.firstOrNull() ?: list.firstOrNull { ext(it) in Net.VIDEO_EXT && ext(it) != "m3u8" && ext(it) != "mpd" }
     }
 
     /**

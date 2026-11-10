@@ -434,7 +434,7 @@ object Downloads {
         } catch (e: IOException) {
             if (e === bad || e.message == bad.message) throw e
             // Çözücü bu kapsayıcıyı (avi/flv/wmv...) tanımıyor: doğrulanamaz, dosya kabul edilir
-            if (kind in setOf("mp4", "mov", "m4v", "3gp", "webm", "mkv")) { f.delete(); throw bad }
+            if (kind in setOf("mp4", "mov", "m4v", "3gp", "3g2", "f4v", "webm", "mkv")) { f.delete(); throw bad }
         } catch (_: Throwable) {
         } finally {
             try { ex.release() } catch (_: Throwable) {}
@@ -698,7 +698,7 @@ object Downloads {
         }
         task.path = dest.path
         task.size = dest.length()
-        if (dest.extension.lowercase() in setOf("mp4", "mov", "m4v", "3gp", "webm", "mkv") && !Mux.hasFrame(dest.path)) {
+        if (dest.extension.lowercase() in setOf("mp4", "mov", "m4v", "3gp", "3g2", "f4v", "webm", "mkv") && !Mux.hasFrame(dest.path)) {
             val codec = try {
                 val ex = MediaExtractor()
                 try {
@@ -722,7 +722,7 @@ object Downloads {
     }
 
     /** İndirmeye izin verilen uzantılar (sorgu dizisine değil, URL yoluna bakılır). */
-    private val ALLOWED_EXT = setOf("m3u8", "mpd", "mp4", "webm", "mov", "m4v", "mkv", "flv", "3gp", "3g2", "ogv", "avi", "wmv", "mpg", "mpeg", "f4v", "asf", "m2ts", "mts")
+    private val ALLOWED_EXT = Net.VIDEO_EXT
 
     private fun pathExt(url: String): String = try {
         java.net.URI(url.substringBefore("#")).path.orEmpty()
@@ -989,6 +989,8 @@ object Gallery {
         "flv" -> "video/x-flv"
         "3gp" -> "video/3gpp"
         "3g2" -> "video/3gpp2"
+        "f4v" -> "video/x-f4v"
+        "m4v" -> "video/x-m4v"
         "ogv" -> "video/ogg"
         "avi" -> "video/x-msvideo"
         "wmv", "asf" -> "video/x-ms-wmv"

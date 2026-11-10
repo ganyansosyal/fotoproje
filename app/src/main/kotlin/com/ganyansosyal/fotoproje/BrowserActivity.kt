@@ -2382,9 +2382,13 @@ class BrowserActivity : Activity() {
             } ?: emptyList()
 
             val wantDur = if (tb.pLive) 0.0 else tb.pDur
+            // Dailymotion: reklam oynarken ekrandaki süre reklamın süresidir; asıl video akışı (manifest)
+            // süre eşleşmesine takılmasın, reklam bitmeden bulunsun.
+            val adNow = tb.pAd
             val original = if (wantDur > 0.5) {
                 val tol = maxOf(1.5, wantDur * 0.03)
                 original0.filter { it.kind == "blob" || it.duration <= 0 && it.url.startsWith("blob:") ||
+                    (adNow && isDmContent(it.url)) ||
                     (it.duration > 0 && Math.abs(it.duration - wantDur) <= tol) }
             } else original0
 
@@ -2402,7 +2406,9 @@ class BrowserActivity : Activity() {
                 expanded.addAll(original)
 
                 // Reklam oynarken bulunan akışlar reklamdır: liste boş kalır, reklam bitince yeniden incelenir
-                val result = if (tb.pAd) emptyList() else expanded.distinctBy { it.url }
+                // (Dailymotion'ın asıl video akışı reklamdan ayrı adrestir; reklam sürerken de listelenir)
+                val result = if (tb.pAd) expanded.filter { isDmContent(it.url) }.distinctBy { it.url }
+                else expanded.distinctBy { it.url }
                 runOnUiThread {
                     if (isFinishing || gen != tb.probeGen || tb.playerId == null) {
                         onDone?.invoke(tb.found)
@@ -2425,6 +2431,15 @@ class BrowserActivity : Activity() {
         }, {
             onDone?.invoke(emptyList())
         })
+    }
+
+    /** Dailymotion'ın asıl video akışı (reklam değil): dailymotion.com / dmcdn.net üzerindeki m3u8/mpd. */
+    private fun isDmContent(url: String): Boolean {
+        val u = try { Uri.parse(url) } catch (_: Throwable) { return false }
+        val h = u.host?.lowercase().orEmpty()
+        if (!(h.endsWith("dailymotion.com") || h.endsWith("dmcdn.net") || h.contains("dm-event"))) return false
+        val p = u.path.orEmpty().lowercase()
+        return p.endsWith(".m3u8") || p.endsWith(".mpd") || p.contains("/cdn/manifest/")
     }
 
     private fun isHlsUrl(url: String, kind: String): Boolean {
