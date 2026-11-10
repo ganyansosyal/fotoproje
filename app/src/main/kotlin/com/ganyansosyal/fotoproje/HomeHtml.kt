@@ -34,7 +34,7 @@ object HomeHtml {
             tiles.append("<a class=\"t\" href=\"${esc(u)}\"><div class=\"i\">$img</div><span>${esc(name)}</span></a>")
         }
         tiles.append(
-            "<a class=\"t\" href=\"#\" id=\"addfav\"><div class=\"i\" style=\"background:$sub;color:$bg\">+</div>" +
+            "<a class=\"t\" href=\"#\" id=\"addfav\"><div class=\"i\" style=\"background:#2563eb;color:#fff\">+</div>" +
                 "<span>${esc(L.t("add"))}</span></a>"
         )
         return TEMPLATE
@@ -57,12 +57,12 @@ p{text-align:center;margin:0 0 20px;color:@@sub@@;font-size:12px}
 form{max-width:520px;margin:0 auto 30px}
 input{width:100%;box-sizing:border-box;padding:12px 16px;border-radius:8px;
 background:@@card@@;color:@@fg@@;font-size:14px;outline:none;border:1px solid @@line@@}
-.g{display:grid;grid-template-columns:repeat(4,1fr);gap:18px 8px;max-width:520px;margin:auto}
+.g{display:grid;grid-template-columns:repeat(4,1fr);gap:20px 6px;max-width:520px;margin:auto}
 .t{text-decoration:none;color:@@fg@@;text-align:center;font-size:11px;transform:translate3d(0,0,0);will-change:transform;transition:transform .15s ease-out}
 .t:active{transform:translate3d(0,0,0) scale(.92)}
-.i{width:46px;height:46px;border-radius:8px;border:1px solid @@line@@;margin:0 auto 5px;background:@@card@@;overflow:hidden;
+.i{width:54px;height:54px;border-radius:50%;margin:0 auto 6px;background:#8a93a6;overflow:hidden;transition:background .25s;
 display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:600}
-.i img{width:26px;height:26px;object-fit:contain;opacity:0;transition:opacity .2s}
+.i img{width:36px;height:36px;border-radius:50%;background:#fff;padding:6px;box-sizing:border-box;object-fit:contain;opacity:0;transition:opacity .2s}
 .i img.ok,.i img.show{opacity:1}
 .i img.ok{transition:none}
 .t span{display:block;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -80,6 +80,24 @@ document.querySelectorAll('img.lg:not(.ok)').forEach(function(im){
  im.onerror=function(){ if(im.src!==globe) next(); };
  im.onload=function(){ if(im.src.indexOf('s2/favicons')>0 && im.naturalWidth<=16){ next(); return; } im.classList.add('show'); };
  if(!h){ im.src=globe; } else { next(); }
+});
+function hs(s){var x=0;for(var i=0;i<s.length;i++)x=(x*31+s.charCodeAt(i))%360;return 'hsl('+x+',68%,46%)'}
+function paint(im){
+ var box=im.parentNode, col=null;
+ try{
+  var c=document.createElement('canvas');c.width=c.height=16;var g=c.getContext('2d');g.drawImage(im,0,0,16,16);
+  var d=g.getImageData(0,0,16,16).data,r=0,gg=0,b=0,w=0;
+  for(var i=0;i<d.length;i+=4){var a=d[i+3];if(a<200)continue;var mx=Math.max(d[i],d[i+1],d[i+2]),mn=Math.min(d[i],d[i+1],d[i+2]);
+   var sat=mx-mn; if(mx>235&&sat<25)continue; var wt=sat+8; r+=d[i]*wt;gg+=d[i+1]*wt;b+=d[i+2]*wt;w+=wt;}
+  if(w>0){r=Math.round(r/w);gg=Math.round(gg/w);b=Math.round(b/w);
+   if(Math.max(r,gg,b)-Math.min(r,gg,b)>=28) col='rgb('+r+','+gg+','+b+')'; else col='rgb('+Math.min(r,90)+','+Math.min(gg,90)+','+Math.min(b,90)+')';}
+ }catch(e){}
+ box.style.background=col||hs(im.getAttribute('data-h')||im.alt||'x');
+}
+document.querySelectorAll('img.lg').forEach(function(im){
+ if(im.complete&&im.naturalWidth>0) paint(im);
+ im.addEventListener('load',function(){paint(im)});
+ im.addEventListener('error',function(){paint(im)});
 });
 function H(n,a,b){try{window.flutter_inappwebview.callHandler(n,a,b)}catch(e){}}
 document.getElementById('addfav').addEventListener('click',function(e){e.preventDefault();H('addFav','','')});
