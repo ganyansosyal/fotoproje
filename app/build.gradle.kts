@@ -5,23 +5,35 @@ plugins {
 
 android {
     namespace = "com.ganyansosyal.fotoproje"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.ganyansosyal.fotoproje"
         minSdk = 24
-        targetSdk = 34
+        targetSdk = 35
         versionCode = 30
         versionName = "1.0.0"
         // yt-dlp + ffmpeg yalnızca gerçek telefon işlemcileri için (APK boyutunu küçültür)
         ndk { abiFilters += setOf("arm64-v8a", "armeabi-v7a") }
     }
 
+    // Play imzası: ortam değişkenleri varsa kendi keystore'un, yoksa debug anahtarı
+    val ksFile = System.getenv("KEYSTORE_FILE")
+    signingConfigs {
+        if (!ksFile.isNullOrBlank() && file(ksFile).exists()) {
+            create("play") {
+                storeFile = file(ksFile)
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Mağaza dışı kurulum için hata ayıklama anahtarıyla imzalanır (eski Flutter derlemesi gibi)
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("play") ?: signingConfigs.getByName("debug")
         }
     }
 
