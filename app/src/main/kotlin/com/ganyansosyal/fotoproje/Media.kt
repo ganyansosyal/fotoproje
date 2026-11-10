@@ -121,6 +121,20 @@ object Media {
   }catch(e){} }).catch(function(){});
   return p; };
 
+ // ---- MediaSource/blob kancası: blob: video oluşturulduğu anı ve codec bilgisini yakalar ----
+ var mseT={};
+ try{ var cou=URL.createObjectURL;
+  if(cou&&typeof MediaSource!=='undefined') URL.createObjectURL=function(o){ var r=cou.apply(this,arguments);
+   try{ if(o instanceof MediaSource){ var rec={t:Date.now(),m:[]}; mseT[r]=rec;
+    var asb=o.addSourceBuffer;
+    o.addSourceBuffer=function(mt){ try{ rec.m.push(String(mt)); }catch(e){} return asb.apply(this,arguments); }; } }catch(e){}
+   return r; };
+ }catch(e){}
+ try{ var rou=URL.revokeObjectURL;
+  if(rou) URL.revokeObjectURL=function(u){ try{ var r=mseT[u]; if(r) setTimeout(function(){ delete mseT[u]; },60000); }catch(e){}
+   return rou.apply(this,arguments); };
+ }catch(e){}
+
  // ---- Oynatıcı takibi: yalnızca gerçekten oynayan video raporlanır ----
  var act=null, wd=0, ft=0, last='', showFor=null, t0=new WeakMap();
  function alive(v){ if(!v||!v.isConnected) return false;
@@ -187,6 +201,7 @@ object Media {
    // Bu videonun yüklenmesinden kısa süre önce/sonra istenen adresler
    // Önce bu videonun yüklenmesine yakın (-8sn / +20sn) istekler; yoksa eski geniş pencere
    var st=t0.get(v)||(Date.now()-120000), j, pass;
+   if(/^blob:/i.test(src)&&mseT[src]) st=mseT[src].t;
    for(pass=0;pass<2&&!urls.length;pass++){
     var from=pass?st-30000:st-8000, to=pass?9e15:st+20000;
     for(j=0;j<cand.length;j++){ if(cand[j].t>=from&&cand[j].t<=to){ urls.push(cand[j].u); if(cand[j].k) hints[cand[j].u]=cand[j].k; } }
