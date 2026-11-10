@@ -1596,7 +1596,7 @@ class BrowserActivity : Activity() {
     /** Sayfanın kaynağındaki video adreslerini bulup inceler; bulunursa indirme seçeneklerini açar. */
     private fun scanPage(tb: Tab, silent: Boolean = false) {
         val w = tb.web ?: return
-        if (isYtTab(tb) || tb.playerId == null) return // oynayan video yoksa / YouTube'da tarama yok
+        if (isYtTab(tb)) return // YouTube'da tarama yok
         w.evaluateJavascript(Media.SCAN_JS) { raw ->
             val urls = ArrayList<String>()
             val netHints = HashMap<String, String>()
@@ -2231,7 +2231,7 @@ class BrowserActivity : Activity() {
         }
         val kind = match?.groupValues?.get(1)?.ifEmpty { match.groupValues.getOrElse(2) { "" } }?.lowercase()
             ?.ifEmpty { inferred } ?: inferred
-        var kind2 = kind
+        var kind2 = if (kind == "m3u") "sniff" else kind // .m3u: türünü Probe içerikten anlar
         if (kind2.isEmpty() && ranged && u.startsWith("http") && !NOT_MEDIA_RE.containsMatchIn(u)) {
             kind2 = "sniff" // türü bilinmiyor: Probe ilk baytlara / Content-Type'a bakarak anlar
         }
@@ -2254,6 +2254,10 @@ class BrowserActivity : Activity() {
         if (isNew && tb.playerId != null) {
             if (tb.found.isEmpty()) ui.post { scheduleProbe(tb) }
             // Sonuç varken gelen adaylar sıradaki videonundur: arka planda önceden incele (kaydırınca anında bulunur)
+            else Probe.warm(u, kind2, tb.pRef ?: tb.url)
+        } else if (isNew && tb.found.isEmpty()) {
+            // Oynatıcı başlamadan da yakala: kesin akış (m3u8/mpd) hemen incelenir, diğerleri önceden ısıtılır
+            if (kind2 == "m3u8" || kind2 == "mpd") ui.post { scheduleProbe(tb) }
             else Probe.warm(u, kind2, tb.pRef ?: tb.url)
         }
     }
@@ -2331,7 +2335,6 @@ class BrowserActivity : Activity() {
     private fun scheduleProbe(tb: Tab) {
         val r = tb.probeRun ?: Runnable { runProbe(tb, null) }.also { tb.probeRun = it }
         ui.removeCallbacks(r)
-        if (tb.playerId == null) return
         // Video açılır açılmaz bulunsun: oynatıcı beklenmez, ağdan gelen adaylar hemen incelenir
         ui.postDelayed(r, 150)
     }
@@ -2356,17 +2359,13 @@ class BrowserActivity : Activity() {
     }
 
     private fun runProbe(tb: Tab, onDone: ((List<FoundItem>) -> Unit)?) {
-        if (tb.playerId == null) {
-            onDone?.invoke(emptyList())
-            return
-        }
-
         val gen = ++tb.probeGen
         val startDur = tb.pDur
         val startSrc = tb.pSrc
         val startId = tb.playerId
         // Video değişmediyse (yalnızca yeni aday geldiyse) sonuç atılmaz
-        fun stale() = tb.playerId == null || tb.playerId != startId ||
+        fun stale() = tb.playerId != startId ||
+            (startId == null && gen != tb.probeGen) || // oynatıcısız incelemede sayfa değiştiyse sonuç atılır
             Math.abs(tb.pDur - startDur) > 0.5 || tb.pSrc != startSrc
         dart("probe", probeArgs(tb), { r ->
             if (stale()) {
@@ -2636,11 +2635,6 @@ class BrowserActivity : Activity() {
             toast(t("ytNoDl"))
             return
         }
-        // Oynayan video yoksa sayfa taranmaz (sayfadaki önizleme/reklam videoları bulunmasın)
-        if (tb.playerId == null) {
-            toast(t("noVideo"))
-            return
-        }
         if (tb.found.isNotEmpty()) {
             showFound() // bulunan videoları seçenek olarak göster
             return
@@ -2664,10 +2658,6 @@ class BrowserActivity : Activity() {
         val tb = cur ?: return
         if (isYtTab(tb)) { toast(t("ytNoDl")); return }
         if (tb.found.isEmpty()) {
-            if (tb.playerId == null) {
-                toast(t("noVideo"))
-                return
-            }
             toast(t("checking"))
             probeThenScan(tb)
             return
@@ -3157,7 +3147,7 @@ class BrowserActivity : Activity() {
         private const val PERF_STOP = "window.__pg=(window.__pg||0)+1;"
 
         private val MEDIA_RE = Regex(
-            "\\.(m3u8|mpd|mp4|webm|mov|m4v|mkv|flv|3gp|3g2|ogv|avi|wmv|mpg|mpeg|f4v|asf|m2ts|mts|m4a|aac|mp3)(?:\$|[?#/])|[?&]mime_type=video_(mp4|webm)", RegexOption.IGNORE_CASE
+            "\\.(m3u8|m3u|mpd|mp4|webm|mov|m4v|mkv|flv|3gp|3g2|ogv|avi|wmv|mpg|mpeg|f4v|asf|m2ts|mts|m4a|aac|mp3)(?:\$|[?#/])|[?&]mime_type=video_(mp4|webm)", RegexOption.IGNORE_CASE
         )
         private val EXT_RE = Regex("\\.(mp4|webm|mov|m4v|mkv|flv|3gp|3g2|ogv|avi|wmv|mpg|mpeg|f4v|asf|m2ts|mts)\$")
         private val AD_URL_RE = Regex(

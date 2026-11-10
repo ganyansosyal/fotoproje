@@ -18,7 +18,7 @@ object PageScan {
     const val ENABLED = false
 
     // Yalnızca gerçek video uzantıları: URL yolu .mp4 veya .m3u8 ile bitmeli (sorgu dizisine bakılmaz)
-    private val MEDIA = Pattern.compile("\\.(m3u8|mp4)$", Pattern.CASE_INSENSITIVE)
+    private val MEDIA = Pattern.compile("\\.(m3u8|mpd|mp4)$", Pattern.CASE_INSENSITIVE)
     private val AD = Pattern.compile(
         "(doubleclick|googlesyndication|imasdk|adservice|adsystem|adnxs|taboola|outbrain|[/_.-]ads?[/_.-]|" +
             "advert|preroll|midroll|vast|vpaid|tracking|beacon|analytics|thumb|sprite|storyboard|preview)",
@@ -29,10 +29,10 @@ object PageScan {
     )
     private val ABS = Pattern.compile("https?://[^\\s\"'<>\\\\)\\]}]+")
     private val REL = Pattern.compile(
-        "[\"'(]((?:/|\\.\\./|\\./)?[^\"'\\s<>()]+?\\.(?:m3u8|mp4)(?:\\?[^\"'\\s<>()]*)?)[\"')]",
+        "[\"'(]((?:/|\\.\\./|\\./)?[^\"'\\s<>()]+?\\.(?:m3u8|mpd|mp4)(?:\\?[^\"'\\s<>()]*)?)[\"')]",
         Pattern.CASE_INSENSITIVE
     )
-    private val PROTO = Pattern.compile("[\"'](//[^\"'\\s<>]+?\\.(?:m3u8|mp4)[^\"'\\s<>]*)[\"']", Pattern.CASE_INSENSITIVE)
+    private val PROTO = Pattern.compile("[\"'](//[^\"'\\s<>]+?\\.(?:m3u8|mpd|mp4)[^\"'\\s<>]*)[\"']", Pattern.CASE_INSENSITIVE)
     private val IFRAME = Pattern.compile("<iframe[^>]+?(?:src|data-src)=[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE)
     private val SCRIPT = Pattern.compile("<script[^>]+?src=[\"']([^\"']+)[\"']", Pattern.CASE_INSENSITIVE)
     private val SKIP_JS = Pattern.compile("(jquery|bootstrap|gtag|fbevents|analytics|adsbygoogle)", Pattern.CASE_INSENSITIVE)
