@@ -284,6 +284,12 @@ object Downloads {
                 } catch (_: Throwable) { "" }
                 task.url = task.url.substringBefore("#fpa=")
             }
+            // Ağdan yakalanıp eşleşen ayrı ses adresi (Facebook/Instagram): görüntü adresine göre bul
+            if (kind != "blob" && task.audio.isEmpty() &&
+                Regex("(fbcdn|cdninstagram)\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url)
+            ) {
+                AvPairs.audioFor(task.url, referer)?.let { task.audio = it }
+            }
             // Düğmeye basıldığı/Devam edildiği anda: WebView'in gördüğü daha taze adres varsa onu kullan
             if (kind != "blob") {
                 Streams.refresh(task.url, referer, task.cancel, false)?.let { task.url = it }
@@ -370,9 +376,51 @@ object Downloads {
                     if (task.audio.isEmpty() && Mux.tracks(path)?.second == false &&
                         Regex("fbcdn\\.", RegexOption.IGNORE_CASE).containsMatchIn(url)
                     ) {
-                        task.allowSilent = true
-                        task.note = if (L.code == "tr") "Ses izi yakalanamadı, video sessiz kaydedildi. Videoyu oynatıp tekrar indirmeyi dene."
-                        else "Audio track not captured; saved without sound. Play the video and retry."
+                        try { File(ctx.cacheDir, "fb_net.txt").writeText(FbNetLog.dump()) } catch (_: Throwable) {}
+                        // Son çare: oynayan videoyu SES DAHİL kaydet (gerçek zamanlı); sessiz dosya asla kaydedilmez
+                        var recOk = false
+                        if (blobReader != null) {
+                            task.label = if (L.code == "tr") "Sesli kayıt alınıyor (video süresi kadar sürer, sayfada kal)…"
+                            else "Recording with sound (takes the video's length, stay on the page)…"
+                            task.progress = -1.0
+                            notifyUi(true)
+                            val rp = File(tmp, "rec_$ts.mp4").path
+                            val rl = CountDownLatch(1)
+                            var rerr: String? = null
+                            blobReader("fprec:", rp, object : BlobRes {
+                                override fun ok() = rl.countDown()
+                                override fun fail(msg: String) {
+                                    rerr = msg
+                                    rl.countDown()
+                                }
+                            })
+                            while (!rl.await(300, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                                if (task.cancel.on) throw CanceledEx()
+                            }
+                            if (rerr == null && File(rp).exists() && File(rp).length() > 1024 &&
+                                FfmpegFix.hasAudioStream(ctx, rp, task.cancel)
+                            ) {
+                                // webm/mp4 kaydı -> temiz MP4 (görüntü copy, ses AAC)
+                                recOk = SafeMux.single(ctx, rp, path + ".rec.mp4", task.cancel)
+                                if (recOk) {
+                                    File(path).delete()
+                                    File(path + ".rec.mp4").renameTo(File(path))
+                                    addNote(
+                                        task,
+                                        "Ses ağdan alınamadı; video sesli olarak kaydedildi (gerçek zamanlı kayıt).",
+                                        "Audio not available from network; recorded with sound in real time."
+                                    )
+                                }
+                            }
+                            try { File(rp).delete() } catch (_: Throwable) {}
+                        }
+                        if (!recOk) {
+                            try { File(path).delete() } catch (_: Throwable) {}
+                            throw IOException(
+                                if (L.code == "tr") "Facebook: ses alınamadı, sessiz kaydedilmedi. Videoyu kendi sayfasında açıp sesi açarak oynat ve tekrar indir. [" + FbNetLog.summary() + "]"
+                                else "Facebook: audio unavailable, not saved silently. Open the video on its own page, play it with sound and retry. [" + FbNetLog.summary() + "]"
+                            )
+                        }
                     }
                     if (task.audio.isNotEmpty()) {
                         // Ses kesin gelmeli: 3 deneme, olmazsa sessiz video kaydetmek yerine hata ver
