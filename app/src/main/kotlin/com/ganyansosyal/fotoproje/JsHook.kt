@@ -75,7 +75,7 @@ object JsHook {
     /**
      * Sayfaya enjekte edilen kanca. Kendini iki kez kurmaz.
      * - fetch ve XMLHttpRequest isteklerinin adresine bakar (uzantı: m3u8, mpd, mp4, webm, ts, m4s)
-     * - yanıtın Content-Type'ına bakar (mpegurl, dash+xml, video/*)
+     * - yanıtın Content-Type'ına bakar (mpegurl, dash+xml, video türleri)
      * - uzantısız manifest/playlist için yanıtın başına bakar (#EXTM3U veya <MPD)
      * - JSON yanıtların içine gömülü .m3u8 / .mpd / .mp4 adreslerini bulur (TV8 gibi siteler)
      */
