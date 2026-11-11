@@ -40,6 +40,7 @@ class DownloadTask(val id: String, @Volatile var url: String, val referer: Strin
     var kind: String? = null   // mp4 / m3u8 / mpd / blob
     var audio = ""             // Görüntüyle birleştirilecek ayrı ses dosyası adresi (Instagram/Facebook)
     val alts = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>() // yedek kaynaklar (adres, tür)
+    @Volatile var allowSilent = false // Facebook: ses izi hiç bulunamazsa sessiz kaydetmeye izin
     var page = ""              // Çözümleyiciye gönderilen sayfa adresi (süre dolunca yeniden çözmek için)
 }
 
@@ -334,7 +335,7 @@ object Downloads {
                                 (r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L) / 1000.0
                             } finally { try { r.release() } catch (_: Throwable) {} }
                         } catch (_: Throwable) { 0.0 }
-                        Probe.bestAudio(dur)?.let { task.audio = it.url }
+                        Probe.audioFor(url, dur)?.let { task.audio = it.url }
                     }
                     if (task.audio.isEmpty() && Mux.tracks(path)?.second == false &&
                         Regex("(cdninstagram|fbcdn)\\.", RegexOption.IGNORE_CASE).containsMatchIn(url)
@@ -348,6 +349,14 @@ object Downloads {
                             Streams.direct(alt, path, Net.smartHeaders(alt, referer, task.cancel), task.cancel, report)
                             checkPlayable(path, kind)
                         }
+                    }
+                    // Facebook: ses hiçbir yoldan bulunamadıysa indirmeyi çöpe atma, sessiz kaydet ve not düş
+                    if (task.audio.isEmpty() && Mux.tracks(path)?.second == false &&
+                        Regex("fbcdn\\.", RegexOption.IGNORE_CASE).containsMatchIn(url)
+                    ) {
+                        task.allowSilent = true
+                        task.note = if (L.code == "tr") "Ses izi yakalanamadı, video sessiz kaydedildi. Videoyu oynatıp tekrar indirmeyi dene."
+                        else "Audio track not captured; saved without sound. Play the video and retry."
                     }
                     if (task.audio.isNotEmpty()) {
                         // Ses kesin gelmeli: 3 deneme, olmazsa sessiz video kaydetmek yerine hata ver
@@ -710,7 +719,7 @@ object Downloads {
             dest = d
         }
         // Kesin doğrulama: ayrı sesle gelen ya da Instagram/Facebook videosunda dosyada ses izi OLMALI
-        val needAudio = task.audio.isNotEmpty() || Regex("(cdninstagram|fbcdn)\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url)
+        val needAudio = !task.allowSilent && (task.audio.isNotEmpty() || Regex("(cdninstagram|fbcdn)\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url))
         if (needAudio) {
             val tr = Mux.tracks(dest.path)
             if (tr != null && (!tr.first || !tr.second)) {

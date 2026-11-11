@@ -308,6 +308,26 @@ object Probe {
         }
     }
 
+    /** Facebook/Instagram adresindeki "efg" içinden video varlık kimliği (aynı videonun görüntü ve ses dosyası aynı kimliği taşır). */
+    private fun assetId(url: String): String {
+        return try {
+            val raw = android.net.Uri.parse(url.substringBefore("#")).getQueryParameter("efg") ?: return ""
+            var b = raw.replace('-', '+').replace('_', '/')
+            while (b.length % 4 != 0) b += "="
+            val j = org.json.JSONObject(String(android.util.Base64.decode(b, android.util.Base64.DEFAULT), Charsets.UTF_8))
+            j.optString("xpv_asset_id").ifEmpty { j.optString("video_id") }
+        } catch (_: Throwable) {
+            ""
+        }
+    }
+
+    /** [url] videosunun sesi: önce aynı varlık kimliğine sahip ses dosyası (kesin eşleşme), yoksa süreye göre. */
+    fun audioFor(url: String, dur: Double): MediaInfo? {
+        val id = assetId(url)
+        if (id.isNotEmpty()) audioPool.firstOrNull { assetId(it.url) == id }?.let { return it }
+        return bestAudio(dur)
+    }
+
     /** Adresteki dosyada (görüntü, ses) izleri var mı; okunamazsa null. */
     fun avTracks(url: String, referer: String): Pair<Boolean, Boolean>? = tracks(url, referer, null)
 
