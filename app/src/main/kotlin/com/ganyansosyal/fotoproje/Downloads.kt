@@ -300,7 +300,23 @@ object Downloads {
                 notifyUi()
             }
             var sepAudio = false
-            when (kind) {
+            var ffDone = false // master/mpd çözüldü, FFmpeg video+sesi tek MP4'e yazdı
+            if (kind == "m3u8" || kind == "mpd") {
+                task.label = if (L.code == "tr") "Akış çözümleniyor…" else "Parsing stream…"
+                notifyUi(true)
+                val pk = ManifestDl.download(ctx, url, path, referer, task, report)
+                if (pk != null) {
+                    ffDone = true
+                    task.progress = -1.0
+                    addNote(
+                        task,
+                        "FFmpeg · Video: " + pk.videoId + " + Ses: " + (pk.audioId ?: "içinde/yok"),
+                        "FFmpeg · Video: " + pk.videoId + " + Audio: " + (pk.audioId ?: "embedded/none")
+                    )
+                }
+            }
+            when (if (ffDone) "ff" else kind) {
+                "ff" -> {}
                 "m3u8" -> sepAudio = hlsSafe(url, path, apath, referer, report, task)
                 "mpd" -> sepAudio = dashSafe(url, path, apath, referer, report, task)
                 "blob" -> {
@@ -406,7 +422,7 @@ object Downloads {
             }
             // HLS/DASH tek parça çıktısı ham TS / parçalı MP4'tür: temiz MP4'e çevir (siyah görüntü önlenir)
             var outPath = path
-            if (!sepAudio && (kind == "m3u8" || kind == "mpd")) {
+            if (!ffDone && !sepAudio && (kind == "m3u8" || kind == "mpd")) {
                 val np = "$path.n.mp4"
                 task.label = if (L.code == "tr") "Video düzenleniyor…" else "Fixing video…"
                 notifyUi(true)
