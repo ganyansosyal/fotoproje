@@ -1240,7 +1240,16 @@ class BrowserActivity : Activity() {
                     checkSocial(tb, view?.url ?: tb.url)
                 }
                 scheduleSave()
-                // Otomatik tarama kapalı: video yalnızca gerçekten oynarken ya da butona basılınca aranır
+                // Sayfa yüklenince video sessizce aranır (oynatıcılar videoyu geç yükler: 2 sn ve 6 sn sonra)
+                if (!tb.isHome && u != null && u.startsWith("http")) {
+                    for (d in longArrayOf(2000L, 6000L)) {
+                        ui.postDelayed({
+                            if (tb.web != null && tb.url == normUrl(u, tb) && tb.found.isEmpty() && !tb.isHome) {
+                                scanPage(tb, true)
+                            }
+                        }, d)
+                    }
+                }
             }
 
             override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
