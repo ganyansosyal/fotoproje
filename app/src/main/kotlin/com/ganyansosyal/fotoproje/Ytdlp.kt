@@ -37,9 +37,10 @@ object Ytdlp {
             if (!ensure(ctx)) return
             val sp = ctx.getSharedPreferences("fp_ytdlp", Context.MODE_PRIVATE)
             val now = System.currentTimeMillis()
-            if (now - sp.getLong("upd", 0L) < 24L * 3600_000L) return
-            YoutubeDL.getInstance().updateYoutubeDL(ctx, YoutubeDL.UpdateChannel.STABLE)
-            sp.edit().putLong("upd", now).apply()
+            // Facebook/Instagram çözümleyici düzeltmeleri önce nightly'ye girer (STABLE haftalarca geriden gelir)
+            if (now - sp.getLong("upd_nightly", 0L) < 6L * 3600_000L) return
+            YoutubeDL.getInstance().updateYoutubeDL(ctx, YoutubeDL.UpdateChannel.NIGHTLY)
+            sp.edit().putLong("upd_nightly", now).apply()
         } catch (_: Throwable) {
         }
     }
@@ -147,7 +148,42 @@ object Ytdlp {
      * 2. deneme (1. bozuksa): ffmpeg ile indir + kapsayıcıyı zorla onar.
      * Hata olursa IOException (mesajı yt-dlp'nin son hata satırı ya da doğrulama nedeni).
      */
+    /** Facebook video kimliğinden, yt-dlp'nin farklı çözümleyicilerine giden alternatif adresler. */
+    private fun fbAlternatives(src: String): List<String> {
+        if (!FB.containsMatchIn(src)) return emptyList()
+        val id = Regex("[?&]v=(\\d{6,})").find(src)?.groupValues?.get(1)
+            ?: Regex("/reels?/(\\d{6,})").find(src)?.groupValues?.get(1)
+            ?: return emptyList()
+        return listOf(
+            "https://www.facebook.com/reel/$id",
+            "https://m.facebook.com/watch/?v=$id&_rdr",
+            "https://www.facebook.com/video.php?v=$id"
+        ).filter { it != src }
+    }
+
+    /** Facebook'ta bir adres çözülemezse (Cannot parse data / HTTP 500) aynı videonun diğer adres biçimlerini dener. */
     fun download(
+        ctx: Context, task: DownloadTask, src: String, referer: String,
+        report: (Double, String) -> Unit
+    ): Result {
+        val alts = fbAlternatives(src)
+        if (alts.isEmpty()) return downloadOne(ctx, task, src, referer, report)
+        var last: Throwable? = null
+        for (s in listOf(src) + alts) {
+            try {
+                return downloadOne(ctx, task, s, referer, report)
+            } catch (e: CanceledEx) {
+                throw e
+            } catch (e: Throwable) {
+                if (task.cancel.on) throw CanceledEx()
+                last = e
+                report(-1.0, "Facebook başka adresle deneniyor…")
+            }
+        }
+        throw last ?: IOException("yt-dlp: Facebook videosu çözülemedi")
+    }
+
+    private fun downloadOne(
         ctx: Context, task: DownloadTask, src: String, referer: String,
         report: (Double, String) -> Unit
     ): Result {

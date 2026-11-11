@@ -338,7 +338,7 @@ class DownloadsActivity : Activity() {
         if (!nt.isNullOrEmpty()) {
             val nv = TextView(this)
             nv.text = nt
-            nv.maxLines = 6
+            nv.maxLines = 14
             nv.ellipsize = android.text.TextUtils.TruncateAt.END
             nv.setTextColor(sub)
             nv.textSize = 10.5f
