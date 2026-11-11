@@ -33,6 +33,9 @@ object VideoRules {
     // Uzantısız veya sunucu uzantılı manifest adreslerine izin verilir; json/js/css gibi dosyalara verilmez.
     private val MANIFEST_EXT = setOf("", "php", "aspx", "ashx", "txt")
 
+    private val AUDIO_EXT = Regex("\\.(m4a|aac|mp3|weba|opus)$", RegexOption.IGNORE_CASE)
+    private val AUDIO_MIME = Regex("[?&]mime_?type=audio", RegexOption.IGNORE_CASE)
+
     fun isAd(url: String): Boolean = AD.containsMatchIn(url)
 
     /** Adres bir video/akış adayıysa türünü döner, değilse null. */
@@ -47,6 +50,9 @@ object VideoRules {
             path.endsWith(".mpd") -> "mpd"
             path.endsWith(".mp4") -> "mp4"
             path.endsWith(".webm") -> "webm"
+            // Ayrı ses akışları (modern sitelerde görüntü ve ses ayrı sunulur): "m4a" türüyle yakalanır
+            AUDIO_EXT.containsMatchIn(path) -> "m4a"
+            AUDIO_MIME.containsMatchIn(url) -> "m4a"
             path.endsWith(".ts") || path.endsWith(".m4s") -> "ts"
             path.endsWith(".ism/manifest") -> "manifest"
             ext in MANIFEST_EXT && MANIFEST_WORD.containsMatchIn(file) -> "manifest"

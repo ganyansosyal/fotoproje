@@ -125,6 +125,7 @@ object Streams {
         if (ls.any { it.startsWith("#EXT-X-STREAM-INF") }) {
             var best: String? = null
             var group: String? = null
+            var bestInf: String? = null // seçilen varyantın #EXT-X-STREAM-INF satırı (ses kodeği kontrolü için)
             if (wantBw != null) {
                 // Seçilen kalite: bant genişliği + çözünürlük birlikte eşleşir; yoksa yalnızca bant genişliği.
                 // Hiçbiri yoksa sessizce en yükseğe dönmek yerine hata verilir.
@@ -140,6 +141,7 @@ object Streams {
                         while (j < ls.size && (ls[j].isEmpty() || ls[j].startsWith("#"))) j++
                         if (j >= ls.size) continue
                         best = ls[j]
+                        bestInf = ls[i]
                         group = Media.hlsAttr(ls[i], "AUDIO")
                         return true
                     }
@@ -157,6 +159,7 @@ object Streams {
                     if (j < ls.size && b > bw) {
                         bw = b
                         best = ls[j]
+                        bestInf = ls[i]
                         group = Media.hlsAttr(ls[i], "AUDIO")
                     }
                 }
@@ -164,20 +167,29 @@ object Streams {
             if (best == null) throw IOException("Video listesi bulunamadı")
             val master = pl
             pl = Media.resolve(master, best!!)
-            if (group != null) {
+            // Ses akışı seçimi: önce varyantın AUDIO grubu; grup yoksa / grupta adres yoksa tüm ses
+            // temsilleri (DEFAULT=YES öncelikli) taranır. Böylece ayrı ses linki sessizce kaçmaz.
+            fun pickAudio(onlyGroup: String?): String? {
                 var any: String? = null
                 var def: String? = null
                 for (l in ls) {
-                    if (!l.startsWith("#EXT-X-MEDIA") || Media.hlsAttr(l, "TYPE") != "AUDIO" ||
-                        Media.hlsAttr(l, "GROUP-ID") != group
-                    ) continue
-                    val u = Media.hlsAttr(l, "URI") ?: continue
+                    if (!l.startsWith("#EXT-X-MEDIA") || !Media.hlsAttr(l, "TYPE").equals("AUDIO", true)) continue
+                    if (onlyGroup != null && Media.hlsAttr(l, "GROUP-ID") != onlyGroup) continue
+                    val u = Media.hlsAttr(l, "URI")
+                    if (u.isNullOrEmpty()) continue
                     if (any == null) any = u
-                    if (Media.hlsAttr(l, "DEFAULT") == "YES" && def == null) def = u
+                    if (Media.hlsAttr(l, "DEFAULT").equals("YES", true) && def == null) def = u
                 }
-                val a = def ?: any
-                if (a != null) audioUrl = Media.resolve(master, a)
+                return def ?: any
             }
+            var a: String? = if (group != null) pickAudio(group) else null
+            if (a == null) {
+                // Varyantta ses kodeği yoksa (yalnızca görüntü) ana listedeki ses temsili kullanılır.
+                val codecs = bestInf?.let { Media.hlsAttr(it, "CODECS") }?.lowercase()
+                val videoOnly = codecs != null && listOf("mp4a", "ac-3", "ec-3", "opus", "flac", "vorbis", "mp3").none { codecs.contains(it) }
+                if (group != null || videoOnly) a = pickAudio(null)
+            }
+            if (a != null) audioUrl = Media.resolve(master, a)
         }
         val hasAudio = audioUrl != null
         if (hasAudio) {
@@ -185,6 +197,8 @@ object Streams {
                 { hlsMedia(pl, path, report, "Video", h, cancel, 0.0, 1.0) },
                 { hlsMedia(audioUrl!!, audioPath, SILENT, "Ses", h, cancel, 0.0, 1.0) }
             )
+            // Ses akışı bildirildi ama dosya yoksa/boşsa devam edilmez
+            FfmpegFix.requireAudio(audioPath)
             return true
         }
         hlsMedia(pl, path, report, "Video", h, cancel, 0.0, 1.0)
@@ -378,6 +392,7 @@ object Streams {
                 { grab(bestSet, bestRep, path, "Video", 0.0, 1.0) },
                 { grab(bestASet!!, bestARep!!, audioPath, "Ses", 0.0, 1.0, SILENT) }
             )
+            FfmpegFix.requireAudio(audioPath)
             return true
         }
         grab(bestSet, bestRep, path, "Video", 0.0, 1.0)

@@ -371,7 +371,7 @@ object Downloads {
                                     task.audio, apath, Net.smartHeaders(task.audio, referer, task.cancel),
                                     task.cancel, { _, _ -> }
                                 )
-                                if (File(apath).length() > 0L) { ok = true; break }
+                                if (FfmpegFix.hasAudioFile(apath)) { ok = true; break }
                             } catch (e: CanceledEx) {
                                 throw e
                             } catch (e: Throwable) {
@@ -379,9 +379,21 @@ object Downloads {
                                 File(apath).delete()
                             }
                         }
-                        if (!ok) throw IOException(lastErr?.message ?: (if (L.code == "tr") "Ses indirilemedi" else "Audio download failed"))
+                        if (!ok) {
+                            try { File(path).delete() } catch (_: Throwable) {}
+                            throw AudioMissingException(lastErr?.message ?: (if (L.code == "tr") "Ses indirilemedi" else "Audio download failed"))
+                        }
                         sepAudio = true
                     }
+                }
+            }
+            // Ayrı ses akışı varsa dosya KESİN var ve dolu olmalı; değilse süreç burada güvenle kesilir
+            if (sepAudio) {
+                try {
+                    FfmpegFix.requireAudio(apath)
+                } catch (e: AudioMissingException) {
+                    try { File(path).delete() } catch (_: Throwable) {}
+                    throw e
                 }
             }
             // HLS/DASH tek parça çıktısı ham TS / parçalı MP4'tür: temiz MP4'e çevir (siyah görüntü önlenir)
@@ -413,6 +425,7 @@ object Downloads {
             } catch (e: Throwable) {
                 // Kendi yöntemimiz de olmadı: yt-dlp'nin sessiz ama sağlam dosyası varsa onu kaydet
                 val sr = silentRes
+                if (e is AudioMissingException) throw e // ses zorunluyken sessiz mp4 kaydedilmez
                 if (sr == null || task.cancel.on) throw e
                 task.note = sr.info
                 finish(task, sr.path, null)
@@ -673,7 +686,16 @@ object Downloads {
         var sepAudio = audioTmp
         var dest: File? = null
         task.progress = -1.0
+        val expectAudio = audioTmp != null // ayrı ses ile geldiyse sonuçta ses izi ZORUNLU
         if (audioTmp != null) {
+            // FFmpeg/MediaMuxer birleştirmesine geçmeden önce: ses dosyası var mı ve boş değil mi?
+            try {
+                FfmpegFix.requireAudio(audioTmp)
+            } catch (e: AudioMissingException) {
+                try { File(tmpPath).delete() } catch (_: Throwable) {}
+                try { File(audioTmp).delete() } catch (_: Throwable) {}
+                throw e
+            }
             task.label = L.t("merging")
             notifyUi(true)
             // Birleştirmeyi doğrudan hedef klasöre yaz: ikinci bir kopyalama gerekmez
@@ -695,17 +717,27 @@ object Downloads {
                 sepAudio = null
             } catch (e: Throwable) {
                 d.delete()
-                // MediaMuxer birleştiremedi: FFmpeg ile dene
-                if (FfmpegFix.merge(ctx, tmpPath, audioTmp, d.path)) {
+                // MediaMuxer birleştiremedi: FFmpeg ile dene (ses doğrulaması FfmpegFix.merge içinde de yapılır)
+                val ffOk = try {
+                    FfmpegFix.merge(ctx, tmpPath, audioTmp, d.path)
+                } catch (ae: AudioMissingException) {
+                    d.delete()
+                    File(tmpPath).delete()
+                    File(audioTmp).delete()
+                    throw ae
+                }
+                if (ffOk) {
                     File(tmpPath).delete()
                     File(audioTmp).delete()
                     dest = d
                     sepAudio = null
                 } else {
                     d.delete()
-                    // Ayrı sesle gelen indirmede sessiz video kaydetme: hata ver
-                    if (task.audio.isNotEmpty()) throw IOException(L.t("mergeFail") + " (" + (e.message ?: e.javaClass.simpleName) + ")")
-                    task.note = L.t("mergeFail") + " (" + (e.message ?: e.javaClass.simpleName) + ")"
+                    // Ayrı ses beklenen her indirmede (HLS/DASH/YouTube/Instagram/Facebook) sessiz video
+                    // kaydetme: süreç güvenle kesilir, geçici dosyalar temizlenir, hata döner.
+                    try { File(tmpPath).delete() } catch (_: Throwable) {}
+                    try { File(audioTmp).delete() } catch (_: Throwable) {}
+                    throw IOException(L.t("mergeFail") + " (" + (e.message ?: e.javaClass.simpleName) + ")")
                 }
             }
         }
@@ -719,7 +751,7 @@ object Downloads {
             dest = d
         }
         // Kesin doğrulama: ayrı sesle gelen ya da Instagram/Facebook videosunda dosyada ses izi OLMALI
-        val needAudio = !task.allowSilent && (task.audio.isNotEmpty() || Regex("(cdninstagram|fbcdn)\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url))
+        val needAudio = expectAudio || !task.allowSilent && (task.audio.isNotEmpty() || Regex("(cdninstagram|fbcdn)\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url))
         if (needAudio) {
             val tr = Mux.tracks(dest.path)
             if (tr != null && (!tr.first || !tr.second)) {

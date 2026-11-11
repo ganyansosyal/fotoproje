@@ -11,7 +11,7 @@ import androidx.webkit.WebViewFeature
  * Sayfadaki betik fetch / XHR ile bulduğu adresi buraya bildirir (arka plan iş parçacığında gelir).
  */
 class VideoBridge(private val sniffer: VideoSniffer) {
-    private val kinds = setOf("m3u8", "mpd", "mp4", "webm", "ts", "manifest")
+    private val kinds = setOf("m3u8", "mpd", "mp4", "webm", "ts", "manifest", "m4a")
 
     @JavascriptInterface
     fun report(url: String?, kind: String?, source: String?, page: String?) {
@@ -86,7 +86,7 @@ object JsHook {
   var B = window.VideoBridge;
   if (!B || typeof B.report !== 'function') return;
 
-  var EXT = /\.(m3u8|mpd|mp4|webm|ts|m4s)(?:[?#&\/]|$)/i;
+  var EXT = /\.(m3u8|mpd|mp4|webm|ts|m4s|m4a|aac|mp3|weba|opus)(?:[?#&\/]|$)/i;
   var BAD = /\.(?:json|js|css|html?|png|jpe?g|gif|webp|svg|ico|woff2?)(?:[?#]|$)/i;
   var SEG = /(?:seg|segment|chunk|frag|fragment)[-_.]?\d/i;
   var seen = {};
@@ -101,6 +101,8 @@ object JsHook {
     if (/\.mpd$/.test(p)) return 'mpd';
     if (/\.mp4$/.test(p)) return 'mp4';
     if (/\.webm$/.test(p)) return 'webm';
+    if (/\.(m4a|aac|mp3|weba|opus)$/.test(p)) return 'm4a';
+    if (/[?&]mime_?type=audio/i.test(u)) return 'm4a';
     if (/\.(ts|m4s)$/.test(p)) return 'ts';
     return 'manifest';
   }
@@ -127,6 +129,8 @@ object JsHook {
     if (/dash\+xml/i.test(ct)) { report(u, src + '-ct', 'mpd'); return true; }
     if (/^video\/mp2t/i.test(ct)) { report(u, src + '-ct', 'ts'); return true; }
     if (/^video\//i.test(ct)) { report(u, src + '-ct', 'mp4'); return true; }
+    // Ayrı ses akışı (audio/mp4, audio/aac, audio/webm...): sesin kaçmaması için yakalanır
+    if (/^audio\//i.test(ct)) { report(u, src + '-ct', 'm4a'); return true; }
     return false;
   }
   function textOK(ct) { return !ct || /json|text|xml|javascript|mpegurl|dash/i.test(ct); }
@@ -139,7 +143,7 @@ object JsHook {
   function scanUrls(t, src) {
     try {
       t = String(t).replace(/\\u0026/g, '&').replace(/\\\//g, '/');
-      var re = /https?:\/\/[^"'\s<>\\]+?\.(?:m3u8|mpd|mp4)(?:\?[^"'\s<>\\]*)?/gi, m, n = 0;
+      var re = /https?:\/\/[^"'\s<>\\]+?\.(?:m3u8|mpd|mp4|m4a|aac|weba)(?:\?[^"'\s<>\\]*)?/gi, m, n = 0;
       while ((m = re.exec(t)) && n++ < 30) report(m[0], src + '-json');
     } catch (e) {}
   }

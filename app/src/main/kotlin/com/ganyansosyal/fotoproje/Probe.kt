@@ -331,7 +331,7 @@ object Probe {
     /** Adresteki dosyada (görüntü, ses) izleri var mı; okunamazsa null. */
     fun avTracks(url: String, referer: String): Pair<Boolean, Boolean>? = tracks(url, referer, null)
 
-    private val AUDIO_EXT = Regex("\\.(m4a|aac|mp3)$", RegexOption.IGNORE_CASE)
+    private val AUDIO_EXT = Regex("\\.(m4a|aac|mp3|weba|opus)$", RegexOption.IGNORE_CASE)
 
     /** Son incelemede bulunan yalnızca-ses dosyaları: indirme sırasında sessiz videoya eş aranır. */
     @Volatile var audioPool: List<MediaInfo> = emptyList()
@@ -372,7 +372,7 @@ object Probe {
     }
 
     private fun probeOne(url: String, hint: String, referer: String, children: MutableSet<String>): MediaInfo {
-        if (hint == "m4a" || hint == "aac" || hint == "mp3" ||
+        if (hint == "m4a" || hint == "aac" || hint == "mp3" || hint == "weba" || hint == "opus" ||
             AUDIO_EXT.containsMatchIn(url.substringBefore('?').substringBefore('#'))) {
             return probeAudio(url, referer)
         }

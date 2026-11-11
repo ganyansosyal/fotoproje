@@ -2247,6 +2247,7 @@ class BrowserActivity : Activity() {
         val inferred = when {
             lower.contains("mime_type=video_mp4") -> "mp4"
             lower.contains("mime_type=video_webm") -> "webm"
+            lower.contains("mime_type=audio") || lower.contains("mimetype=audio") -> "m4a"
             lower.contains(".m3u8") || lower.contains("format=hls") -> "m3u8"
             lower.contains(".mpd") || lower.contains("format=dash") -> "mpd"
             lower.contains("videoplayback") || lower.contains("/video/") || lower.contains("/videos/") -> "mp4"
@@ -3171,7 +3172,7 @@ class BrowserActivity : Activity() {
         private const val PERF_STOP = "window.__pg=(window.__pg||0)+1;"
 
         private val MEDIA_RE = Regex(
-            "\\.(m3u8|m3u|mpd|mp4|webm|mov|m4v|mkv|flv|3gp|3g2|ogv|avi|wmv|mpg|mpeg|f4v|asf|m2ts|mts|m4a|aac|mp3)(?:\$|[?#/])|[?&]mime_type=video_(mp4|webm)", RegexOption.IGNORE_CASE
+            "\\.(m3u8|m3u|mpd|mp4|webm|mov|m4v|mkv|flv|3gp|3g2|ogv|avi|wmv|mpg|mpeg|f4v|asf|m2ts|mts|m4a|aac|mp3|weba|opus)(?:\$|[?#/])|[?&]mime_type=video_(mp4|webm)", RegexOption.IGNORE_CASE
         )
         private val EXT_RE = Regex("\\.(mp4|webm|mov|m4v|mkv|flv|3gp|3g2|ogv|avi|wmv|mpg|mpeg|f4v|asf|m2ts|mts)\$")
         private val AD_URL_RE = Regex(
