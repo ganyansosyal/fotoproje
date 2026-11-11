@@ -344,3 +344,90 @@ open class SniffingWebViewClient(private val sniffer: VideoSniffer) : WebViewCli
         return super.shouldInterceptRequest(view, request)
     }
 }
+
+/**
+ * Facebook/Instagram CDN (fbcdn) ağ isteği kaydı. Videonun sesi neden yakalanmadı sorusunu
+ * cevaplamak için: her isteğin kodlama etiketi (efg -> vencode_tag), varlık kimliği,
+ * bayt aralığı, sınıflandırma sonucu (kind) ve reklam filtresine takılıp takılmadığı tutulur.
+ * Son 80 istek bellekte durur; imza / token parametreleri kaydedilmez.
+ */
+object FbNetLog {
+    private class E(
+        val t: Long, val file: String, val tag: String, val asset: String,
+        val range: String, val kind: String, val ad: Boolean, val mime: String
+    )
+
+    private val buf = Collections.synchronizedList(ArrayList<E>())
+
+    private fun efg(url: String): JSONObject? = try {
+        val raw = android.net.Uri.parse(url.substringBefore("#")).getQueryParameter("efg")
+        if (raw == null) null else {
+            var b = raw.replace('-', '+').replace('_', '/')
+            while (b.length % 4 != 0) b += "="
+            JSONObject(String(Base64.decode(b, Base64.DEFAULT), Charsets.UTF_8))
+        }
+    } catch (_: Throwable) {
+        null
+    }
+
+    fun add(url: String, rangeHeader: String?) {
+        try {
+            if (!url.contains("fbcdn.", true) && !url.contains("cdninstagram.", true)) return
+            val u = android.net.Uri.parse(url.substringBefore("#"))
+            val j = efg(url)
+            val bs = u.getQueryParameter("bytestart")
+            val be = u.getQueryParameter("byteend")
+            val range = when {
+                bs != null || be != null -> "q:${bs ?: ""}-${be ?: ""}"
+                !rangeHeader.isNullOrEmpty() -> "h:$rangeHeader"
+                else -> "-"
+            }
+            val e = E(
+                System.currentTimeMillis(),
+                (u.lastPathSegment ?: "?").take(40),
+                j?.optString("vencode_tag")?.take(60) ?: "(efg yok)",
+                (j?.optString("xpv_asset_id")?.ifEmpty { j.optString("video_id") } ?: "").take(24),
+                range,
+                VideoRules.classify(url) ?: "null",
+                VideoRules.isAd(url),
+                u.getQueryParameter("mime_type") ?: u.getQueryParameter("mime") ?: ""
+            )
+            synchronized(buf) {
+                buf.add(e)
+                while (buf.size > 80) buf.removeAt(0)
+            }
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun isAudio(e: E) = e.tag.contains("audio", true) || e.mime.startsWith("audio", true)
+
+    /** İndirme notuna sığacak kısa özet. */
+    fun summary(): String {
+        val l = synchronized(buf) { ArrayList(buf) }
+        if (l.isEmpty()) return "fbcdn isteği hiç görülmedi"
+        val audio = l.count { isAudio(it) }
+        val dash = l.count { it.tag.contains("dash", true) && !isAudio(it) }
+        val noEfg = l.count { it.tag == "(efg yok)" }
+        val ads = l.count { it.ad }
+        val nullKind = l.count { it.kind == "null" }
+        val assets = l.map { it.asset }.filter { it.isNotEmpty() }.toSet().size
+        return "fbcdn=${l.size} ses=$audio dashVideo=$dash efgYok=$noEfg reklamaTakılan=$ads sınıfsız=$nullKind varlık=$assets"
+    }
+
+    /** Ayrıntılı dökümü (her satır bir istek) metin olarak verir. */
+    fun dump(): String {
+        val l = synchronized(buf) { ArrayList(buf) }
+        val sb = StringBuilder()
+        for (e in l) {
+            sb.append(e.file).append(" | ").append(e.tag).append(" | asset=").append(e.asset)
+                .append(" | range=").append(e.range).append(" | kind=").append(e.kind)
+                .append(if (e.ad) " | REKLAM-FILTRESI" else "")
+                .append(if (e.mime.isNotEmpty()) " | mime=" + e.mime else "")
+                .append('\n')
+        }
+        return sb.toString()
+    }
+
+    fun clear() = buf.clear()
+}
