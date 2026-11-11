@@ -194,11 +194,19 @@ object Downloads {
             // blob: (MSE) videolar adresten indirilemez; Instagram/Facebook/YouTube'da sayfa adresi kullanılır
             val xPost = if (!social && !yt) Ytdlp.xPost(referer, task.page) else null
             // Facebook: gönderi adresi bulunamadıysa (akış/feed) ama doğrudan video adresi varsa, yt-dlp'yi atlayıp doğrudan indir
+            // Facebook akışında gönderi adresi gizli olabilir: fbcdn adresindeki efg içinden video kimliği alınıp
+            // gönderi adresi türetilir (yt-dlp ses+görüntüyü birleştirir; doğrudan fbcdn dosyası çoğu zaman sessiz gelir)
+            val fbPost: String? = if (social && !yt && kind != "blob" && Ytdlp.postUrl(referer, task.page) == null &&
+                Regex("fbcdn\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url)
+            ) {
+                VideoRules.assetId(task.url).takeIf { it.matches(Regex("\\d{6,}")) }
+                    ?.let { "https://www.facebook.com/watch/?v=$it" }
+            } else null
             val fbDirect = social && !yt && kind != "blob" && task.url.startsWith("http") &&
-                Ytdlp.postUrl(referer, task.page) == null &&
+                Ytdlp.postUrl(referer, task.page) == null && fbPost == null &&
                 Regex("(fbcdn|facebook)\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url)
             if ((kind != "blob" || yt || social || xPost != null) && !fbDirect) {
-                val post = if (social) Ytdlp.postUrl(referer, task.page) else xPost
+                val post = if (social) (Ytdlp.postUrl(referer, task.page) ?: fbPost) else xPost
                 val ytPage = if (yt) Ytdlp.youtubePage(referer, task.page) else null
                 if ((social && post == null) || (yt && ytPage == null)) {
                     throw IOException(
@@ -250,7 +258,10 @@ object Downloads {
                             notifyUi()
                         }
                         task.note = r.info
-                        if (r.info.contains("SES YOK") && !social && !yt && xPost == null && kind != "blob") {
+                        // Facebook: yt-dlp sessiz çıktıysa ve doğrudan fbcdn adresi varsa sessiz kaydetme, kendi yöntemimizi dene
+                        val fbSilentRetry = social && !yt && kind != "blob" &&
+                            Regex("fbcdn\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url)
+                        if (r.info.contains("SES YOK") && ((!social && !yt && xPost == null && kind != "blob") || fbSilentRetry)) {
                             // yt-dlp görüntüyü aldı ama sesi alamadı: kendi indiricimizle (ayrı ses akışını da alır) dene.
                             // O da olmazsa sessiz dosya yine de kaydedilir.
                             silentRes = r
@@ -363,7 +374,8 @@ object Downloads {
                         Regex("(cdninstagram|fbcdn)\\.", RegexOption.IGNORE_CASE).containsMatchIn(url)
                     ) {
                         // Ayrı ses yakalanamadı: sayfadaki sesli+görüntülü (progressive) dosyayı bul ve onu indir
-                        val alt = findProgressive(referer, task.cancel)
+                        // Akış sayfası yerine videonun kendi gönderi sayfası taranır (içinde sesli .mp4 adresi olur)
+                        val alt = findProgressive(Ytdlp.postUrl(referer, task.page) ?: referer, task.cancel)
                         if (alt != null) {
                             task.label = if (L.code == "tr") "Sesli sürüm indiriliyor…" else "Downloading version with audio…"
                             notifyUi()
@@ -513,7 +525,8 @@ object Downloads {
             pages.add("https://www.instagram.com/$k/${it.groupValues[2]}/embed/captioned/")
         }
         for (pg in pages) {
-            val hits = try { PageScan.scan(pg) { cancel.on } } catch (_: Throwable) { continue }
+            // force=true: PageScan.ENABLED kapalı olsa da bu yedek yol (yalnızca ses bulunamayınca) çalışmalı
+            val hits = try { PageScan.scan(pg, force = true) { cancel.on } } catch (_: Throwable) { continue }
             for (h in hits) {
                 if (cancel.on) throw CanceledEx()
                 val tr = Probe.avTracks(h.url, h.ref.ifEmpty { pg }) ?: continue
