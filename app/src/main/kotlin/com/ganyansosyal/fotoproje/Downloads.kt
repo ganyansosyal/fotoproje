@@ -757,6 +757,11 @@ object Downloads {
                 notifyUi(true)
                 muxed = SafeMux.single(ctx, src, d.path, task.cancel)
                 if (muxed) File(src).delete() else d.delete()
+                if (muxed && FfmpegFix.lastWasSilent) addNote(
+                    task,
+                    "Kaynakta ses akışı bulunamadı; dosyaya sessiz ses izi eklendi.",
+                    "No audio stream in the source; a silent audio track was added."
+                )
             }
             if (!muxed) {
                 File(src).copyTo(d, overwrite = false, bufferSize = 262144)
@@ -949,88 +954,17 @@ object Downloads {
 
 /**
  * Korumalı FFmpeg aktarımı: "ses yok" diye süreç KESİLMEZ.
- * Hep -c:v copy -c:a aac: görüntü aynen kopyalanır, ses (varsa) AAC'ye çevrilir.
- * "0:a:0?" ses izi hiç yoksa hata vermez; çıktı yine üretilir.
+ * Asıl iş [FfmpegFix.smart]'ta: ayrı ses -> videonun kendi sesi -> sessiz AAC izi (sırayla).
+ * Görüntü -c:v copy, ses -c:a aac.
  */
 object SafeMux {
-    private fun exe(ctx: Context) = File(ctx.applicationInfo.nativeLibraryDir, "libffmpeg.so")
+    /** Tek dosya (ham TS / parçalı MP4 / sessiz görünen MP4) -> temiz MP4. Çıktıda hep ses izi olur. */
+    fun single(ctx: Context, src: String, out: String, cancel: CancelFlag?): Boolean =
+        FfmpegFix.smart(ctx, src, null, out, cancel)
 
-    private fun libPath(ctx: Context): String {
-        val base = File(ctx.noBackupFilesDir, "youtubedl-android/packages")
-        return File(base, "ffmpeg/usr/lib").absolutePath + ":" + File(base, "python/usr/lib").absolutePath
-    }
-
-    private fun run(ctx: Context, args: List<String>, cancel: CancelFlag?): Boolean {
-        val e = exe(ctx)
-        if (!e.exists()) return false
-        return try {
-            val pb = ProcessBuilder(listOf(e.absolutePath, "-hide_banner", "-loglevel", "error", "-y") + args)
-            pb.environment()["LD_LIBRARY_PATH"] = libPath(ctx)
-            pb.environment()["TMPDIR"] = ctx.cacheDir.absolutePath
-            pb.redirectErrorStream(true)
-            pb.redirectOutput(File(ctx.cacheDir, "ffmpeg_mux.log")) // çıktı dosyaya: boru dolup takılmaz
-            val p = pb.start()
-            while (true) {
-                try {
-                    p.exitValue()
-                    break
-                } catch (_: IllegalThreadStateException) {
-                    if (cancel != null && cancel.on) {
-                        p.destroy()
-                        throw CanceledEx()
-                    }
-                    Thread.sleep(300)
-                }
-            }
-            p.exitValue() == 0
-        } catch (ce: CanceledEx) {
-            throw ce
-        } catch (_: Throwable) {
-            false
-        }
-    }
-
-    private fun good(o: File) = o.exists() && o.length() > 1024
-
-    /** Tek dosya (ham TS / parçalı MP4 / sessiz görünen MP4) -> temiz MP4. Başarılıysa true. */
-    fun single(ctx: Context, src: String, out: String, cancel: CancelFlag?): Boolean {
-        val o = File(out)
-        val probe = listOf("-fflags", "+genpts", "-analyzeduration", "100M", "-probesize", "100M")
-        val a = run(
-            ctx,
-            probe + listOf(
-                "-i", src, "-map", "0:v:0", "-map", "0:a:0?",
-                "-c:v", "copy", "-c:a", "aac", "-b:a", "160k",
-                "-max_muxing_queue_size", "4096", "-movflags", "+faststart", out
-            ),
-            cancel
-        ) && good(o)
-        if (a) return true
-        o.delete()
-        // Harita vermeden (FFmpeg kendi seçsin) bir kez daha
-        val b = run(
-            ctx,
-            probe + listOf("-i", src, "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", out),
-            cancel
-        ) && good(o)
-        if (!b) o.delete()
-        return b
-    }
-
-    /** Ayrı görüntü + ayrı ses -> tek MP4 (-c:v copy -c:a aac). Başarılıysa true. */
-    fun merge(ctx: Context, video: String, audio: String, out: String, cancel: CancelFlag?): Boolean {
-        val o = File(out)
-        val ok = run(
-            ctx,
-            listOf(
-                "-i", video, "-i", audio, "-map", "0:v:0", "-map", "1:a:0",
-                "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", out
-            ),
-            cancel
-        ) && good(o)
-        if (!ok) o.delete()
-        return ok
-    }
+    /** Ayrı görüntü + ayrı ses -> tek MP4. Başarısızsa sessiz iz eklenmez (ses dosyası korunur). */
+    fun merge(ctx: Context, video: String, audio: String, out: String, cancel: CancelFlag?): Boolean =
+        FfmpegFix.smart(ctx, video, audio, out, cancel, allowSilent = false)
 }
 
 /** Ses + görüntü birleştirici (MediaMuxer). */

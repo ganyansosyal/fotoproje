@@ -11,11 +11,19 @@ import java.io.IOException
 class AudioMissingException(message: String) : IOException(message)
 
 /**
- * FFmpeg yedeği. MediaMuxer birleştiremezse / çeviremezse devreye girer.
+ * FFmpeg yedeği ve akıllı birleştirici.
  * youtubedl-android kütüphanesindeki hazır ffmpeg dosyasını (libffmpeg.so) doğrudan çalıştırır.
- * Yeniden kodlama yapmaz (-c copy): hızlıdır, kalite kaybı olmaz.
+ *
+ * Akıllı birleştirme ([smart]) çıktının HER ZAMAN ses izi olmasını sağlar:
+ *  1. Ayrı ses dosyası geçerliyse:      -map 0:v:0 -map 1:a:0
+ *  2. Yoksa videonun kendi ses izi:     -map 0:v:0 -map 0:a:0   (ffmpeg ile aranır)
+ *  3. O da yoksa sessiz AAC izi eklenir: anullsrc + -shortest
+ * Görüntü her zaman -c:v copy (kalite kaybı yok), ses -c:a aac.
  */
 object FfmpegFix {
+    /** Son [smart] çağrısında sessiz AAC izi eklendiyse true (kaynakta gerçekten ses yoktu). */
+    @Volatile var lastWasSilent = false
+
     private fun bin(ctx: Context) = File(ctx.applicationInfo.nativeLibraryDir, "libffmpeg.so")
 
     private fun libPath(ctx: Context): String {
@@ -23,23 +31,55 @@ object FfmpegFix {
         return File(base, "ffmpeg/usr/lib").absolutePath + ":" + File(base, "python/usr/lib").absolutePath
     }
 
-    private fun run(ctx: Context, args: List<String>): Boolean {
+    private class Res(val code: Int, val log: String)
+
+    /** FFmpeg'i çalıştırır; çıktıyı dosyaya yönlendirir (boru dolup takılmaz), iptali dinler. */
+    private fun exec(ctx: Context, args: List<String>, cancel: CancelFlag?, level: String = "error"): Res? {
         val exe = bin(ctx)
-        if (!exe.exists()) return false
+        if (!exe.exists()) return null
+        val logFile = File(ctx.cacheDir, "ffmpeg_${System.nanoTime()}.log")
         return try {
-            val pb = ProcessBuilder(listOf(exe.absolutePath, "-hide_banner", "-loglevel", "error", "-y") + args)
+            val pb = ProcessBuilder(listOf(exe.absolutePath, "-hide_banner", "-loglevel", level, "-y") + args)
             pb.environment()["LD_LIBRARY_PATH"] = libPath(ctx)
             pb.environment()["TMPDIR"] = ctx.cacheDir.absolutePath
             pb.redirectErrorStream(true)
+            pb.redirectOutput(logFile)
             val p = pb.start()
-            p.inputStream.bufferedReader().use { it.readText() } // çıktıyı boşalt, takılmasın
-            p.waitFor() == 0
+            while (true) {
+                try {
+                    p.exitValue()
+                    break
+                } catch (_: IllegalThreadStateException) {
+                    if (cancel != null && cancel.on) {
+                        p.destroy()
+                        throw CanceledEx()
+                    }
+                    Thread.sleep(300)
+                }
+            }
+            Res(p.exitValue(), try { logFile.readText() } catch (_: Throwable) { "" })
+        } catch (ce: CanceledEx) {
+            throw ce
         } catch (_: Throwable) {
-            false
+            null
+        } finally {
+            try { logFile.delete() } catch (_: Throwable) {}
         }
     }
 
     private fun ok(f: File) = f.exists() && f.length() > 1024
+
+    /** Dosyada ses akışı var mı? FFmpeg'in kendi taramasıyla bakar (MediaExtractor opus vb. kaçırabilir). */
+    fun hasAudioStream(ctx: Context, path: String, cancel: CancelFlag? = null): Boolean {
+        val r = exec(
+            ctx,
+            listOf("-analyzeduration", "100M", "-probesize", "100M", "-i", path),
+            cancel,
+            "info"
+        )
+        if (r != null) return Regex("Stream #\\d+:\\d+.*: Audio:").containsMatchIn(r.log)
+        return Mux.tracks(path)?.second == true // ffmpeg yoksa Android çıkarıcıya güven
+    }
 
     private fun msgAudio(path: String, why: String): String =
         if (L.code == "tr") "Ses dosyası $why, indirme geçersiz (${File(path).name})"
@@ -64,40 +104,72 @@ object FfmpegFix {
     fun hasAudioFile(audioPath: String?): Boolean =
         !audioPath.isNullOrEmpty() && File(audioPath).let { it.exists() && it.length() > 0L }
 
-    /** Ham TS / parçalı MP4 dosyasını temiz MP4'e çevirir. Başarılıysa true. */
-    fun remux(ctx: Context, src: String, out: String): Boolean {
-        val o = File(out)
-        val good = run(
-            ctx,
-            listOf("-i", src, "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart", out)
-        ) && ok(o)
-        // aac_adtstoasc bazı ses türlerinde hata verir: filtresiz bir kez daha dene
-        if (good) return true
-        o.delete()
-        val again = run(ctx, listOf("-i", src, "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy", "-movflags", "+faststart", out)) && ok(o)
-        if (!again) o.delete()
-        return again
-    }
+    private val PROBE = listOf("-fflags", "+genpts", "-analyzeduration", "100M", "-probesize", "100M")
+    private val OUT_OPTS = listOf(
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-strict", "experimental",
+        "-max_muxing_queue_size", "4096", "-movflags", "+faststart"
+    )
 
     /**
-     * Ayrı görüntü + ayrı ses dosyasını tek MP4'te birleştirir. Başarılıysa true.
+     * AKILLI BİRLEŞTİRME. Başarılıysa true; çıktıda her zaman bir ses izi olur
+     * ([allowSilent] true ise kaynakta ses yoksa sessiz AAC izi eklenir).
      *
-     * Birleştirmeye geçmeden ÖNCE ses dosyası doğrulanır: yoksa / boşsa FFmpeg hiç çalıştırılmaz,
-     * [AudioMissingException] fırlatılır (sessiz / rastgele mp4 üretilmez).
-     * Görüntü dosyası da yoksa ya da boşsa [IOException] fırlatılır.
+     * @param audio ayrı ses dosyası (yoksa null). Geçerliyse önce o kullanılır.
+     * @param allowSilent false: ses bulunamazsa sessiz iz EKLENMEZ, false döner
+     *        (ayrı ses dosyası varken birleşme başarısız olursa o dosya kaybolmasın diye).
      */
-    fun merge(ctx: Context, video: String, audio: String, out: String): Boolean {
-        requireAudio(audio)
+    fun smart(
+        ctx: Context, video: String, audio: String?, out: String, cancel: CancelFlag?,
+        allowSilent: Boolean = audio.isNullOrEmpty()
+    ): Boolean {
+        lastWasSilent = false
         val v = File(video)
         if (!v.exists() || v.length() <= 0L) {
             throw IOException(if (L.code == "tr") "Görüntü dosyası yok ya da boş" else "Video file missing or empty")
         }
         val o = File(out)
-        val good = run(
-            ctx,
-            listOf("-i", video, "-i", audio, "-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-movflags", "+faststart", out)
-        ) && ok(o)
-        if (!good) o.delete()
-        return good
+        fun attempt(args: List<String>): Boolean {
+            val r = exec(ctx, args + out, cancel)
+            val good = r != null && r.code == 0 && ok(o)
+            if (!good) try { o.delete() } catch (_: Throwable) {}
+            return good
+        }
+
+        // 1) Ayrı ses dosyası: zorunlu iki harita
+        if (hasAudioFile(audio)) {
+            if (attempt(PROBE + listOf("-i", video, "-i", audio!!, "-map", "0:v:0", "-map", "1:a:0") + OUT_OPTS)) return true
+            if (!allowSilent) return false
+        }
+        // 2) Videonun kendi ses izi (varsa) korunur
+        if (hasAudioStream(ctx, video, cancel)) {
+            if (attempt(PROBE + listOf("-i", video, "-map", "0:v:0", "-map", "0:a:0") + OUT_OPTS)) return true
+            // Harita vermeden (FFmpeg kendi seçsin) bir kez daha
+            if (attempt(PROBE + listOf("-i", video) + OUT_OPTS)) return true
+        }
+        if (!allowSilent) return false
+        // 3) Ses hiç yok: sessiz AAC izi ekle (dosya "ses izi yok" halinde kalmasın)
+        val silent = attempt(
+            PROBE + listOf(
+                "-i", video,
+                "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
+                "-map", "0:v:0", "-map", "1:a:0", "-shortest"
+            ) + OUT_OPTS
+        )
+        if (silent) lastWasSilent = true
+        return silent
+    }
+
+    /** Ham TS / parçalı MP4 dosyasını temiz MP4'e çevirir (ses korunur / yoksa sessiz iz eklenir). */
+    fun remux(ctx: Context, src: String, out: String): Boolean = smart(ctx, src, null, out, null)
+
+    /**
+     * Ayrı görüntü + ayrı ses dosyasını tek MP4'te birleştirir. Başarılıysa true.
+     *
+     * Birleştirmeden ÖNCE ses dosyası doğrulanır: yoksa / boşsa FFmpeg hiç çalıştırılmaz,
+     * [AudioMissingException] fırlatılır. Başarısız olursa sessiz iz EKLENMEZ (ses dosyası korunur).
+     */
+    fun merge(ctx: Context, video: String, audio: String, out: String): Boolean {
+        requireAudio(audio)
+        return smart(ctx, video, audio, out, null, allowSilent = false)
     }
 }
