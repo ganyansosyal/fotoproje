@@ -193,7 +193,8 @@ object Ytdlp {
     ): String {
         val dir = ctx.cacheDir
         val base = "yt_${task.createdAt}"
-        dir.listFiles()?.filter { it.name.startsWith("$base.") }?.forEach { it.delete() }
+        // 1. denemede önceki (duraklatılan/yarım kalan) dosyalar silinmez: yt-dlp kaldığı yerden sürdürür
+        if (second) dir.listFiles()?.filter { it.name.startsWith("$base.") }?.forEach { it.delete() }
 
         val req = YoutubeDLRequest(src)
         req.addOption("--no-playlist")

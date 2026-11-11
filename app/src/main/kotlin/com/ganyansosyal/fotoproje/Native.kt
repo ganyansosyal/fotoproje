@@ -13,6 +13,7 @@ import android.os.IBinder
 import android.webkit.CookieManager
 import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.RandomAccessFile
@@ -280,7 +281,18 @@ object Native {
         var written = 0
         val err = AtomicReference<Throwable?>(null)
         val keyCache = HashMap<String, ByteArray>()
-        val out = BufferedOutputStream(FileOutputStream(path), 1 shl 20)
+        // Duraklat/Devam: yazılan parça sayısı ve dosya boyutu yan dosyada tutulur
+        val side = File("$path.seg")
+        var resumed = false
+        try {
+            val f = File(path)
+            val p = if (side.exists()) side.readText().trim().split(",") else emptyList()
+            if (f.exists() && p.size == 3 && p[0].toIntOrNull() == total && p[2].toLongOrNull() == f.length()) {
+                val w = p[1].toIntOrNull() ?: 0
+                if (w in 1..total) { written = w; next = w; resumed = true }
+            }
+        } catch (_: Exception) {}
+        val out = BufferedOutputStream(FileOutputStream(path, resumed), 1 shl 20)
 
         fun fail(e: Throwable) {
             err.compareAndSet(null, e)
@@ -290,7 +302,7 @@ object Native {
         // İstekler arası bekleme: başta 120 ms (en çok ~8 istek/sn); 429 gelince ikiye katlanır
         // (en çok 2 sn), başarılı isteklerde yavaşça eski haline döner.
         val pacer = Any()
-        var gap = 120L
+        var gap = 0L
         var slotAt = 0L
         fun pace() {
             val now = System.currentTimeMillis()
@@ -314,7 +326,7 @@ object Native {
                 try {
                     pace()
                     val b = Http.bytes(url, headers, cancel)
-                    synchronized(pacer) { if (gap > 120L) gap = maxOf(120L, gap - 20L) }
+                    synchronized(pacer) { if (gap > 0L) gap = maxOf(0L, gap - 20L) }
                     return b
                 } catch (e: CanceledEx) {
                     throw e
@@ -323,7 +335,7 @@ object Native {
                     if (isThrottle(e)) {
                         // Sunucu "çok fazla istek" dedi: bağlantı sayısını düşür, üstel bekleyip tekrar dene
                         if (lim.limit > 1) lim.limit = maxOf(1, lim.limit / 2)
-                        synchronized(pacer) { gap = minOf(2000L, gap * 2) }
+                        synchronized(pacer) { gap = minOf(2000L, maxOf(100L, gap * 2)) }
                         if (th++ >= 12) throw e
                         val ra = (e as? HttpErr)?.retryAfterMs ?: 0L
                         val wait = maxOf(minOf(15000L, 1000L shl minOf(th - 1, 4)), minOf(ra, 60000L))
@@ -367,7 +379,7 @@ object Native {
                     while (true) {
                         if (err.get() != null || cancel.on) return
                         if (id >= lim.limit || next >= total) return
-                        if (next - written <= 32) break
+                        if (next - written <= 64) break
                         cv.await(100, TimeUnit.MILLISECONDS)
                     }
                     next++
@@ -387,8 +399,8 @@ object Native {
         }
 
         try {
-            if (init != null) out.write(fetch(init))
-            progress(0, total.toLong())
+            if (init != null && !resumed) out.write(fetch(init))
+            progress(written.toLong(), total.toLong())
             val threads = (0 until minOf(conns, total)).map { id ->
                 Thread {
                     try {
@@ -406,6 +418,10 @@ object Native {
             if (written < total) throw IOException("Eksik parça")
         } finally {
             try { out.close() } catch (_: Exception) {}
+            try {
+                if (written >= total) side.delete()
+                else side.writeText("$total,$written,${File(path).length()}")
+            } catch (_: Exception) {}
         }
     }
 
@@ -431,42 +447,83 @@ object Native {
         }
         if (strict && total <= 0) throw IOException("Parçalı indirme desteklenmiyor")
 
-        // Küçük dosya ya da Range yok: tek bağlantı
+        // Küçük dosya ya da Range yok: tek bağlantı (Range varsa duraklatınca kaldığı yerden sürer)
         if (total < 4L * 1024 * 1024) {
-            Http.get(url, headers, null, cancel) { c ->
-                val len = c.contentLengthLong
-                var got = 0L
-                c.inputStream.use { ins ->
-                    FileOutputStream(path).use { fo ->
-                        val buf = ByteArray(262144)
-                        while (true) {
-                            val n = ins.read(buf)
-                            if (n < 0) break
-                            if (cancel.on) throw CanceledEx()
-                            fo.write(buf, 0, n)
-                            got += n
-                            progress(got, if (len > 0) len else -1L)
+            val side = File("$path.sm")
+            val ident = url.substringBefore("?")
+            var have = 0L
+            try {
+                val f = File(path)
+                val ln = if (side.exists()) side.readText().split("\n") else emptyList()
+                if (total > 0 && f.exists() && ln.size == 2 && ln[0] == ident &&
+                    ln[1].trim().toLongOrNull() == f.length() && f.length() > 0 && f.length() < total
+                ) have = f.length()
+            } catch (_: Exception) {}
+            var complete = false
+            try {
+                Http.get(url, headers, if (have > 0) "bytes=$have-" else null, cancel) { c ->
+                    val resume = have > 0 && c.responseCode == 206
+                    val len0 = c.contentLengthLong
+                    val len = if (resume) (if (len0 > 0) have + len0 else -1L) else len0
+                    var got = if (resume) have else 0L
+                    c.inputStream.use { ins ->
+                        FileOutputStream(path, resume).use { fo ->
+                            val buf = ByteArray(262144)
+                            while (true) {
+                                val n = ins.read(buf)
+                                if (n < 0) break
+                                if (cancel.on) throw CanceledEx()
+                                fo.write(buf, 0, n)
+                                got += n
+                                progress(got, if (len > 0) len else -1L)
+                            }
                         }
                     }
+                    if (len > 0 && got != len) throw IOException("İndirme eksik kaldı ($got/$len bayt)")
+                    progress(got, if (len > 0) len else -1L)
+                    complete = true
                 }
-                if (len > 0 && got != len) throw IOException("İndirme eksik kaldı ($got/$len bayt)")
-                progress(got, if (len > 0) len else -1L)
+            } finally {
+                try {
+                    if (complete || total <= 0) side.delete()
+                    else side.writeText(ident + "\n" + File(path).length())
+                } catch (_: Exception) {}
             }
             return
         }
 
         val chunk = 16L * 1024 * 1024
         val n = ((total + chunk - 1) / chunk).toInt()
+        // Duraklat/Devam: biten 16 MB'lık parçaların numaraları yan dosyada tutulur
+        val side = File("$path.chk")
+        val done = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
+        var resumed = false
+        try {
+            val f = File(path)
+            val ln = if (side.exists()) side.readText().trim().split(",") else emptyList()
+            if (f.exists() && f.length() == total && ln.size >= 2 && ln[0].toLongOrNull() == total) {
+                for (x in ln.drop(1)) { val d = x.toIntOrNull(); if (d != null && d in 0 until n) done.add(d) }
+                resumed = done.isNotEmpty()
+            }
+        } catch (_: Exception) {}
+        var got0 = 0L
+        for (d in done) got0 += minOf(total, d * chunk + chunk) - d * chunk
         val raf = RandomAccessFile(path, "rw")
         try {
-            raf.setLength(0)
-            raf.setLength(total)
+            if (!resumed) {
+                raf.setLength(0)
+                raf.setLength(total)
+            }
             val ch = raf.channel
-            val got = AtomicLong(0)
+            val got = AtomicLong(got0)
             val nextIdx = AtomicInteger(0)
             val retry = ConcurrentLinkedQueue<Int>()
             val lim = Lim(conns)
             val err = AtomicReference<Throwable?>(null)
+
+            fun saveSide() {
+                try { synchronized(done) { side.writeText("$total," + done.joinToString(",")) } } catch (_: Exception) {}
+            }
 
             fun writeAt(buf: ByteArray, len: Int, pos: Long, c: FileChannel) {
                 val bb = ByteBuffer.wrap(buf, 0, len)
@@ -480,6 +537,7 @@ object Native {
                     if (id >= lim.limit && retry.isEmpty()) return
                     val i = retry.poll() ?: nextIdx.getAndIncrement()
                     if (i >= n) return
+                    if (done.contains(i)) continue
                     val from = i * chunk
                     val to = minOf(total, from + chunk) - 1
                     var k = 0
@@ -503,6 +561,8 @@ object Native {
                                     if (pos != to + 1) throw IOException("Parça eksik geldi")
                                 }
                             }
+                            done.add(i)
+                            saveSide()
                             break
                         } catch (e: CanceledEx) {
                             err.compareAndSet(null, e)
@@ -560,6 +620,7 @@ object Native {
             if (err.get() == null && !cancel.on && !retry.isEmpty()) worker(0)
             err.get()?.let { throw it }
             if (cancel.on) throw CanceledEx()
+            try { side.delete() } catch (_: Exception) {}
             progress(total, total)
         } finally {
             try { raf.close() } catch (_: Exception) {}
