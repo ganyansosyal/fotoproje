@@ -333,6 +333,17 @@ class DownloadsActivity : Activity() {
         s.setTextColor(sub)
         s.textSize = 12.5f
         col.addView(s, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(2) })
+        // GEÇİCİ TEŞHİS: hangi yöntemin kullanıldığını (yt-dlp/FFmpeg/SES YOK ...) göster. Sorun çözülünce kaldır.
+        val nt = t.note
+        if (!nt.isNullOrEmpty()) {
+            val nv = TextView(this)
+            nv.text = nt
+            nv.maxLines = 6
+            nv.ellipsize = android.text.TextUtils.TruncateAt.END
+            nv.setTextColor(sub)
+            nv.textSize = 10.5f
+            col.addView(nv, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(2) })
+        }
         top.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
 
         // Sağda ikon düğmeler: paylaş + sil

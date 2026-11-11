@@ -201,7 +201,9 @@ object Ytdlp {
         // H.264 + AAC (her telefonda oynar); olmazsa en iyi kombinasyon
         req.addOption(
             "-f",
-            if (anyAudio) "bv*[vcodec^=avc]+ba/bv*+ba/b"
+            // 2. deneme (1. sessiz çıktı): Instagram/Facebook'ta önce görüntü+ses birlikte gelen (muxed) biçim
+            if (anyAudio && isSocial(src)) "b/bv*[vcodec^=avc]+ba/bv*+ba"
+            else if (anyAudio) "bv*[vcodec^=avc]+ba/bv*+ba/b"
             else "bv*[vcodec^=avc1]+ba[acodec^=mp4a]/bv*[vcodec^=avc]+ba/b[vcodec^=avc1]/bv*+ba/b"
         )
         req.addOption("--merge-output-format", "mp4")
