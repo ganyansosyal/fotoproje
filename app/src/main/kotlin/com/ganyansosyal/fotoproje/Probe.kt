@@ -367,6 +367,27 @@ object Probe {
             kind = k
         }
         if (kind.isEmpty()) kind = sniffKind(url, referer) ?: "mp4"
+        if (kind == "manifest") {
+            // JSON kalite listesi (ör. {"qualities":{"720":[{"url":...}]}}) ya da uzantısız m3u8:
+            // içindeki gerçek akış adresine çevrilip normal yoldan incelenir.
+            val body = try {
+                textRetry(url, referer)
+            } catch (e: CanceledEx) {
+                throw e
+            } catch (_: Throwable) {
+                ""
+            }
+            if (body.trimStart('\uFEFF', ' ', '\n', '\r', '\t').startsWith("#EXTM3U")) {
+                return probeOne(url, "m3u8", referer, children)
+            }
+            val opts = StreamQuality.parse(body, url).options
+            val master = opts.firstOrNull { it.type == StreamType.HLS_MASTER && it.url != url }
+            if (master != null) return probeOne(master.url, "m3u8", referer, children)
+            val direct = opts.filter { it.type == StreamType.PROGRESSIVE && it.url != url }
+                .maxByOrNull { it.height }
+            if (direct != null) return probeOne(direct.url, "mp4", referer, children)
+            return MediaInfo(url, "mp4").also { it.usable = false }
+        }
         val info = MediaInfo(url, kind)
         try {
             if (kind == "blob") return info
@@ -703,6 +724,23 @@ object Probe {
                 res.add(m)
             } else res.add(e)
         }
+        // Aynı videonun farklı adresli kopyaları (CDN / token / birden çok ana liste) aynı kaliteleri
+        // tekrar tekrar üretir: kalite başına (tür + çözünürlük) tek satır kalır, en yüksek bit hızı korunur.
+        val bestQ = HashMap<String, MediaInfo>()
+        for (m in res) {
+            if (!m.url.contains("#fpq=")) continue
+            val key = m.kind + "|" + (if (m.height > 0) m.height.toString() else "bw" + m.bw)
+            val cur = bestQ[key]
+            if (cur == null || m.bw > cur.bw) bestQ[key] = m
+        }
+        val seenQ = HashSet<String>()
+        val unique = res.filter { m ->
+            if (!m.url.contains("#fpq=")) return@filter true
+            val key = m.kind + "|" + (if (m.height > 0) m.height.toString() else "bw" + m.bw)
+            bestQ[key] === m && seenQ.add(key)
+        }
+        res.clear()
+        res.addAll(unique)
         val picked = pick(res)
         res.clear()
         res.addAll(picked)

@@ -110,6 +110,8 @@ object Net {
         val head = String(d, 0, minOf(n, 600), Charsets.ISO_8859_1)
         if (head.trimStart().startsWith("#EXTM3U")) return "m3u8"
         if (head.contains("<MPD")) return "mpd"
+        // JSON kalite listesi (qualities / url alanlı): Probe içinde gerçek akış adresine çevrilir
+        if (head.trimStart().startsWith("{") && head.contains("\"qualities\"")) return "manifest"
         val box = String(d, 4, 4, Charsets.ISO_8859_1)
         if (box == "ftyp" || box == "moov" || box == "mdat" || box == "free" || box == "wide") return "mp4"
         if (d[0] == 0x1A.toByte() && d[1] == 0x45.toByte() && d[2] == 0xDF.toByte() && d[3] == 0xA3.toByte()) {
