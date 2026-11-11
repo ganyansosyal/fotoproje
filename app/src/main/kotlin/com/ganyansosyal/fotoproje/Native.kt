@@ -262,7 +262,7 @@ object Native {
     }
 
     private fun isThrottle(e: Exception) =
-        e is HttpErr && (e.code == 403 || e.code == 429 || e.code == 503)
+        e is HttpErr && (e.code == 429 || e.code == 503)
 
     // ------------------------------------------------ 1) HLS / DASH parçaları
     fun segments(
@@ -299,43 +299,21 @@ object Native {
             lk.withLock { cv.signalAll() }
         }
 
-        // İstekler arası bekleme: başta 120 ms (en çok ~8 istek/sn); 429 gelince ikiye katlanır
-        // (en çok 2 sn), başarılı isteklerde yavaşça eski haline döner.
-        val pacer = Any()
-        var gap = 0L
-        var slotAt = 0L
-        fun pace() {
-            val now = System.currentTimeMillis()
-            var w = synchronized(pacer) {
-                val s = maxOf(now, slotAt)
-                slotAt = s + gap
-                s - now
-            }
-            while (w > 0) {
-                if (cancel.on) throw CanceledEx()
-                val st = minOf(w, 100L)
-                Thread.sleep(st)
-                w -= st
-            }
-        }
+        // Kısıtlama yok: tüm bağlantılar tam hızda çalışır (istek aralığı / bağlantı düşürme kaldırıldı).
 
         fun fetch(url: String): ByteArray {
             var k = 0
             var th = 0
             while (true) {
                 try {
-                    pace()
                     val b = Http.bytes(url, headers, cancel)
-                    synchronized(pacer) { if (gap > 0L) gap = maxOf(0L, gap - 20L) }
                     return b
                 } catch (e: CanceledEx) {
                     throw e
                 } catch (e: Exception) {
                     if (cancel.on) throw CanceledEx()
                     if (isThrottle(e)) {
-                        // Sunucu "çok fazla istek" dedi: bağlantı sayısını düşür, üstel bekleyip tekrar dene
-                        if (lim.limit > 1) lim.limit = maxOf(1, lim.limit / 2)
-                        synchronized(pacer) { gap = minOf(2000L, maxOf(100L, gap * 2)) }
+                        // Sunucu "çok fazla istek" dedi: bağlantıları düşürmeden üstel bekleyip tekrar dene
                         if (th++ >= 12) throw e
                         val ra = (e as? HttpErr)?.retryAfterMs ?: 0L
                         val wait = maxOf(minOf(15000L, 1000L shl minOf(th - 1, 4)), minOf(ra, 60000L))
@@ -378,8 +356,8 @@ object Native {
                 val i = lk.withLock {
                     while (true) {
                         if (err.get() != null || cancel.on) return
-                        if (id >= lim.limit || next >= total) return
-                        if (next - written <= 64) break
+                        if (next >= total) return
+                        if (id < lim.limit && next - written <= 64) break
                         cv.await(100, TimeUnit.MILLISECONDS)
                     }
                     next++
@@ -569,17 +547,6 @@ object Native {
                             return
                         } catch (e: Exception) {
                             got.addAndGet(-part)
-                            if (isThrottle(e) && lim.limit > 1) {
-                                // Sunucu eşzamanlı bağlantıyı kısıyor: bağlantıyı yarıya indir,
-                                // deneme hakkını harcamadan yeniden dene (en az 1 bağlantıya kadar).
-                                lim.limit = maxOf(1, lim.limit / 2)
-                                if (id >= lim.limit) {
-                                    retry.add(i)
-                                    return
-                                }
-                                Thread.sleep(600)
-                                continue
-                            }
                             if (isThrottle(e)) {
                                 // Tek bağlantıda bile kısıtlanıyorsa üstel bekleyip daha çok dene
                                 if (k++ >= 12) {
