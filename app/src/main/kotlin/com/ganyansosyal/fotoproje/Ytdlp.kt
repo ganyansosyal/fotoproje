@@ -47,6 +47,8 @@ object Ytdlp {
     private val SOCIAL = Regex("(instagram\\.com|cdninstagram\\.|fbcdn\\.|facebook\\.com|fb\\.watch)", RegexOption.IGNORE_CASE)
     private val YT = Regex("(youtube\\.com|youtu\\.be|googlevideo\\.com|ytimg\\.com|youtube-nocookie\\.com)", RegexOption.IGNORE_CASE)
 
+    private val FB = Regex("(facebook\\.com|fb\\.watch|fbcdn\\.)", RegexOption.IGNORE_CASE)
+
     fun isYoutube(vararg urls: String) = urls.any { YT.containsMatchIn(it) }
     fun isSocial(vararg urls: String) = urls.any { SOCIAL.containsMatchIn(it) }
 
@@ -152,13 +154,22 @@ object Ytdlp {
         if (!ensure(ctx)) throw IOException("yt-dlp başlatılamadı: " + (initError ?: "?"))
         var why: String? = null
         var silent: String? = null // sesi olmayan ama sağlam çıkan ilk sonuç (ikinci deneme de olmazsa bu verilir)
+        var fbNoCookies = false // Facebook sayfası HTTP 500 verirse çerezsiz yeniden dene
         for (attempt in 1..2) {
             val path = try {
-                runOnce(ctx, task, src, referer, attempt == 2, report, anyAudio = silent != null)
+                runOnce(ctx, task, src, referer, attempt == 2, report, anyAudio = silent != null, noCookies = fbNoCookies)
             } catch (e: CanceledEx) {
                 throw e
             } catch (e: Throwable) {
                 if (silent != null) return Result(silent, "yt-dlp #1 · " + describe(silent) + " · SES YOK")
+                // Facebook sayfayı (çerez/oturum yüzünden) 500 ile reddedebilir: bir kez çerezsiz dene
+                if (attempt == 1 && !fbNoCookies && FB.containsMatchIn(src) &&
+                    (e.message ?: "").let { it.contains("500") || it.contains("Unable to download webpage", true) }
+                ) {
+                    fbNoCookies = true
+                    report(-1.0, "Facebook yeniden deneniyor…")
+                    continue
+                }
                 throw e
             }
             why = check(path)
@@ -189,7 +200,7 @@ object Ytdlp {
 
     private fun runOnce(
         ctx: Context, task: DownloadTask, src: String, referer: String, second: Boolean,
-        report: (Double, String) -> Unit, anyAudio: Boolean = false
+        report: (Double, String) -> Unit, anyAudio: Boolean = false, noCookies: Boolean = false
     ): String {
         val dir = ctx.cacheDir
         val base = "yt_${task.createdAt}"
@@ -212,7 +223,8 @@ object Ytdlp {
         req.addOption("--retries", "3")
         req.addOption("--fragment-retries", "5")
         req.addOption("--socket-timeout", "25")
-        req.addOption("--user-agent", Net.ua)
+        // Facebook: WebView'in mobil UA'sı yt-dlp'nin masaüstü sayfa çözümleyicisiyle uyuşmaz (HTTP 500); yt-dlp'nin kendi UA'sı kullanılır
+        if (!FB.containsMatchIn(src)) req.addOption("--user-agent", Net.ua)
         if (second) {
             req.addOption("--downloader", "ffmpeg")
             req.addOption("--fixup", "force")
@@ -220,7 +232,7 @@ object Ytdlp {
             req.addOption("--concurrent-fragments", "10")
         }
         if (referer.startsWith("http")) req.addOption("--referer", referer)
-        val cf = cookieFile(ctx, src, base)
+        val cf = if (noCookies) null else cookieFile(ctx, src, base)
         if (cf != null) req.addOption("--cookies", cf.path)
 
         val pid = "fp_${task.id}_" + (if (second) 2 else 1)
