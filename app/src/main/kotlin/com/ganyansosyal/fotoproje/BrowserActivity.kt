@@ -2559,25 +2559,74 @@ class BrowserActivity : Activity() {
     }
 
     // ---- indirme
+    /**
+     * Facebook akışında (feed) video, gönderi adresi olmadan tek başına (sessiz fbcdn) iner.
+     * Bu betik oynayan / ekranda en büyük videodan yukarı çıkıp gönderinin kendi adresini
+     * (reel, videos, watch?v=, posts, permalink, share) ya da video kimliğini bulur.
+     * Bulunamazsa boş döner (başka videonun adresi tahmin edilmez).
+     */
+    private val FB_POST_JS = """
+(function(){try{
+var POST=/(\/reel\/\d+|\/videos\/\d+|\/watch\/?\?(?:[^#]*&)?v=\d+|\/video\.php\?(?:[^#]*&)?v=\d+|\/posts\/[\w.-]+|\/permalink\.php\?|\/permalink\/|\/story\.php\?|\/share\/[rvp]\/[\w-]+|fb\.watch\/[\w-]+)/i;
+var abs=function(h){try{return new URL(h,location.href).href}catch(e){return ''}};
+var good=function(h){h=abs(h);return (h&&/^https?:\/\/[^\/]*(facebook\.com|fb\.watch)/i.test(h)&&POST.test(h))?h:''};
+var vs=[].slice.call(document.querySelectorAll('video'));
+var best=null,bs=-1;
+vs.forEach(function(v){var r=v.getBoundingClientRect();
+var w=Math.max(0,Math.min(r.right,innerWidth)-Math.max(r.left,0));
+var h=Math.max(0,Math.min(r.bottom,innerHeight)-Math.max(r.top,0));
+var sc=w*h+(v.paused?0:1e9);if(sc>bs){bs=sc;best=v}});
+if(!best)return '';
+var el=best;
+for(var i=0;el&&i<14;i++,el=el.parentElement){
+var ds=el.getAttribute&&el.getAttribute('data-store');
+if(ds){var m=/"videoID":"?(\d{6,})/.exec(ds);if(m)return 'https://www.facebook.com/watch/?v='+m[1];}
+var vid=el.getAttribute&&(el.getAttribute('data-video-id')||el.getAttribute('data-videoid'));
+if(vid&&/^\d{6,}$/.test(vid))return 'https://www.facebook.com/watch/?v='+vid;
+var as=el.querySelectorAll?el.querySelectorAll('a[href]'):[];
+for(var j=0;j<as.length;j++){var g=good(as[j].getAttribute('href'));if(g)return g.split('#')[0];}
+if(el.tagName==='ARTICLE'||(el.getAttribute&&el.getAttribute('role')==='article'))break;
+}
+return '';
+}catch(e){return ''}})()
+"""
+
     private fun startDownload(
         tb: Tab, url: String, kind: String, name: String? = null, others: List<FoundItem> = emptyList()
     ) {
         if (isYtTab(tb)) { toast(t("ytNoDl")); return }
         try { tb.web?.settings?.userAgentString?.takeIf { it.isNotBlank() }?.let { Net.ua = it } } catch (_: Throwable) {}
-        dart(
-            "download",
-            mapOf(
-                "url" to url,
-                "kind" to kind,
-                "ref" to (tb.pRef ?: tb.web?.url ?: ""),
-                "title" to (name ?: tb.title),
-                "tab" to tb.id,
-                // Seçilen kaynak olmazsa sırayla bunlar denenir
-                "alts" to others.filter { it.url != url && it.kind != "blob" }.map { it.kind + "|" + it.url }
-            ),
-            { r -> toast(if (r is String) r else t("downloadStarted")) },
-            { toast(t("failed")) }
-        )
+        val cur = tb.pRef ?: tb.web?.url ?: ""
+        fun send(ref: String) {
+            dart(
+                "download",
+                mapOf(
+                    "url" to url,
+                    "kind" to kind,
+                    "ref" to ref,
+                    "title" to (name ?: tb.title),
+                    "tab" to tb.id,
+                    // Seçilen kaynak olmazsa sırayla bunlar denenir
+                    "alts" to others.filter { it.url != url && it.kind != "blob" }.map { it.kind + "|" + it.url }
+                ),
+                { r -> toast(if (r is String) r else t("downloadStarted")) },
+                { toast(t("failed")) }
+            )
+        }
+        val fb = Regex("(facebook\\.com|fbcdn\\.|fb\\.watch)", RegexOption.IGNORE_CASE)
+            .containsMatchIn(url + " " + cur)
+        val web = tb.web
+        if (fb && web != null && Ytdlp.postUrl(cur) == null && kind != "blob") {
+            // Gönderi adresi bilinmiyor: sayfadan bul, yt-dlp'ye ver (ses+görüntü birlikte gelir)
+            web.evaluateJavascript(FB_POST_JS) { raw ->
+                val found = try {
+                    (org.json.JSONTokener(raw ?: "").nextValue() as? String)?.trim()
+                } catch (_: Throwable) { null }
+                send(if (!found.isNullOrEmpty() && found.startsWith("http")) found else cur)
+            }
+        } else {
+            send(cur)
+        }
     }
 
     /** İndir düğmesi: parmakla sürüklenir (sağ/sol/yukarı/aşağı), bırakılan yer hatırlanır. */
