@@ -192,7 +192,11 @@ object Downloads {
             val social = Ytdlp.isSocial(task.url, referer)
             // blob: (MSE) videolar adresten indirilemez; Instagram/Facebook/YouTube'da sayfa adresi kullanılır
             val xPost = if (!social && !yt) Ytdlp.xPost(referer, task.page) else null
-            if (kind != "blob" || yt || social || xPost != null) {
+            // Facebook: gönderi adresi bulunamadıysa (akış/feed) ama doğrudan video adresi varsa, yt-dlp'yi atlayıp doğrudan indir
+            val fbDirect = social && !yt && kind != "blob" && task.url.startsWith("http") &&
+                Ytdlp.postUrl(referer, task.page) == null &&
+                Regex("(fbcdn|facebook)\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url)
+            if ((kind != "blob" || yt || social || xPost != null) && !fbDirect) {
                 val post = if (social) Ytdlp.postUrl(referer, task.page) else xPost
                 val ytPage = if (yt) Ytdlp.youtubePage(referer, task.page) else null
                 if ((social && post == null) || (yt && ytPage == null)) {
@@ -260,7 +264,10 @@ object Downloads {
                     } catch (e: Throwable) {
                         if (task.cancel.on) throw CanceledEx()
                         // Instagram/Facebook/YouTube: eski yöntem sessiz/bozuk video üretiyordu, net hata göster
-                        if (social || yt || (kind == "blob" && xPost == null)) {
+                        // Facebook: yt-dlp olmazsa doğrudan video adresi varsa eski (ses birleştirmeli) yönteme düş
+                        val fbFallback = social && !yt && kind != "blob" &&
+                            Regex("fbcdn\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url)
+                        if ((social && !fbFallback) || yt || (kind == "blob" && xPost == null)) {
                             if (ytNote != null) throw IOException("NewPipe: " + ytNote + " | " + (e.message ?: "?"))
                             throw e
                         }

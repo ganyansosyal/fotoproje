@@ -181,7 +181,41 @@ object Media {
    // "Orijinal ses" bağlantısı (/reels/audio/...) gönderi adresi değildir, atlanır
    if(a){ for(k=0;k<a.length;k++){ h=a[k].getAttribute('href')||''; if(RX.test(h)&&h.indexOf('/audio')<0) return new URL(h,location.href).href; } }
   }
+  // Facebook akışta zaman damgası bağlantısının adresini gizler (href="#"): üzerine gelme olayıyla açtır, olmazsa oynatıcıdan video kimliğini bul
+  if(fb){ var f=fbFind(v,RX); if(f) return f; }
  }catch(e){} return location.href; }
+ function fbFind(v,RX){ try{
+  var n=v, i, art=null, as, k, h, m, fn, p, key, d;
+  for(i=0;n&&i<40;i++,n=n.parentElement){ if(n.getAttribute&&n.getAttribute('role')==='article'){ art=n; break; } }
+  var root=art||(v.parentElement&&v.parentElement.parentElement)||document.body;
+  // 1) Zaman damgası bağlantılarını uyandır
+  as=root.querySelectorAll('a[role="link"],a[href="#"]');
+  for(k=0;k<as.length&&k<25;k++){
+   h=as[k].getAttribute('href')||'';
+   if(RX.test(h)&&h.indexOf('/audio')<0) return new URL(h,location.href).href;
+   if((as[k].textContent||'').length>24) continue;
+   try{ as[k].dispatchEvent(new MouseEvent('mouseover',{bubbles:true})); as[k].dispatchEvent(new MouseEvent('mousemove',{bubbles:true})); as[k].dispatchEvent(new FocusEvent('focusin',{bubbles:true})); }catch(e){}
+   h=as[k].getAttribute('href')||'';
+   if(RX.test(h)&&h.indexOf('/audio')<0) return new URL(h,location.href).href;
+  }
+  // 2) React bileşen özelliklerinden video kimliği
+  n=v;
+  for(i=0;n&&i<30;i++,n=n.parentElement){
+   key=null; for(d in n){ if(d.indexOf('__reactFiber$')===0||d.indexOf('__reactInternalInstance$')===0){ key=d; break; } }
+   if(!key) continue;
+   fn=n[key];
+   for(k=0;fn&&k<60;k++,fn=fn.return){
+    p=fn.memoizedProps; if(!p||typeof p!=='object') continue;
+    var id=p.videoID||p.video_id||p.videoId||(p.video&&p.video.id)||(p.videoData&&p.videoData.video_id);
+    if(id&&/^[0-9]{8,}${'$'}/.test(String(id))) return 'https://www.facebook.com/watch/?v='+id;
+   }
+   break;
+  }
+  // 3) Gönderinin HTML'inde video kimliği ara
+  h=root.innerHTML||''; if(h.length>600000) h=h.slice(0,600000);
+  m=/(?:\/reel\/|\/videos\/|watch\/?\?v=|\"video_id\":\"|\"videoID\":\"|\"videoId\":\")([0-9]{8,})/.exec(h);
+  if(m) return 'https://www.facebook.com/watch/?v='+m[1];
+ }catch(e){} return null; }
  // Reklam algılama: oynatıcıda reklam durumu sınıfı ya da videonun üstünde "Reklam" etiketi varsa oynayan reklamdır
  var ADC=/(ad-showing|ad-playing|ad-interrupting|ad-running|vjs-ad-playing|vjs-ad-loading|jw-flag-ads|jw-state-ad|ima-ad-container|ads-playing|advertisement-playing|plyr--ad)/i;
  var ADT=/^(reklam|reklamı geç|reklamı atla|advertisement|ad|ads|sponsored|skip ad|skip ads|werbung|publicité|anuncio)( [0-9:]+)?/i;
