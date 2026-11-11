@@ -741,6 +741,17 @@ object Probe {
         }
         res.clear()
         res.addAll(unique)
+        // İçeriği okunamayan akışlar (liste getirilemedi: 403 / süresi dolmuş token / reklam-izleme listesi):
+        // çözünürlük, bit hızı, boyut ve süre hiçbiri yoktur ve arayüzde "VİDEO · Boyut bilinmiyor" görünür.
+        // Daha iyi aday varsa gizlenir; hiç yoksa yalnızca biri kalır (kullanıcı yine de deneyebilsin).
+        fun blank(m: MediaInfo) = (m.kind == "m3u8" || m.kind == "mpd") &&
+            m.height <= 0 && m.bw <= 0 && m.size <= 0 && m.duration <= 0
+        val blanks = res.filter { blank(it) }
+        if (blanks.isNotEmpty()) {
+            val keep = res.filter { !blank(it) }
+            res.clear()
+            res.addAll(if (keep.isNotEmpty()) keep else listOf(blanks.first()))
+        }
         val picked = pick(res)
         res.clear()
         res.addAll(picked)
