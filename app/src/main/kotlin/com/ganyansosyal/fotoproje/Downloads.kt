@@ -381,7 +381,14 @@ object Downloads {
                 } catch (e: CanceledEx) {
                     throw e
                 } catch (_: Throwable) {
-                    File(np).delete() // çevrilemedi: ham dosya olduğu gibi kalır
+                    File(np).delete()
+                    // MediaMuxer çeviremedi: FFmpeg ile dene; o da olmazsa ham dosya olduğu gibi kalır
+                    if (FfmpegFix.remux(ctx, path, np)) {
+                        File(path).delete()
+                        outPath = np
+                    } else {
+                        File(np).delete()
+                    }
                 }
             }
             finish(task, outPath, if (sepAudio) apath else null)
@@ -672,9 +679,18 @@ object Downloads {
                 sepAudio = null
             } catch (e: Throwable) {
                 d.delete()
-                // Ayrı sesle gelen indirmede sessiz video kaydetme: hata ver
-                if (task.audio.isNotEmpty()) throw IOException(L.t("mergeFail") + " (" + (e.message ?: e.javaClass.simpleName) + ")")
-                task.note = L.t("mergeFail") + " (" + (e.message ?: e.javaClass.simpleName) + ")"
+                // MediaMuxer birleştiremedi: FFmpeg ile dene
+                if (FfmpegFix.merge(ctx, tmpPath, audioTmp, d.path)) {
+                    File(tmpPath).delete()
+                    File(audioTmp).delete()
+                    dest = d
+                    sepAudio = null
+                } else {
+                    d.delete()
+                    // Ayrı sesle gelen indirmede sessiz video kaydetme: hata ver
+                    if (task.audio.isNotEmpty()) throw IOException(L.t("mergeFail") + " (" + (e.message ?: e.javaClass.simpleName) + ")")
+                    task.note = L.t("mergeFail") + " (" + (e.message ?: e.javaClass.simpleName) + ")"
+                }
             }
         }
         if (dest == null) {
