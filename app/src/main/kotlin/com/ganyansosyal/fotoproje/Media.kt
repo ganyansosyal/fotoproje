@@ -89,17 +89,23 @@ object Media {
    else if(/^https?:\/\/[^\s]+\.mp4(\?|${'$'})/i.test(o)) note(o,'mp4');
    return; }
   if(typeof o==='object'){ for(var k in o){ try{ igWalk(o[k],d+1); }catch(e){} } } }
+ // Facebook GraphQL yanıtları çoğu zaman SATIR SATIR birden fazla JSON'dur (tek JSON.parse patlar):
+ // önce bütün, olmazsa satır satır, o da olmazsa düz metin taraması (ses adresi buradan yakalanır).
  function igScan(t){ try{ if(!t||t.length<200||t.length>4000000||t.indexOf('.mp4')<0) return;
-   var i=t.indexOf('{'), j=t.indexOf('['); if(i<0||(j>=0&&j<i)) i=j; if(i<0) return;
-   igWalk(JSON.parse(t.slice(i)),0); }catch(e){} }
+   var ok=false, i=t.indexOf('{'), j=t.indexOf('['); if(i<0||(j>=0&&j<i)) i=j;
+   if(i>=0){ try{ igWalk(JSON.parse(t.slice(i)),0); ok=true; }catch(e){} }
+   if(!ok){ var ls=t.split('\n'), k, l, a; for(k=0;k<ls.length&&k<600;k++){ l=ls[k]; if(l.indexOf('.mp4')<0) continue; a=l.indexOf('{'); if(a<0) continue;
+     try{ igWalk(JSON.parse(l.slice(a)),0); ok=true; }catch(e){} } }
+   if(!ok) apiScan(t);
+  }catch(e){} }
  function igPage(){ if(!igHost()) return; try{ var ss=document.querySelectorAll('script[type="application/json"]');
    for(var i=0;i<ss.length;i++) igScan(ss[i].textContent); }catch(e){} }
  if(igHost()){ window.addEventListener('load',function(){ setTimeout(igPage,800); setTimeout(igPage,3000); }); }
  // Genel API taraması: JSON yanıtlarının içine gömülü .m3u8/.mpd/.mp4 adresleri (tüm siteler).
  function apiScan(t){ try{ if(!t||t.length<20||t.length>2000000) return;
-   t=String(t).replace(/\\u0026/g,'&').replace(/\\\//g,'/');
+   t=String(t).replace(/\\u0026/g,'&').replace(/\\\//g,'/').replace(/&amp;/g,'&');
    var re=/https?:\/\/[^"'\s<>\\]+?\.(?:m3u8|mpd|mp4)(?:\?[^"'\s<>\\]*)?(?=["'\\\s<>]|${'$'})/gi, m, n=0;
-   while((m=re.exec(t))&&n++<30) note(m[0],/\.m3u8/i.test(m[0])?'m3u8':/\.mpd/i.test(m[0])?'mpd':'mp4'); }catch(e){} }
+   while((m=re.exec(t))&&n++<120) note(m[0],/\.m3u8/i.test(m[0])?'m3u8':/\.mpd/i.test(m[0])?'mpd':'mp4'); }catch(e){} }
  var xo=XMLHttpRequest.prototype.open;
  XMLHttpRequest.prototype.open=function(m,u){ var x=this;
   try{ if(RE.test(String(u))) note(u);
