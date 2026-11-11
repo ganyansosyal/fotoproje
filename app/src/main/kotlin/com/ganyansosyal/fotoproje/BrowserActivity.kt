@@ -1179,6 +1179,11 @@ class BrowserActivity : Activity() {
         cm.setAcceptThirdPartyCookies(w, true)
 
         w.addJavascriptInterface(Bridge(tb), "__fp")
+        // Video dinleyici: ağ seviyesi (NetSniffer.kt) + JS fetch/XHR kancası (JsHook.kt)
+        val sniffer = VideoSniffer { hit ->
+            noteNet(tb, hit.url, false, hit.headers, hit.kind)
+        }
+        JsHook.install(w, sniffer)
         installScripts(tb, w)
 
         w.webViewClient = object : WebViewClient() {
@@ -1207,6 +1212,7 @@ class BrowserActivity : Activity() {
                     tb.url = n
                 }
                 clearMedia(tb)
+                sniffer.reset()
                 if (tb === cur) {
                     if (!urlBox.hasFocus()) urlBox.setText(shownUrl(tb))
                     setBar(true)
@@ -1260,6 +1266,7 @@ class BrowserActivity : Activity() {
             ): WebResourceResponse? {
                 val req = request ?: return null
                 val u = req.url.toString()
+                sniffer.inspect(req)
                 if (blockAds && !req.isForMainFrame && AdBlock.isAd(u, req.url.host)) {
                     return AdBlock.empty()
                 }
@@ -1434,6 +1441,7 @@ class BrowserActivity : Activity() {
     private fun injectNow(tb: Tab) {
         val w = tb.web ?: return
         w.evaluateJavascript(SHIM + "\n" + hookJs, null)
+        JsHook.injectFallback(w)
         if (noAutoJs.isNotEmpty()) w.evaluateJavascript(noAutoJs, null)
         if (blockAds) w.evaluateJavascript(AdBlock.HIDE_JS, null)
     }
