@@ -301,8 +301,8 @@ object Downloads {
             }
             var sepAudio = false
             when (kind) {
-                "m3u8" -> sepAudio = Streams.hls(url, path, apath, referer, report, task.cancel)
-                "mpd" -> sepAudio = Streams.dash(url, path, apath, referer, report, task.cancel)
+                "m3u8" -> sepAudio = hlsSafe(url, path, apath, referer, report, task)
+                "mpd" -> sepAudio = dashSafe(url, path, apath, referer, report, task)
                 "blob" -> {
                     if (blobReader == null) throw IOException(L.t("blobFail"))
                     val latch = CountDownLatch(1)
@@ -380,43 +380,51 @@ object Downloads {
                             }
                         }
                         if (!ok) {
-                            try { File(path).delete() } catch (_: Throwable) {}
-                            throw AudioMissingException(lastErr?.message ?: (if (L.code == "tr") "Ses indirilemedi" else "Audio download failed"))
+                            // İPTAL YOK: ses inmedi, videoyla (tekli dosya) devam edilir
+                            try { File(apath).delete() } catch (_: Throwable) {}
+                            task.audio = ""
+                            addNote(
+                                task,
+                                "Ayrı ses indirilemedi (" + (lastErr?.message ?: "?").take(80) + "), tekli dosyadan devam edildi.",
+                                "Separate audio failed (" + (lastErr?.message ?: "?").take(80) + "), continued with the single file."
+                            )
+                        } else {
+                            sepAudio = true
                         }
-                        sepAudio = true
                     }
                 }
             }
-            // Ayrı ses akışı varsa dosya KESİN var ve dolu olmalı; değilse süreç burada güvenle kesilir
-            if (sepAudio) {
-                try {
-                    FfmpegFix.requireAudio(apath)
-                } catch (e: AudioMissingException) {
-                    try { File(path).delete() } catch (_: Throwable) {}
-                    throw e
-                }
+            // Ayrı ses dosyası yoksa/boşsa süreç KESİLMEZ, tekli akışla devam edilir
+            if (sepAudio && !FfmpegFix.hasAudioFile(apath)) {
+                sepAudio = false
+                try { File(apath).delete() } catch (_: Throwable) {}
+                addNote(
+                    task,
+                    "Ayrı ses dosyası boş/yok, tekli akıştan aktarıldı.",
+                    "Separate audio file empty/missing, remuxed from the single stream."
+                )
             }
             // HLS/DASH tek parça çıktısı ham TS / parçalı MP4'tür: temiz MP4'e çevir (siyah görüntü önlenir)
             var outPath = path
             if (!sepAudio && (kind == "m3u8" || kind == "mpd")) {
                 val np = "$path.n.mp4"
-                try {
-                    task.label = if (L.code == "tr") "Video düzenleniyor…" else "Fixing video…"
-                    notifyUi(true)
-                    Mux.remux(path, np)
+                task.label = if (L.code == "tr") "Video düzenleniyor…" else "Fixing video…"
+                notifyUi(true)
+                var fixed = SafeMux.single(ctx, path, np, task.cancel)
+                if (!fixed) {
+                    try { File(np).delete() } catch (_: Throwable) {}
+                    try {
+                        Mux.remux(path, np)
+                        fixed = true
+                    } catch (e: CanceledEx) {
+                        throw e
+                    } catch (_: Throwable) {
+                        try { File(np).delete() } catch (_: Throwable) {}
+                    }
+                }
+                if (fixed) {
                     File(path).delete()
                     outPath = np
-                } catch (e: CanceledEx) {
-                    throw e
-                } catch (_: Throwable) {
-                    File(np).delete()
-                    // MediaMuxer çeviremedi: FFmpeg ile dene; o da olmazsa ham dosya olduğu gibi kalır
-                    if (FfmpegFix.remux(ctx, path, np)) {
-                        File(path).delete()
-                        outPath = np
-                    } else {
-                        File(np).delete()
-                    }
                 }
             }
             finish(task, outPath, if (sepAudio) apath else null)
@@ -425,7 +433,6 @@ object Downloads {
             } catch (e: Throwable) {
                 // Kendi yöntemimiz de olmadı: yt-dlp'nin sessiz ama sağlam dosyası varsa onu kaydet
                 val sr = silentRes
-                if (e is AudioMissingException) throw e // ses zorunluyken sessiz mp4 kaydedilmez
                 if (sr == null || task.cancel.on) throw e
                 task.note = sr.info
                 finish(task, sr.path, null)
@@ -682,27 +689,30 @@ object Downloads {
     }
 
     private fun finish(task: DownloadTask, tmpPath: String, audioTmp: String?) {
-        var src = tmpPath
+        val src = tmpPath
         var sepAudio = audioTmp
         var dest: File? = null
         task.progress = -1.0
-        val expectAudio = audioTmp != null // ayrı ses ile geldiyse sonuçta ses izi ZORUNLU
-        if (audioTmp != null) {
-            // FFmpeg/MediaMuxer birleştirmesine geçmeden önce: ses dosyası var mı ve boş değil mi?
-            try {
-                FfmpegFix.requireAudio(audioTmp)
-            } catch (e: AudioMissingException) {
-                try { File(tmpPath).delete() } catch (_: Throwable) {}
-                try { File(audioTmp).delete() } catch (_: Throwable) {}
-                throw e
-            }
+        // Ayrı ses dosyası yoksa / boşsa süreç KESİLMEZ: tekli dosyadan zorunlu aktarıma geçilir
+        if (sepAudio != null && !FfmpegFix.hasAudioFile(sepAudio)) {
+            try { File(sepAudio).delete() } catch (_: Throwable) {}
+            sepAudio = null
+            addNote(
+                task,
+                "Ayrı ses dosyası boş/yok, tekli akıştan aktarıldı.",
+                "Separate audio file empty/missing, remuxed from the single stream."
+            )
+        }
+        val aud = sepAudio
+        if (aud != null) {
             task.label = L.t("merging")
             notifyUi(true)
             // Birleştirmeyi doğrudan hedef klasöre yaz: ikinci bir kopyalama gerekmez
             val d = freeDest(safe(task.title), "mp4")
+            var merged = false
             try {
                 var lastP = -1
-                Mux.run(tmpPath, audioTmp, d.path) { p ->
+                Mux.run(tmpPath, aud, d.path) { p ->
                     val pc = (p * 100).toInt()
                     if (pc != lastP) {
                         lastP = pc
@@ -711,34 +721,28 @@ object Downloads {
                         notifyUi()
                     }
                 }
+                merged = true
+            } catch (e: CanceledEx) {
+                d.delete()
+                throw e
+            } catch (_: Throwable) {
+                d.delete()
+                // MediaMuxer birleştiremedi (ör. opus ses): FFmpeg ile -c:v copy -c:a aac
+                merged = SafeMux.merge(ctx, tmpPath, aud, d.path, task.cancel)
+                if (!merged) d.delete()
+            }
+            if (merged) {
                 File(tmpPath).delete()
-                File(audioTmp).delete()
+                File(aud).delete()
                 dest = d
                 sepAudio = null
-            } catch (e: Throwable) {
-                d.delete()
-                // MediaMuxer birleştiremedi: FFmpeg ile dene (ses doğrulaması FfmpegFix.merge içinde de yapılır)
-                val ffOk = try {
-                    FfmpegFix.merge(ctx, tmpPath, audioTmp, d.path)
-                } catch (ae: AudioMissingException) {
-                    d.delete()
-                    File(tmpPath).delete()
-                    File(audioTmp).delete()
-                    throw ae
-                }
-                if (ffOk) {
-                    File(tmpPath).delete()
-                    File(audioTmp).delete()
-                    dest = d
-                    sepAudio = null
-                } else {
-                    d.delete()
-                    // Ayrı ses beklenen her indirmede (HLS/DASH/YouTube/Instagram/Facebook) sessiz video
-                    // kaydetme: süreç güvenle kesilir, geçici dosyalar temizlenir, hata döner.
-                    try { File(tmpPath).delete() } catch (_: Throwable) {}
-                    try { File(audioTmp).delete() } catch (_: Throwable) {}
-                    throw IOException(L.t("mergeFail") + " (" + (e.message ?: e.javaClass.simpleName) + ")")
-                }
+            } else {
+                // İPTAL YOK: birleşmediyse video kaydedilir, ses de ayrı _ses.m4a olarak yanına konur
+                addNote(
+                    task,
+                    "Ses ve görüntü birleştirilemedi; video kaydedildi, ses ayrı dosya olarak yanında.",
+                    "Could not merge audio and video; video saved, audio kept as a separate file."
+                )
             }
         }
         if (dest == null) {
@@ -746,19 +750,34 @@ object Downloads {
             notifyUi(true)
             val ext = src.substringAfterLast('.')
             val d = freeDest(safe(task.title), ext)
-            File(src).copyTo(d, overwrite = false, bufferSize = 262144)
-            File(src).delete()
+            var muxed = false
+            // Tekli dosyada ses izi görünmüyorsa: -c:v copy -c:a aac ile zorunlu aktarım (iptal yok)
+            if (ext.lowercase() == "mp4" && Mux.tracks(src)?.second != true) {
+                task.label = L.t("merging")
+                notifyUi(true)
+                muxed = SafeMux.single(ctx, src, d.path, task.cancel)
+                if (muxed) File(src).delete() else d.delete()
+            }
+            if (!muxed) {
+                File(src).copyTo(d, overwrite = false, bufferSize = 262144)
+                File(src).delete()
+            }
             dest = d
         }
-        // Kesin doğrulama: ayrı sesle gelen ya da Instagram/Facebook videosunda dosyada ses izi OLMALI
-        val needAudio = expectAudio || !task.allowSilent && (task.audio.isNotEmpty() || Regex("(cdninstagram|fbcdn)\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url))
-        if (needAudio) {
-            val tr = Mux.tracks(dest.path)
-            if (tr != null && (!tr.first || !tr.second)) {
-                val msg = if (L.code == "tr") "Dosyada ${if (!tr.first) "görüntü" else "ses"} yok, indirme geçersiz" else "File has no ${if (!tr.first) "video" else "audio"} track"
-                try { dest.delete() } catch (_: Throwable) {}
-                throw IOException(msg)
-            }
+        // Doğrulama artık İPTAL ETMEZ: görüntü izi yoksa geçersiz dosya silinir, ses yoksa not düşülür
+        val tr = Mux.tracks(dest.path)
+        if (tr != null && !tr.first) {
+            try { dest.delete() } catch (_: Throwable) {}
+            throw IOException(if (L.code == "tr") "Dosyada görüntü yok, indirme geçersiz" else "File has no video track")
+        }
+        val expectAudio = audioTmp != null || task.audio.isNotEmpty() ||
+            Regex("(cdninstagram|fbcdn)\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url)
+        if (expectAudio && tr != null && !tr.second) {
+            addNote(
+                task,
+                "Kaynakta ses akışı bulunamadı; video sessiz kaydedildi. Videoyu oynatıp tekrar indirmeyi dene.",
+                "No audio stream found in the source; saved without sound. Play the video and retry."
+            )
         }
         task.path = dest.path
         task.size = dest.length()
@@ -771,18 +790,113 @@ object Downloads {
                         .firstOrNull { it.startsWith("video/") }?.removePrefix("video/") ?: "?"
                 } finally { try { ex.release() } catch (_: Throwable) {} }
             } catch (_: Throwable) { "?" }
-            val w = if (L.code == "tr") "Uyarı: bu cihaz görüntüyü çözemiyor olabilir (siyah ekran). Kodek: $codec"
-            else "Warning: this device may not decode the picture (black screen). Codec: $codec"
-            task.note = if (task.note.isNullOrEmpty()) w else task.note + " " + w
+            addNote(
+                task,
+                "Uyarı: bu cihaz görüntüyü çözemiyor olabilir (siyah ekran). Kodek: $codec",
+                "Warning: this device may not decode the picture (black screen). Codec: $codec"
+            )
         }
-        if (sepAudio != null) {
+        val leftover = sepAudio
+        if (leftover != null) {
             val ad = File(dest.path.replace(Regex("\\.[^.]+$"), "_ses.m4a"))
-            File(sepAudio).copyTo(ad, overwrite = true, bufferSize = 262144)
-            File(sepAudio).delete()
+            File(leftover).copyTo(ad, overwrite = true, bufferSize = 262144)
+            File(leftover).delete()
         }
         if (Store.syncGallery) {
             Gallery.putVideo(ctx, dest)
         }
+    }
+
+    private fun addNote(task: DownloadTask, tr: String, en: String) {
+        val m = if (L.code == "tr") tr else en
+        task.note = if (task.note.isNullOrEmpty()) m else task.note + " " + m
+    }
+
+    /**
+     * HLS indirme, ses hatasında İPTAL ETMEZ.
+     * 1) Ses dosyası boş/eksikse: video zaten inmiştir, tekli akışla devam (false döner).
+     * 2) Başka hata olursa: ana listedeki tekli (muxed) varyant doğrudan indirilir; ses varsa o akışın içindedir.
+     */
+    private fun hlsSafe(
+        url: String, path: String, apath: String, referer: String, report: Report, task: DownloadTask
+    ): Boolean {
+        try {
+            return Streams.hls(url, path, apath, referer, report, task.cancel)
+        } catch (e: CanceledEx) {
+            throw e
+        } catch (e: AudioMissingException) {
+            try { File(apath).delete() } catch (_: Throwable) {}
+            addNote(
+                task,
+                "Ayrı ses bulunamadı, ana akıştaki tekli yapı kullanıldı.",
+                "Separate audio not found, using the single-stream structure."
+            )
+            return false
+        } catch (e: Throwable) {
+            if (task.cancel.on) throw CanceledEx()
+            val single = singleVariant(url, referer, task.cancel) ?: throw e
+            try { File(path).delete() } catch (_: Throwable) {}
+            try { File(apath).delete() } catch (_: Throwable) {}
+            task.label = if (L.code == "tr") "Tekli akış deneniyor…" else "Trying single stream…"
+            notifyUi(true)
+            Streams.hls(single, path, apath, referer, report, task.cancel)
+            addNote(
+                task,
+                "Ses/görüntü ayrı alınamadı, tekli akıştan indirildi.",
+                "Separate tracks failed, downloaded from the single stream."
+            )
+            return false
+        }
+    }
+
+    /** DASH: ses dosyası boş/eksikse video zaten inmiştir; iptal etmeden tekli dosyayla devam. */
+    private fun dashSafe(
+        url: String, path: String, apath: String, referer: String, report: Report, task: DownloadTask
+    ): Boolean {
+        try {
+            return Streams.dash(url, path, apath, referer, report, task.cancel)
+        } catch (e: CanceledEx) {
+            throw e
+        } catch (e: AudioMissingException) {
+            try { File(apath).delete() } catch (_: Throwable) {}
+            addNote(
+                task,
+                "Ayrı ses bulunamadı, görüntü akışıyla devam edildi.",
+                "Separate audio not found, continued with the video stream."
+            )
+            return false
+        }
+    }
+
+    /**
+     * Ana listeden (master m3u8) tekli varyant adresini seçer: seçilen kalite (bant genişliği) varsa o,
+     * yoksa AUDIO grubu OLMAYAN (sesi içinde taşıyan) en yüksek varyant, o da yoksa en yüksek varyant.
+     * Zaten medya listesi ise null döner.
+     */
+    private fun singleVariant(url0: String, referer: String, cancel: CancelFlag): String? = try {
+        val frag = url0.substringAfter("#fpq=", "")
+        val wantBw = frag.substringBefore('_').toIntOrNull()
+        val url = url0.substringBefore("#fpq=")
+        val ls = Net.fetchText(url, referer, cancel).body.split('\n').map { it.trim() }
+        var exact: String? = null
+        var muxed: String? = null
+        var muxedBw = -1
+        var any: String? = null
+        var anyBw = -1
+        for (i in ls.indices) {
+            if (!ls[i].startsWith("#EXT-X-STREAM-INF")) continue
+            val bw = Media.hlsAttr(ls[i], "BANDWIDTH")?.toIntOrNull() ?: 0
+            var j = i + 1
+            while (j < ls.size && (ls[j].isEmpty() || ls[j].startsWith("#"))) j++
+            if (j >= ls.size) continue
+            val u = ls[j]
+            if (wantBw != null && bw == wantBw && exact == null) exact = u
+            if (bw > anyBw) { anyBw = bw; any = u }
+            if (Media.hlsAttr(ls[i], "AUDIO") == null && bw > muxedBw) { muxedBw = bw; muxed = u }
+        }
+        (exact ?: muxed ?: any)?.let { Media.resolve(url, it) }
+    } catch (_: Throwable) {
+        null
     }
 
     /** İndirmeye izin verilen uzantılar (sorgu dizisine değil, URL yoluna bakılır). */
@@ -830,6 +944,92 @@ object Downloads {
         var r = s.replace(Regex("[\\\\/:*?\"<>|\\n\\r]"), "_").trim()
         if (r.isEmpty()) r = "video"
         return if (r.length > 80) r.substring(0, 80) else r
+    }
+}
+
+/**
+ * Korumalı FFmpeg aktarımı: "ses yok" diye süreç KESİLMEZ.
+ * Hep -c:v copy -c:a aac: görüntü aynen kopyalanır, ses (varsa) AAC'ye çevrilir.
+ * "0:a:0?" ses izi hiç yoksa hata vermez; çıktı yine üretilir.
+ */
+object SafeMux {
+    private fun exe(ctx: Context) = File(ctx.applicationInfo.nativeLibraryDir, "libffmpeg.so")
+
+    private fun libPath(ctx: Context): String {
+        val base = File(ctx.noBackupFilesDir, "youtubedl-android/packages")
+        return File(base, "ffmpeg/usr/lib").absolutePath + ":" + File(base, "python/usr/lib").absolutePath
+    }
+
+    private fun run(ctx: Context, args: List<String>, cancel: CancelFlag?): Boolean {
+        val e = exe(ctx)
+        if (!e.exists()) return false
+        return try {
+            val pb = ProcessBuilder(listOf(e.absolutePath, "-hide_banner", "-loglevel", "error", "-y") + args)
+            pb.environment()["LD_LIBRARY_PATH"] = libPath(ctx)
+            pb.environment()["TMPDIR"] = ctx.cacheDir.absolutePath
+            pb.redirectErrorStream(true)
+            pb.redirectOutput(File(ctx.cacheDir, "ffmpeg_mux.log")) // çıktı dosyaya: boru dolup takılmaz
+            val p = pb.start()
+            while (true) {
+                try {
+                    p.exitValue()
+                    break
+                } catch (_: IllegalThreadStateException) {
+                    if (cancel != null && cancel.on) {
+                        p.destroy()
+                        throw CanceledEx()
+                    }
+                    Thread.sleep(300)
+                }
+            }
+            p.exitValue() == 0
+        } catch (ce: CanceledEx) {
+            throw ce
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    private fun good(o: File) = o.exists() && o.length() > 1024
+
+    /** Tek dosya (ham TS / parçalı MP4 / sessiz görünen MP4) -> temiz MP4. Başarılıysa true. */
+    fun single(ctx: Context, src: String, out: String, cancel: CancelFlag?): Boolean {
+        val o = File(out)
+        val probe = listOf("-fflags", "+genpts", "-analyzeduration", "100M", "-probesize", "100M")
+        val a = run(
+            ctx,
+            probe + listOf(
+                "-i", src, "-map", "0:v:0", "-map", "0:a:0?",
+                "-c:v", "copy", "-c:a", "aac", "-b:a", "160k",
+                "-max_muxing_queue_size", "4096", "-movflags", "+faststart", out
+            ),
+            cancel
+        ) && good(o)
+        if (a) return true
+        o.delete()
+        // Harita vermeden (FFmpeg kendi seçsin) bir kez daha
+        val b = run(
+            ctx,
+            probe + listOf("-i", src, "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", out),
+            cancel
+        ) && good(o)
+        if (!b) o.delete()
+        return b
+    }
+
+    /** Ayrı görüntü + ayrı ses -> tek MP4 (-c:v copy -c:a aac). Başarılıysa true. */
+    fun merge(ctx: Context, video: String, audio: String, out: String, cancel: CancelFlag?): Boolean {
+        val o = File(out)
+        val ok = run(
+            ctx,
+            listOf(
+                "-i", video, "-i", audio, "-map", "0:v:0", "-map", "1:a:0",
+                "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", out
+            ),
+            cancel
+        ) && good(o)
+        if (!ok) o.delete()
+        return ok
     }
 }
 
