@@ -17,7 +17,7 @@ import com.unity3d.mediation.rewarded.LevelPlayRewardedAdListener
 
 /** İndirme hakkı (kredi): reklam izleyince +5, her indirmede -1. */
 object Credits {
-    const val PER_AD = 5
+    const val PER_AD = 3
     private fun p() = Store.app.getSharedPreferences("fp_credits", Context.MODE_PRIVATE)
 
     /** LevelPlay anahtarları girilmediyse sistem kapalıdır: indirme serbest, reklam sorulmaz. */

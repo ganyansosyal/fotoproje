@@ -2632,18 +2632,11 @@ return '';
     /** Hak bitti: "Reklam izle, 5 indirme kazan" penceresi. Reklam izlenince onGranted çağrılır. */
     private fun askAd(onGranted: () -> Unit) {
         val tr = L.code == "tr"
-        AlertDialog.Builder(this, dlgTheme())
-            .setTitle(if (tr) "İndirme hakkın bitti" else "No downloads left")
-            .setMessage(
-                if (tr) "Kısa bir reklam izle, ${Credits.PER_AD} indirme hakkı kazan."
-                else "Watch a short ad to get ${Credits.PER_AD} downloads."
-            )
-            .setPositiveButton(if (tr) "Reklam izle" else "Watch ad") { _, _ ->
-                if (!Ads.ready) {
-                    toast(if (tr) "Reklam hazırlanıyor, birkaç saniye sonra tekrar dene" else "Ad is loading, try again shortly")
-                    Ads.load(this)
-                    return@setPositiveButton
-                }
+        RewardDialog.show(this, Credits.PER_AD, tr, onWatch = {
+            if (!Ads.ready) {
+                toast(if (tr) "Reklam hazırlanıyor, birkaç saniye sonra tekrar dene" else "Ad is loading, try again shortly")
+                Ads.load(this)
+            } else {
                 Ads.show(this,
                     onReward = {
                         Credits.add(Credits.PER_AD)
@@ -2654,8 +2647,7 @@ return '';
                     }
                 )
             }
-            .setNegativeButton(if (tr) "Vazgeç" else "Cancel", null)
-            .show()
+        })
     }
 
     private fun startDownload(
@@ -3163,8 +3155,8 @@ return '';
                 .show()
         }
         val dlLabel = if (Credits.has()) t("download") + (if (Credits.enabled) " (" + Credits.count + ")" else "")
-            else "🔒 " + (if (L.code == "tr") "Reklam izle" else "Watch ad")
-        val dl = action("⤓", dlLabel, acc) {
+            else (if (L.code == "tr") "Reklam izle" else "Watch ad")
+        val dl = action(if (Credits.has()) "⤓" else "▶", dlLabel, acc) {
             val f = items[sel]
             dlg.dismiss()
             startDownload(tb, f.url, f.kind, name, items)
