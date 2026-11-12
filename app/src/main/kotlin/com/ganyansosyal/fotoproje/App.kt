@@ -25,6 +25,7 @@ class App : Application() {
         // Hazır reklam listesi: arka planda, düşük öncelikle indirilir/okunur
         Thread { AdBlock.init(this) }.apply { priority = Thread.MIN_PRIORITY }.start()
         Store.init(this)
+        Ads.init(this) // ödüllü reklamı önceden yükle
         Downloads.load()
         FavIcons.load()
         FavIcons.ensure(HomeHtml.hosts())

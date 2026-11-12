@@ -2625,13 +2625,51 @@ return '';
 }catch(e){return ''}})()
 """
 
+    private fun creditsLabel(): String =
+        if (L.code == "tr") "Kalan hak: ${Credits.count}" else "Credits left: ${Credits.count}"
+
+    /** Hak bitti: "Reklam izle, 5 indirme kazan" penceresi. Reklam izlenince onGranted çağrılır. */
+    private fun askAd(onGranted: () -> Unit) {
+        val tr = L.code == "tr"
+        AlertDialog.Builder(this, dlgTheme())
+            .setTitle(if (tr) "İndirme hakkın bitti" else "No downloads left")
+            .setMessage(
+                if (tr) "Kısa bir reklam izle, ${Credits.PER_AD} indirme hakkı kazan."
+                else "Watch a short ad to get ${Credits.PER_AD} downloads."
+            )
+            .setPositiveButton(if (tr) "Reklam izle" else "Watch ad") { _, _ ->
+                if (!Ads.ready) {
+                    toast(if (tr) "Reklam hazırlanıyor, birkaç saniye sonra tekrar dene" else "Ad is loading, try again shortly")
+                    Ads.load(this)
+                    return@setPositiveButton
+                }
+                Ads.show(this,
+                    onReward = {
+                        Credits.add(Credits.PER_AD)
+                        ui.post { onGranted() }
+                    },
+                    onFail = {
+                        if (!Credits.has()) toast(if (tr) "Ödül alınamadı. Reklamı sonuna kadar izle." else "No reward. Watch the full ad.")
+                    }
+                )
+            }
+            .setNegativeButton(if (tr) "Vazgeç" else "Cancel", null)
+            .show()
+    }
+
     private fun startDownload(
         tb: Tab, url: String, kind: String, name: String? = null, others: List<FoundItem> = emptyList()
     ) {
         if (isYtTab(tb)) { toast(t("ytNoDl")); return }
+        // Kredi yoksa önce reklam; izlenince +5 hak verilir ve indirme kendiliğinden başlar
+        if (!Credits.has()) {
+            askAd { startDownload(tb, url, kind, name, others) }
+            return
+        }
         try { tb.web?.settings?.userAgentString?.takeIf { it.isNotBlank() }?.let { Net.ua = it } } catch (_: Throwable) {}
         val cur = tb.pRef ?: tb.web?.url ?: ""
         fun send(ref: String) {
+            Credits.use()
             dart(
                 "download",
                 mapOf(
@@ -2643,8 +2681,8 @@ return '';
                     // Seçilen kaynak olmazsa sırayla bunlar denenir
                     "alts" to others.filter { it.url != url && it.kind != "blob" }.map { it.kind + "|" + it.url }
                 ),
-                { r -> toast(if (r is String) r else t("downloadStarted")) },
-                { toast(t("failed")) }
+                { r -> toast((if (r is String) r else t("downloadStarted")) + "  •  " + creditsLabel()) },
+                { Credits.add(1); toast(t("failed")) } // indirme başlamadıysa hak geri verilir
             )
         }
         val fb = Regex("(facebook\\.com|fbcdn\\.|fb\\.watch)", RegexOption.IGNORE_CASE)
@@ -3123,7 +3161,9 @@ return '';
                 .setNegativeButton(if (tr) "Vazgeç" else "Cancel", null)
                 .show()
         }
-        val dl = action("⤓", t("download"), acc) {
+        val dlLabel = if (Credits.has()) t("download") + " (" + Credits.count + ")"
+            else "🔒 " + (if (L.code == "tr") "Reklam izle" else "Watch ad")
+        val dl = action("⤓", dlLabel, acc) {
             val f = items[sel]
             dlg.dismiss()
             startDownload(tb, f.url, f.kind, name, items)
