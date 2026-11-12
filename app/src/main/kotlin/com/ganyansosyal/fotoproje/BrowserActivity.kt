@@ -1442,6 +1442,7 @@ class BrowserActivity : Activity() {
             tb.scripts.add(
                 WebViewCompat.addDocumentStartJavaScript(w, SHIM + "\n" + hookJs, rules)
             )
+            tb.scripts.add(WebViewCompat.addDocumentStartJavaScript(w, FbDl.JS, rules))
             if (noAutoJs.isNotEmpty()) {
                 tb.scripts.add(WebViewCompat.addDocumentStartJavaScript(w, noAutoJs, rules))
             }
@@ -1459,6 +1460,7 @@ class BrowserActivity : Activity() {
         val w = tb.web ?: return
         w.evaluateJavascript(SHIM + "\n" + hookJs, null)
         JsHook.injectFallback(w)
+        w.evaluateJavascript(FbDl.JS, null)
         if (noAutoJs.isNotEmpty()) w.evaluateJavascript(noAutoJs, null)
         if (blockAds) w.evaluateJavascript(AdBlock.HIDE_JS, null)
     }
@@ -1488,6 +1490,15 @@ class BrowserActivity : Activity() {
             "cand" -> {
                 val cu = arr.optString(0)
                 if (cu.startsWith("http")) noteNet(tb, cu, false, null, arr.optString(1))
+            }
+            // Facebook: videonun köşesindeki küçük indirme düğmesi (adres o videonun kendi öğesinden bulundu)
+            "fbdl" -> {
+                val pu = arr.optString(0)
+                if (pu.startsWith("http")) startDownload(tb, pu, "mp4", refOverride = pu)
+                else toast(
+                    if (L.code == "tr") "Bu videonun adresi bulunamadı. Videoyu açıp tekrar dene."
+                    else "Couldn't find this video's link. Open the video and try again."
+                )
             }
             "perf" -> if (tb === cur) onPerf(arr.optInt(0), arr.optInt(1), arr.optInt(2))
             // Ana sayfa düğmeleri yalnızca ana sayfada geçerlidir
@@ -2651,16 +2662,17 @@ return '';
     }
 
     private fun startDownload(
-        tb: Tab, url: String, kind: String, name: String? = null, others: List<FoundItem> = emptyList()
+        tb: Tab, url: String, kind: String, name: String? = null, others: List<FoundItem> = emptyList(),
+        refOverride: String? = null
     ) {
         if (isYtTab(tb)) { toast(t("ytNoDl")); return }
         // Kredi yoksa önce reklam; izlenince +5 hak verilir ve indirme kendiliğinden başlar
         if (!Credits.has()) {
-            askAd { startDownload(tb, url, kind, name, others) }
+            askAd { startDownload(tb, url, kind, name, others, refOverride) }
             return
         }
         try { tb.web?.settings?.userAgentString?.takeIf { it.isNotBlank() }?.let { Net.ua = it } } catch (_: Throwable) {}
-        val cur = tb.pRef ?: tb.web?.url ?: ""
+        val cur = refOverride ?: tb.pRef ?: tb.web?.url ?: ""
         fun send(ref: String) {
             Credits.use()
             dart(

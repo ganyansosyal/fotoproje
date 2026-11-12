@@ -21,7 +21,10 @@ object Credits {
     private fun p() = Store.app.getSharedPreferences("fp_credits", Context.MODE_PRIVATE)
 
     /** LevelPlay anahtarları girilmediyse sistem kapalıdır: indirme serbest, reklam sorulmaz. */
-    val enabled: Boolean get() = Ads.configured
+    /** TEST İÇİN ana şalter: false iken ödüllü reklam/kredi tamamen kapalı (indirme serbest). Yayın öncesi true yap. */
+    const val REWARD_ADS = false
+
+    val enabled: Boolean get() = REWARD_ADS && Ads.configured
 
     val count: Int get() = p().getInt("n", 0)
     fun has() = !enabled || count > 0
