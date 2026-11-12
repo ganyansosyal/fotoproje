@@ -353,6 +353,7 @@ object Media {
   for(i=0;n&&i<4;i++,n=n.parentElement){ q=n.getBoundingClientRect(); if(q.width*q.height>a*3) break; r=q; }
   return r; }
  function allowed(v){
+  if(window.__fpAllow&&Date.now()-window.__fpAllow<6000) return true;
   if(Date.now()-last>=OK) return false;
   if(!strict||!v||!v.getBoundingClientRect) return true;
   var r=box(v);
@@ -372,6 +373,25 @@ object Media {
   if(location.pathname.indexOf('/shorts')===0 ||
    (t && Math.abs(t.clientX-tx)<12 && Math.abs(t.clientY-ty)<12)){ last=Date.now(); pt(e); }
  },true);
+ // "Videoyu başlat": kullanıcı video düğmesine bastığında uygulama videoyu kendisi oynatır (sessiz) ve
+ // oynat düğmesine basar; tam video adresi ancak oynayınca ağdan görünen sitelerde işe yarar.
+ window.__fpPlay=function(){ window.__fpAllow=Date.now();
+  var vs=document.getElementsByTagName('video'), i, anyPlaying=false;
+  for(i=0;i<vs.length;i++){ var v=vs[i];
+   try{ v.__ap=1; v.muted=true; var pr=v.play(); if(pr&&pr.catch) pr.catch(function(){}); if(!v.paused) anyPlaying=true; }catch(e){} }
+  if(!anyPlaying){
+   var sel=['.vjs-big-play-button','.jw-icon-display','.jw-display-icon-container','.plyr__control--overlaid',
+    '.ytp-large-play-button','.mejs__overlay-button','.fp-play','[class*="big-play"]','[class*="play-button"]',
+    '[class*="play-btn"]','[class*="playBtn"]','[aria-label*="Play" i]','[aria-label*="Oynat" i]',
+    '[title*="Play" i]','[title*="Oynat" i]'];
+   for(i=0;i<sel.length;i++){ var els=document.querySelectorAll(sel[i]), j, done=false;
+    for(j=0;j<els.length;j++){ var el=els[j];
+     if(el.offsetWidth>0&&el.offsetHeight>0){ try{ el.click(); done=true; }catch(e){} break; } }
+    if(done) break; } }
+  var fr=document.getElementsByTagName('iframe');
+  for(i=0;i<fr.length;i++){ try{ fr[i].contentWindow.postMessage('__fpPlay','*'); }catch(e){} }
+ };
+ window.addEventListener('message',function(e){ if(e.data==='__fpPlay'&&e.source===window.parent) window.__fpPlay(); });
  var P=window.HTMLMediaElement&&HTMLMediaElement.prototype;
  if(!P) return;
  var op=P.play;

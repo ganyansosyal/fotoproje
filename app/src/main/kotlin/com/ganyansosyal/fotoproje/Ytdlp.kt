@@ -50,6 +50,24 @@ object Ytdlp {
 
     private val FB = Regex("(facebook\\.com|fb\\.watch|fbcdn\\.)", RegexOption.IGNORE_CASE)
 
+    class PageInfo(val title: String, val duration: Double)
+
+    /** Sayfayı yt-dlp'nin kendi çözücüleriyle inceler (indirmeden): başlık ve süre. Çözemezse null. */
+    fun info(ctx: Context, page: String): PageInfo? {
+        if (!ensure(ctx)) return null
+        return try {
+            val req = YoutubeDLRequest(page)
+            req.addOption("--no-playlist")
+            req.addOption("--socket-timeout", "15")
+            req.addOption("--user-agent", Net.ua)
+            val vi = YoutubeDL.getInstance().getInfo(req)
+            val d = vi.duration.toDouble()
+            if (d > 0) PageInfo(vi.title ?: "", d) else null
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
     fun isYoutube(vararg urls: String) = urls.any { YT.containsMatchIn(it) }
     fun isSocial(vararg urls: String) = urls.any { SOCIAL.containsMatchIn(it) }
 

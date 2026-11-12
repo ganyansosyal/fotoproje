@@ -32,17 +32,47 @@ object Backend {
                         val urls = (a["urls"] as? List<*>)?.map { it.toString() } ?: emptyList()
                         val hints = HashMap<String, String>()
                         (a["hints"] as? Map<*, *>)?.forEach { (k, v) -> hints[k.toString()] = v.toString() }
-                        val items = Probe.probeAll(
-                            urls, hints, s("ref"),
-                            (a["dur"] as? Number)?.toDouble() ?: 0.0, s("src"),
-                            (a["h"] as? Number)?.toInt() ?: 0
+                        val ref0 = s("ref")
+                        val h0 = (a["h"] as? Number)?.toInt() ?: 0
+                        var items = Probe.probeAll(
+                            urls, hints, ref0,
+                            (a["dur"] as? Number)?.toDouble() ?: 0.0, s("src"), h0
                         )
-                        done(items.map {
+                        // Yedek: normal sitede yalnızca kısa (fragman/reklam) ya da hiç video bulunduysa sayfa kaynağını tara
+                        if (ref0.startsWith("http") && Probe.isAdSite(ref0) &&
+                            items.none { it.duration >= 60 || (it.isStream && it.duration <= 0) }
+                        ) {
+                            val extra = try { PageScan.scan(ref0, force = true) { false }.map { it.url } } catch (_: Throwable) { emptyList() }
+                                .filter { it !in urls }
+                            if (extra.isNotEmpty()) {
+                                val h2 = HashMap(hints)
+                                for (u in extra) h2[u] = Media.kind(u) ?: "mp4"
+                                // Oynayan videonun süresi güvenilmez (fragman olabilir): süre eşleştirmesi yok
+                                val more = Probe.probeAll(urls + extra, h2, ref0, 0.0, "", h0)
+                                if (more.isNotEmpty()) items = more
+                            }
+                        }
+                        val out = ArrayList<Map<String, Any?>>(items.map {
                             mapOf(
                                 "url" to it.url, "kind" to it.kind, "title" to it.title, "subtitle" to it.subtitle,
                                 "h" to it.height, "d" to it.duration, "s" to it.size, "bw" to it.bw
                             )
                         })
+                        // Siteye özel çözüm: hâlâ uzun video yoksa yt-dlp'nin kendi site çözücüleri sayfayı dener.
+                        // Bulursa sayfa adresi aday olur; indirme de yt-dlp ile yapılır.
+                        if (ref0.startsWith("http") && Probe.isAdSite(ref0) &&
+                            items.none { it.duration >= 60 || (it.isStream && it.duration <= 0) }
+                        ) {
+                            val inf = Ytdlp.info(Store.app, ref0)
+                            if (inf != null && inf.duration >= 60) {
+                                out.add(0, mapOf(
+                                    "url" to ref0, "kind" to "mp4", "title" to inf.title,
+                                    "subtitle" to "Sayfadan çözüldü",
+                                    "h" to 0, "d" to inf.duration, "s" to 0L, "bw" to 0
+                                ))
+                            }
+                        }
+                        done(out)
                     } catch (_: Throwable) {
                         ui.post { onFail() }
                     }

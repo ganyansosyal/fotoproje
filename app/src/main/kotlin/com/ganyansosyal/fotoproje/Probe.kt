@@ -56,6 +56,15 @@ class MediaInfo(val url: String, var kind: String) {
 }
 
 object Probe {
+    private val FEED_SITES = Regex(
+        "(tiktok\\.com|threads\\.net|threads\\.com|x\\.com|twitter\\.com|instagram\\.com|facebook\\.com|fb\\.watch)",
+        RegexOption.IGNORE_CASE
+    )
+
+    /** Akış sitesi (Instagram/TikTok/YouTube/X/Facebook...) olmayan, reklam/fragman karışabilen normal site mi. */
+    fun isAdSite(ref: String): Boolean =
+        !Ytdlp.isSocial(ref) && !Ytdlp.isYoutube(ref) && Ytdlp.xPost(ref, "") == null && !FEED_SITES.containsMatchIn(ref)
+
     private val pool = Executors.newFixedThreadPool(6) // aynı anda en çok 6 istek
 
     /** İncelenmiş adresler: aynı adres tekrar incelenmez (akış sürekli yeni aday getirse de hızlı kalır). */
@@ -640,8 +649,7 @@ object Probe {
             e.duration > 0 && Math.abs(e.duration - expectDur) <= tolE)
         // Oynayan video çok kısaysa (< 30 sn) reklam olabilir: gerçek (uzun) videonun incelenmesi için biraz daha bekle
         // Instagram/Facebook/YouTube/X akışlarında hiçbir şey değişmez (önceden yüklenen başka videolar karışmasın)
-        val adSite = !Ytdlp.isSocial(referer) && !Ytdlp.isYoutube(referer) && Ytdlp.xPost(referer, "") == null &&
-            !Regex("(tiktok\\.com|threads\\.net|threads\\.com|x\\.com|twitter\\.com|instagram\\.com|facebook\\.com|fb\\.watch)", RegexOption.IGNORE_CASE).containsMatchIn(referer)
+        val adSite = isAdSite(referer)
         val grace = if (adSite && expectDur in 0.5..30.0 && ordered.size > 1) 2500L else 900L
         val t0 = System.currentTimeMillis()
         var left = ordered.size
@@ -677,7 +685,23 @@ object Probe {
         // Yalnızca HLS/DASH ana listesinin kendi alt listeleri (aynı videonun kalite parçaları) ayıklanır.
         val ok = list.filter { it.usable && !synchronized(children) { children.contains(it.url) } }
             .sortedByDescending { it.rank }
-        val filtered = ok.distinctBy { it.url }
+        var filtered = ok.distinctBy { it.url }
+        // Parça parça gönderen siteler: aynı sunucudan gelen, benzer kısa süreli (<= 20 sn) 3+ dosya
+        // aynı videonun parçalarıdır; ayrı video gibi listelenmez. Akış (m3u8/mpd) listesi varsa kısa dosyalar da elenir.
+        // Instagram/TikTok gibi akış sitelerinde uygulanmaz (reel'ler zaten kısa).
+        if (adSite) {
+            val shortDirect = filtered.filter { !it.isStream && it.kind != "blob" && it.duration > 0 && it.duration <= 20 }
+            val hostOf = { u: String -> try { java.net.URI(u.substringBefore("#")).host.orEmpty() } catch (_: Throwable) { "" } }
+            val chunks = shortDirect.groupBy { hostOf(it.url) }.values
+                .filter { g -> g.size >= 3 && g.maxOf { it.duration } - g.minOf { it.duration } <= 3.0 }
+                .flatten().toSet()
+            val hasStream = filtered.any { it.isStream }
+            val drop = if (hasStream) shortDirect.toSet() else chunks
+            if (drop.isNotEmpty()) {
+                val keep = filtered.filter { it !in drop }
+                if (keep.isNotEmpty()) filtered = keep
+            }
+        }
         // Süzgeç değil, EŞLEŞTİRME: kullanıcının bastığı videonun süresi biliniyorsa yalnızca o videonun
         // dosyaları gösterilir (Instagram akışında önceden yüklenen başka videolar karışmasın).
         // Eşleşen yoksa liste boş kalır (başka video karışmaz).

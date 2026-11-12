@@ -334,6 +334,17 @@ class DownloadsActivity : Activity() {
         s.setTextColor(sub)
         s.textSize = 12.5f
         col.addView(s, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(2) })
+        // Teknik not yalnızca sorun varsa (ses yok, birleştirilemedi, uyarı...) gösterilir
+        val nt = t.note
+        if (!nt.isNullOrEmpty() && Regex("SES YOK|ses|audio|sessiz|silent|Uyarı|Warning|olmadı|failed", RegexOption.IGNORE_CASE).containsMatchIn(nt)) {
+            val nv = TextView(this)
+            nv.text = nt
+            nv.maxLines = 14
+            nv.ellipsize = android.text.TextUtils.TruncateAt.END
+            nv.setTextColor(sub)
+            nv.textSize = 10.5f
+            col.addView(nv, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(2) })
+        }
         top.addView(col, LinearLayout.LayoutParams(0, -2, 1f))
 
         // Sağda ikon düğmeler: paylaş + sil

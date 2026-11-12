@@ -2416,7 +2416,10 @@ class BrowserActivity : Activity() {
             } ?: emptyList()
 
             val wantDur = if (tb.pLive) 0.0 else tb.pDur
-            val original = if (wantDur > 0.5) {
+            // Normal sitede oynayan video kısa (fragman/reklam) ve listede çok daha uzun video varsa süre eşleştirmesi yapılmaz
+            val trailerCase = wantDur in 0.5..30.0 && Probe.isAdSite(tb.pRef ?: tb.web?.url ?: tb.url) &&
+                original0.any { it.duration >= 120 }
+            val original = if (wantDur > 0.5 && !trailerCase) {
                 val tol = maxOf(1.5, wantDur * 0.03)
                 original0.filter { it.kind == "blob" || it.duration <= 0 && it.url.startsWith("blob:") ||
                     (it.duration > 0 && Math.abs(it.duration - wantDur) <= tol) }
@@ -2731,12 +2734,38 @@ return '';
     private fun showFound() {
         val tb = cur ?: return
         if (isYtTab(tb)) { toast(t("ytNoDl")); return }
+        // Normal sitede video bulunamadı ya da yalnızca kısa (fragman/reklam) var: bir kez videoyu kendimiz başlatıp ara
+        val pageUrl = tb.web?.url ?: tb.url
+        if (tb.web != null && tb.autoPlayUrl != pageUrl && Probe.isAdSite(pageUrl) &&
+            tb.found.none { it.duration >= 60 }
+        ) {
+            tb.autoPlayUrl = pageUrl
+            startPlayAndFind(tb)
+            return
+        }
         if (tb.found.isEmpty()) {
             toast(t("checking"))
             probeThenScan(tb)
             return
         }
         showFoundSheet(tb, tb.found)
+    }
+
+    /** Videoyu (sessiz) başlatır, oynat düğmesine basar; tam video ağdan görününce yeniden arar. */
+    private fun startPlayAndFind(tb: Tab) {
+        val w = tb.web ?: return
+        toast(if (L.code == "tr") "Video başlatılıyor, aranıyor…" else "Starting the video, searching…")
+        try { w.settings.mediaPlaybackRequiresUserGesture = false } catch (_: Throwable) {}
+        w.evaluateJavascript("window.__fpPlay&&window.__fpPlay()", null)
+        ui.postDelayed({
+            try { tb.web?.settings?.mediaPlaybackRequiresUserGesture = true } catch (_: Throwable) {}
+            if (isFinishing || tb !== cur) return@postDelayed
+            probeThenScan(tb)
+            // Aday adresler toplandı: videoyu durdur (arka planda sessizce oynamaya devam etmesin)
+            tb.web?.evaluateJavascript(
+                "Array.prototype.forEach.call(document.getElementsByTagName('video'),function(v){try{v.pause()}catch(e){}})", null
+            )
+        }, 3500)
     }
 
     // ---- Önizleme: kare önbelleği (liste hazır olunca arka planda önceden alınır)
@@ -2766,9 +2795,12 @@ return '';
         }
     }
 
+    private val PAGE_RESOLVED = "Sayfadan çözüldü"
+
     private fun sortedFound(all: List<FoundItem>): List<FoundItem> {
         val found = all.filter {
-            it.size > 0L || it.kind.equals("m3u8", true) || it.kind.equals("mpd", true) || it.kind == "blob"
+            it.size > 0L || it.kind.equals("m3u8", true) || it.kind.equals("mpd", true) || it.kind == "blob" ||
+                it.subtitle == PAGE_RESOLVED
         }.ifEmpty { all }
         val maxDur = found.maxOfOrNull { it.duration } ?: 0.0
         return found.sortedWith(
