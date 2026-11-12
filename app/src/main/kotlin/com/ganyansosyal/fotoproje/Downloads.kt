@@ -204,7 +204,38 @@ object Downloads {
             val kind = task.kind ?: "mp4"
             // Facebook düğmesi: sayfadan (WebView ile) bulunan sesli mp4 -> yt-dlp atlanır, doğrudan indirilir
             val forceDirect = task.url.contains("#fpdirect")
-            if (forceDirect) task.url = task.url.replace("#fpdirect", "")
+            var muxedOk = false // ses+görüntü birlikte olduğu İNDİRMEDEN ÖNCE doğrulanan tek dosya
+            if (forceDirect) {
+                fun frag(n: String): String = Regex("#" + n + "=([^#]*)").find(task.url)?.groupValues?.get(1)?.let {
+                    try { java.net.URLDecoder.decode(it, "UTF-8") } catch (_: Throwable) { "" }
+                } ?: ""
+                val fm = frag("fpm")
+                val fv = frag("fpv")
+                val fa = frag("fpa")
+                val base = task.url.substringBefore("#fpdirect")
+                task.label = if (L.code == "tr") "Ses kontrol ediliyor…" else "Checking audio…"
+                notifyUi(true)
+                if (fm.startsWith("http")) {
+                    // 1) Tek dosyada gerçekten hem görüntü hem ses var mı?
+                    val tr = Probe.avTracks(fm, referer)
+                    if (tr != null && tr.first && tr.second) {
+                        task.url = fm
+                        task.audio = ""
+                        muxedOk = true
+                    }
+                }
+                if (!muxedOk) {
+                    if (fv.startsWith("http") && fa.startsWith("http")) {
+                        // 2) Görüntü ve ses ayrı akışlarda: ikisi de indirilir, FFmpeg/Mux ile tek MP4 yapılır
+                        task.url = fv
+                        task.audio = fa
+                    } else {
+                        // 3) Ses kanıtlanamadı: sessiz kaydetme yok; eski yöntem (ses eşleme / gerçek zamanlı sesli kayıt) denenir
+                        task.url = fv.ifEmpty { fm.ifEmpty { base } }
+                        task.audio = ""
+                    }
+                }
+            }
             var silentRes: Ytdlp.Result? = null // yt-dlp'nin sessiz çıkardığı dosya (diğer yöntem de olmazsa bu kaydedilir)
             // Ana yol: yt-dlp + ffmpeg (ses/görüntü birleştirme, HLS/DASH, kodek uyumu)
             val yt = Ytdlp.isYoutube(task.url, referer)
@@ -284,13 +315,13 @@ object Downloads {
                 task.url = task.url.substringBefore("#fpa=")
             }
             // Ağdan yakalanıp eşleşen ayrı ses adresi (Facebook/Instagram): görüntü adresine göre bul
-            if (kind != "blob" && task.audio.isEmpty() &&
+            if (kind != "blob" && task.audio.isEmpty() && !muxedOk &&
                 Regex("(fbcdn|cdninstagram)\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url)
             ) {
                 AvPairs.audioFor(task.url, referer)?.let { task.audio = it }
             }
             // Düğmeye basıldığı/Devam edildiği anda: WebView'in gördüğü daha taze adres varsa onu kullan
-            if (kind != "blob") {
+            if (kind != "blob" && !forceDirect) {
                 Streams.refresh(task.url, referer, task.cancel, false)?.let { task.url = it }
             }
             val url = task.url
@@ -303,6 +334,46 @@ object Downloads {
                 task.progress = p
                 task.label = l
                 notifyUi()
+            }
+            // Gerçek zamanlı SESLİ kayıt (ses ağdan alınamazsa son çare). Başarılıysa path'teki dosya sesli sürümle değişir.
+            fun recordWithSound(): Boolean {
+                var recOk = false
+                        if (blobReader != null) {
+                            task.label = if (L.code == "tr") "Sesli kayıt alınıyor (video süresi kadar sürer, sayfada kal)…"
+                            else "Recording with sound (takes the video's length, stay on the page)…"
+                            task.progress = -1.0
+                            notifyUi(true)
+                            val rp = File(tmp, "rec_$ts.mp4").path
+                            val rl = CountDownLatch(1)
+                            var rerr: String? = null
+                            blobReader("fprec:", rp, object : BlobRes {
+                                override fun ok() = rl.countDown()
+                                override fun fail(msg: String) {
+                                    rerr = msg
+                                    rl.countDown()
+                                }
+                            })
+                            while (!rl.await(300, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                                if (task.cancel.on) throw CanceledEx()
+                            }
+                            if (rerr == null && File(rp).exists() && File(rp).length() > 1024 &&
+                                FfmpegFix.hasAudioStream(ctx, rp, task.cancel)
+                            ) {
+                                // webm/mp4 kaydı -> temiz MP4 (görüntü copy, ses AAC)
+                                recOk = SafeMux.single(ctx, rp, path + ".rec.mp4", task.cancel)
+                                if (recOk) {
+                                    File(path).delete()
+                                    File(path + ".rec.mp4").renameTo(File(path))
+                                    addNote(
+                                        task,
+                                        "Ses ağdan alınamadı; video sesli olarak kaydedildi (gerçek zamanlı kayıt).",
+                                        "Audio not available from network; recorded with sound in real time."
+                                    )
+                                }
+                            }
+                            try { File(rp).delete() } catch (_: Throwable) {}
+                        }
+                return recOk
             }
             var sepAudio = false
             var ffDone = false // master/mpd çözüldü, FFmpeg video+sesi tek MP4'e yazdı
@@ -377,43 +448,8 @@ object Downloads {
                         Regex("fbcdn\\.", RegexOption.IGNORE_CASE).containsMatchIn(url)
                     ) {
                         try { File(ctx.cacheDir, "fb_net.txt").writeText(FbNetLog.dump()) } catch (_: Throwable) {}
-                        // Son çare: oynayan videoyu SES DAHİL kaydet (gerçek zamanlı); sessiz dosya asla kaydedilmez
-                        var recOk = false
-                        if (blobReader != null) {
-                            task.label = if (L.code == "tr") "Sesli kayıt alınıyor (video süresi kadar sürer, sayfada kal)…"
-                            else "Recording with sound (takes the video's length, stay on the page)…"
-                            task.progress = -1.0
-                            notifyUi(true)
-                            val rp = File(tmp, "rec_$ts.mp4").path
-                            val rl = CountDownLatch(1)
-                            var rerr: String? = null
-                            blobReader("fprec:", rp, object : BlobRes {
-                                override fun ok() = rl.countDown()
-                                override fun fail(msg: String) {
-                                    rerr = msg
-                                    rl.countDown()
-                                }
-                            })
-                            while (!rl.await(300, java.util.concurrent.TimeUnit.MILLISECONDS)) {
-                                if (task.cancel.on) throw CanceledEx()
-                            }
-                            if (rerr == null && File(rp).exists() && File(rp).length() > 1024 &&
-                                FfmpegFix.hasAudioStream(ctx, rp, task.cancel)
-                            ) {
-                                // webm/mp4 kaydı -> temiz MP4 (görüntü copy, ses AAC)
-                                recOk = SafeMux.single(ctx, rp, path + ".rec.mp4", task.cancel)
-                                if (recOk) {
-                                    File(path).delete()
-                                    File(path + ".rec.mp4").renameTo(File(path))
-                                    addNote(
-                                        task,
-                                        "Ses ağdan alınamadı; video sesli olarak kaydedildi (gerçek zamanlı kayıt).",
-                                        "Audio not available from network; recorded with sound in real time."
-                                    )
-                                }
-                            }
-                            try { File(rp).delete() } catch (_: Throwable) {}
-                        }
+                        // Son çare: oynayan videoyu SES DAHİL kaydet (recordWithSound)
+                        val recOk = recordWithSound()
                         if (!recOk) {
                             try { File(path).delete() } catch (_: Throwable) {}
                             throw IOException(
@@ -443,7 +479,20 @@ object Downloads {
                                 File(apath).delete()
                             }
                         }
-                        if (!ok) {
+                        var recovered = false
+                        if (!ok && forceDirect) {
+                            try { File(apath).delete() } catch (_: Throwable) {}
+                            task.audio = ""
+                            if (!recordWithSound()) {
+                                try { File(path).delete() } catch (_: Throwable) {}
+                                throw IOException(
+                                    if (L.code == "tr") "Facebook: ses indirilemedi, sessiz kaydedilmedi. Videoyu sesi açık oynatıp tekrar dene."
+                                    else "Facebook: audio could not be downloaded, not saved silently. Play the video with sound and retry."
+                                )
+                            }
+                            recovered = true
+                        }
+                        if (!ok && !recovered) {
                             // İPTAL YOK: ses inmedi, videoyla (tekli dosya) devam edilir
                             try { File(apath).delete() } catch (_: Throwable) {}
                             task.audio = ""
@@ -452,7 +501,7 @@ object Downloads {
                                 "Ayrı ses indirilemedi (" + (lastErr?.message ?: "?").take(80) + "), tekli dosyadan devam edildi.",
                                 "Separate audio failed (" + (lastErr?.message ?: "?").take(80) + "), continued with the single file."
                             )
-                        } else {
+                        } else if (!recovered) {
                             sepAudio = true
                         }
                     }
@@ -491,7 +540,7 @@ object Downloads {
                     outPath = np
                 }
             }
-            finish(task, outPath, if (sepAudio) apath else null)
+            finish(task, outPath, if (sepAudio) apath else null, requireAudio = forceDirect)
             } catch (e: CanceledEx) {
                 throw e
             } catch (e: Throwable) {
@@ -754,7 +803,7 @@ object Downloads {
         return dest
     }
 
-    private fun finish(task: DownloadTask, tmpPath: String, audioTmp: String?) {
+    private fun finish(task: DownloadTask, tmpPath: String, audioTmp: String?, requireAudio: Boolean = false) {
         val src = tmpPath
         var sepAudio = audioTmp
         var dest: File? = null
@@ -802,6 +851,13 @@ object Downloads {
                 File(aud).delete()
                 dest = d
                 sepAudio = null
+            } else if (requireAudio) {
+                // Facebook düğmesi: birleşmediyse sessiz video bırakma
+                try { File(tmpPath).delete() } catch (_: Throwable) {}
+                throw IOException(
+                    if (L.code == "tr") "Ses ve görüntü birleştirilemedi, sessiz video kaydedilmedi."
+                    else "Could not merge audio and video; silent video not saved."
+                )
             } else {
                 // İPTAL YOK: birleşmediyse video kaydedilir, ses de ayrı _ses.m4a olarak yanına konur
                 addNote(
@@ -817,6 +873,13 @@ object Downloads {
             val ext = src.substringAfterLast('.')
             val d = freeDest(safe(task.title), ext)
             var muxed = false
+            if (requireAudio && Mux.tracks(src)?.second != true && !FfmpegFix.hasAudioStream(ctx, src, task.cancel)) {
+                try { File(src).delete() } catch (_: Throwable) {}
+                throw IOException(
+                    if (L.code == "tr") "Dosyada ses yok, sessiz video kaydedilmedi."
+                    else "File has no audio; silent video not saved."
+                )
+            }
             // Tekli dosyada ses izi görünmüyorsa: -c:v copy -c:a aac ile zorunlu aktarım (iptal yok)
             if (ext.lowercase() == "mp4" && Mux.tracks(src)?.second != true) {
                 task.label = L.t("merging")

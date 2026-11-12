@@ -1495,10 +1495,19 @@ class BrowserActivity : Activity() {
             "fbwait" -> toast(if (L.code == "tr") "Video hazırlanıyor…" else "Preparing video…")
             "fbdl" -> {
                 val pu = arr.optString(0)
-                val direct = arr.optString(1)
-                if (direct.startsWith("http")) {
-                    // Sesli (muxed) mp4 adresi bulundu: yt-dlp'yi atlayıp doğrudan indir (#fpdirect işareti Downloads.kt'de okunur)
-                    startDownload(tb, direct.substringBefore("#") + "#fpdirect", "mp4", refOverride = pu.ifEmpty { null })
+                val muxed = arr.optString(1)
+                val vid = arr.optString(2)
+                val aud = arr.optString(3)
+                val hasPlan = muxed.startsWith("http") || (vid.startsWith("http") && aud.startsWith("http"))
+                if (hasPlan) {
+                    // Sayfadan (WebView ile) bulunan adresler: yt-dlp atlanır. Ses/görüntü kontrolü Downloads.kt'de yapılır.
+                    fun enc(x: String) = java.net.URLEncoder.encode(x.substringBefore("#"), "UTF-8")
+                    val primary = (muxed.ifEmpty { vid }).substringBefore("#")
+                    val link = primary + "#fpdirect" +
+                        (if (muxed.isNotEmpty()) "#fpm=" + enc(muxed) else "") +
+                        (if (vid.isNotEmpty()) "#fpv=" + enc(vid) else "") +
+                        (if (aud.isNotEmpty()) "#fpa=" + enc(aud) else "")
+                    startDownload(tb, link, "mp4", refOverride = pu.ifEmpty { null })
                 } else if (pu.startsWith("http")) {
                     startDownload(tb, pu, "mp4", refOverride = pu)
                 } else toast(
