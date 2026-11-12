@@ -2,24 +2,33 @@ package com.ganyansosyal.fotoproje
 
 import android.app.Activity
 import android.content.Context
-import com.google.android.gms.ads.AdError
-import com.google.android.gms.ads.AdRequest
-import com.google.android.gms.ads.FullScreenContentCallback
-import com.google.android.gms.ads.LoadAdError
-import com.google.android.gms.ads.MobileAds
-import com.google.android.gms.ads.rewarded.RewardedAd
-import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
+import android.os.Handler
+import android.os.Looper
+import com.unity3d.mediation.LevelPlay
+import com.unity3d.mediation.LevelPlayAdError
+import com.unity3d.mediation.LevelPlayAdInfo
+import com.unity3d.mediation.LevelPlayConfiguration
+import com.unity3d.mediation.LevelPlayInitError
+import com.unity3d.mediation.LevelPlayInitListener
+import com.unity3d.mediation.LevelPlayInitRequest
+import com.unity3d.mediation.rewarded.LevelPlayReward
+import com.unity3d.mediation.rewarded.LevelPlayRewardedAd
+import com.unity3d.mediation.rewarded.LevelPlayRewardedAdListener
 
 /** İndirme hakkı (kredi): reklam izleyince +5, her indirmede -1. */
 object Credits {
     const val PER_AD = 5
     private fun p() = Store.app.getSharedPreferences("fp_credits", Context.MODE_PRIVATE)
 
+    /** LevelPlay anahtarları girilmediyse sistem kapalıdır: indirme serbest, reklam sorulmaz. */
+    val enabled: Boolean get() = Ads.configured
+
     val count: Int get() = p().getInt("n", 0)
-    fun has() = count > 0
+    fun has() = !enabled || count > 0
 
     @Synchronized fun add(n: Int) { p().edit().putInt("n", count + n).apply() }
     @Synchronized fun use(): Boolean {
+        if (!enabled) return true
         val c = count
         if (c <= 0) return false
         p().edit().putInt("n", c - 1).apply()
@@ -27,47 +36,99 @@ object Credits {
     }
 }
 
-/** AdMob ödüllü reklam. GERÇEK kimlik: kendi telefonunda AdMob panelinden test cihazı olarak ekle, reklama tıklama. */
+/** LevelPlay (içinde AdMob) ödüllü reklam. */
 object Ads {
-    // Gerçek ödüllü reklam birimi (indirme_odul)
-    private const val UNIT_ID = "ca-app-pub-1340335815297540/5900117294"
+    // LevelPlay panelinden alınacak: Setup > Apps > App Key ve Setup > Ad Units > Rewarded ad unit ID
+    private const val APP_KEY = "298353485"
+    private const val AD_UNIT_ID = "lipy2p9ldlnctkdv"
 
-    private var ad: RewardedAd? = null
+    val configured: Boolean
+        get() = !APP_KEY.startsWith("BURAYA") && !AD_UNIT_ID.startsWith("BURAYA")
+
+    private val ui = Handler(Looper.getMainLooper())
+    private var ad: LevelPlayRewardedAd? = null
+    private var initDone = false
+    private var initing = false
     private var loading = false
 
-    val ready: Boolean get() = ad != null
+    private var cbReward: (() -> Unit)? = null
+    private var cbFail: (() -> Unit)? = null
+    private var earned = false
+
+    val ready: Boolean get() = try { ad?.isAdReady() == true } catch (_: Throwable) { false }
 
     fun init(ctx: Context) {
+        if (!configured || initDone || initing) return
+        initing = true
         try {
-            MobileAds.initialize(ctx) {}
-            load(ctx)
-        } catch (_: Throwable) {}
+            val req = LevelPlayInitRequest.Builder(APP_KEY).build()
+            LevelPlay.init(ctx.applicationContext, req, object : LevelPlayInitListener {
+                override fun onInitSuccess(configuration: LevelPlayConfiguration) {
+                    initing = false
+                    initDone = true
+                    val a = LevelPlayRewardedAd(AD_UNIT_ID)
+                    a.setListener(listener)
+                    ad = a
+                    load(ctx)
+                }
+                override fun onInitFailed(error: LevelPlayInitError) {
+                    initing = false // sonraki load() çağrısında yeniden denenir
+                }
+            })
+        } catch (_: Throwable) { initing = false }
     }
 
     fun load(ctx: Context) {
-        if (loading || ad != null) return
+        if (!configured) return
+        if (!initDone) { init(ctx); return }
+        if (loading || ready) return
         loading = true
-        try {
-            RewardedAd.load(ctx, UNIT_ID, AdRequest.Builder().build(), object : RewardedAdLoadCallback() {
-                override fun onAdLoaded(a: RewardedAd) { ad = a; loading = false }
-                override fun onAdFailedToLoad(e: LoadAdError) { ad = null; loading = false }
-            })
-        } catch (_: Throwable) { loading = false }
+        try { ad?.loadAd() } catch (_: Throwable) { loading = false }
     }
 
     /** Ödül yalnızca kullanıcı reklamı gerçekten izleyince verilir (onReward). */
     fun show(act: Activity, onReward: () -> Unit, onFail: () -> Unit) {
         val a = ad
-        if (a == null) { load(act); onFail(); return }
-        var earned = false
-        a.fullScreenContentCallback = object : FullScreenContentCallback() {
-            override fun onAdDismissedFullScreenContent() {
-                ad = null
-                load(act) // sıradaki reklam önceden yüklenir
-                if (!earned) onFail()
-            }
-            override fun onAdFailedToShowFullScreenContent(e: AdError) { ad = null; load(act); onFail() }
+        if (a == null || !ready) { load(act); onFail(); return }
+        cbReward = onReward
+        cbFail = onFail
+        earned = false
+        try { a.showAd(act) } catch (_: Throwable) { finish(false) }
+    }
+
+    private fun finish(ok: Boolean) {
+        val r = cbReward; val f = cbFail
+        cbReward = null; cbFail = null
+        if (ok) r?.invoke() else f?.invoke()
+    }
+
+    private val listener = object : LevelPlayRewardedAdListener {
+        override fun onAdLoaded(adInfo: LevelPlayAdInfo) { loading = false }
+
+        override fun onAdLoadFailed(error: LevelPlayAdError) {
+            loading = false
+            // Reklam yoksa 30 sn sonra yeniden dene
+            ui.postDelayed({ ad?.let { load(Store.app) } }, 30_000)
         }
-        a.show(act) { earned = true; onReward() }
+
+        override fun onAdRewarded(reward: LevelPlayReward, adInfo: LevelPlayAdInfo) {
+            earned = true
+            finish(true)
+        }
+
+        override fun onAdClosed(adInfo: LevelPlayAdInfo) {
+            load(Store.app) // sıradaki reklam önceden yüklenir
+            // onAdRewarded, onAdClosed'dan sonra gelebilir: kısa süre beklenir
+            ui.postDelayed({ if (!earned) finish(false) }, 1500)
+        }
+
+        override fun onAdDisplayFailed(error: LevelPlayAdError, adInfo: LevelPlayAdInfo) {
+            load(Store.app)
+            finish(false)
+        }
+
+        override fun onAdDisplayed(adInfo: LevelPlayAdInfo) {}
+        override fun onAdClicked(adInfo: LevelPlayAdInfo) {}
+        override fun onAdInfoChanged(adInfo: LevelPlayAdInfo) {}
     }
 }

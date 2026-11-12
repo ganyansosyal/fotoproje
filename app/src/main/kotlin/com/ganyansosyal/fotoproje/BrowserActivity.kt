@@ -2626,7 +2626,8 @@ return '';
 """
 
     private fun creditsLabel(): String =
-        if (L.code == "tr") "Kalan hak: ${Credits.count}" else "Credits left: ${Credits.count}"
+        if (!Credits.enabled) ""
+        else if (L.code == "tr") "Kalan hak: ${Credits.count}" else "Credits left: ${Credits.count}"
 
     /** Hak bitti: "Reklam izle, 5 indirme kazan" penceresi. Reklam izlenince onGranted çağrılır. */
     private fun askAd(onGranted: () -> Unit) {
@@ -2681,7 +2682,7 @@ return '';
                     // Seçilen kaynak olmazsa sırayla bunlar denenir
                     "alts" to others.filter { it.url != url && it.kind != "blob" }.map { it.kind + "|" + it.url }
                 ),
-                { r -> toast((if (r is String) r else t("downloadStarted")) + "  •  " + creditsLabel()) },
+                { r -> toast((if (r is String) r else t("downloadStarted")) + creditsLabel().let { if (it.isEmpty()) "" else "  •  " + it }) },
                 { Credits.add(1); toast(t("failed")) } // indirme başlamadıysa hak geri verilir
             )
         }
@@ -3161,7 +3162,7 @@ return '';
                 .setNegativeButton(if (tr) "Vazgeç" else "Cancel", null)
                 .show()
         }
-        val dlLabel = if (Credits.has()) t("download") + " (" + Credits.count + ")"
+        val dlLabel = if (Credits.has()) t("download") + (if (Credits.enabled) " (" + Credits.count + ")" else "")
             else "🔒 " + (if (L.code == "tr") "Reklam izle" else "Watch ad")
         val dl = action("⤓", dlLabel, acc) {
             val f = items[sel]
