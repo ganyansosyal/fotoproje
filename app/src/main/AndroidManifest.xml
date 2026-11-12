@@ -18,10 +18,10 @@
         android:enableOnBackInvokedCallback="false"
         android:theme="@style/AppTheme.Light">
 
-        <!-- TEST AdMob uygulama kimliği: yayından önce kendi kimliğinle değiştir -->
+        <!-- AdMob uygulama kimliği (Video indir) -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-3940256099942544~3347511713" />
+            android:value="ca-app-pub-1340335815297540~4207761677" />
 
         <activity
             android:name=".BrowserActivity"
