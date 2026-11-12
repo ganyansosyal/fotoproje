@@ -58,5 +58,6 @@ dependencies {
     implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
     implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
     implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.5")
+    implementation("com.google.android.gms:play-services-ads:23.6.0")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.0.4")
 }
