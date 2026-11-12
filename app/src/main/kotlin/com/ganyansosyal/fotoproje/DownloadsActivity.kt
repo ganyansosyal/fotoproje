@@ -147,11 +147,12 @@ class DownloadsActivity : Activity() {
     private fun render() {
         style(tabProg, !showDone)
         style(tabDone, showDone)
-        tabProg.text = L.t("progress") + if (Downloads.active.isNotEmpty()) "  ${Downloads.active.size}" else ""
+        val shown = Downloads.shown()
+        tabProg.text = L.t("progress") + if (shown.isNotEmpty()) "  ${shown.size}" else ""
         tabDone.text = L.t("done") + if (Downloads.unseen > 0) "  ${Downloads.unseen}" else ""
         list.removeAllViews()
         if (!showDone) {
-            if (Downloads.active.isEmpty()) empty(L.t("noActive"), "⤓") else for (t in Downloads.active) list.addView(activeRow(t))
+            if (shown.isEmpty()) empty(L.t("noActive"), "⤓") else for (t in shown) list.addView(activeRow(t))
         } else {
             if (Downloads.done.isEmpty()) empty(L.t("noDownloads"), "▶") else for (t in Downloads.done) list.addView(doneRow(t))
         }

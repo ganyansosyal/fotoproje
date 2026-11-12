@@ -81,9 +81,11 @@ object Streams {
 
     fun direct(
         url: String, path: String, headers: Map<String, String>, cancel: CancelFlag,
-        report: Report, conns: Int = 8, strict: Boolean = false
+        report: Report, conns: Int = 8, strict: Boolean = false,
+        onTotal: ((Long) -> Unit)? = null
     ) {
         Native.direct(url, path, headers, conns, strict, cancel) { a, b ->
+            if (b > 0) onTotal?.invoke(b.toLong())
             if (b > 0) report(a.toDouble() / b, "%" + (a * 100 / b))
             else report(-1.0, String.format("%.1f MB", a / 1048576.0))
         }

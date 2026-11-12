@@ -234,6 +234,8 @@ object Ytdlp {
         throw IOException("İndirilen dosya oynatılamıyor ($why)")
     }
 
+    private val SIZE_RE = Regex("of\\s+([0-9.]+)\\s*([KMG])i?B", RegexOption.IGNORE_CASE) // "~" ile başlayan tahminler eşleşmez
+
     private fun runOnce(
         ctx: Context, task: DownloadTask, src: String, referer: String, second: Boolean,
         report: (Double, String) -> Unit, anyAudio: Boolean = false, noCookies: Boolean = false
@@ -286,6 +288,14 @@ object Ytdlp {
         watcher.start()
         try {
             YoutubeDL.getInstance().execute(req, pid) { progress, _, line ->
+                // "[download]  12.3% of ~ 1.95MiB at ..." satırından toplam boyutu al
+                SIZE_RE.find(line)?.let { m ->
+                    val n = m.groupValues[1].toDoubleOrNull()
+                    if (n != null) {
+                        val mul = when (m.groupValues[2].uppercase()) { "K" -> 1024.0; "M" -> 1048576.0; else -> 1073741824.0 }
+                        task.total = maxOf(task.total, (n * mul).toLong())
+                    }
+                }
                 if (progress >= 0f) {
                     report((progress / 100.0).coerceIn(0.0, 1.0), "İndiriliyor %" + progress.toInt())
                 } else if (line.contains("Merger", true) || line.contains("ffmpeg", true)) {

@@ -31,6 +31,7 @@ class DownloadTask(val id: String, @Volatile var url: String, val referer: Strin
     @Volatile var error: String? = null
     @Volatile var note: String? = null
     @Volatile var size = 0L
+    @Volatile var total = 0L // indirilecek toplam bayt (bilinmiyorsa 0); küçük dosyaları listede gizlemek için
     @Volatile var progress = 0.0 // 0..1, <0: belirsiz
     @Volatile var label = ""
     @Volatile var cancel = CancelFlag()
@@ -93,6 +94,20 @@ object Downloads {
             ui.postDelayed(tick, 200)
         }
     }
+
+    /** 2 MB'tan küçük indirmeler İlerleme listesinde/hapta gösterilmez (yanıp sönmesin), doğrudan Bitti'ye düşer. */
+    const val MIN_SHOW = 2L * 1024 * 1024
+
+    fun isShown(t: DownloadTask): Boolean {
+        if (t.status == DlStatus.FAILED || t.status == DlStatus.PAUSED) return true
+        val tot = t.total
+        if (tot in 1 until MIN_SHOW) return false
+        if (tot >= MIN_SHOW) return true
+        // Boyut henüz bilinmiyor: ilk ~2,5 sn gösterme (başlangıçtaki "…" sıçramasını önler)
+        return System.currentTimeMillis() - t.createdAt > 2500
+    }
+
+    fun shown(): List<DownloadTask> = active.filter { isShown(it) }
 
     fun markSeen() {
         if (unseen == 0) return
@@ -229,7 +244,7 @@ object Downloads {
                             task.progress = p
                             task.label = l
                             notifyUi()
-                        })
+                        }, onTotal = { task.total = maxOf(task.total, it) })
                         if (pk.audioUrl != null) {
                             task.label = if (L.code == "tr") "Ses indiriliyor…" else "Downloading audio…"
                             notifyUi(true)
@@ -355,7 +370,7 @@ object Downloads {
                 else -> {
                     Streams.direct(
                         url, path, Net.smartHeaders(url, referer, task.cancel),
-                        task.cancel, report
+                        task.cancel, report, onTotal = { task.total = maxOf(task.total, it) }
                     )
                     // Bozuk / video olmayan dosya "indi" sayılmaz: hata verir, yedek kaynak denenir
                     checkPlayable(path, kind)
@@ -609,6 +624,7 @@ object Downloads {
         task.alts.addAll(alts)
         active.add(0, task)
         notifyUi(true)
+        ui.postDelayed(tick, 2600) // gizli bekleme süresi bitince listeyi yenile
         run(task, bodyFor(task, blobReader))
         return null
     }

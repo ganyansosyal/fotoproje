@@ -119,7 +119,7 @@ class DlPill(private val act: Activity, private val onTap: () -> Unit) {
             box.visibility = View.GONE
             return
         }
-        val run = Downloads.active.firstOrNull { it.status == DlStatus.RUNNING }
+        val run = Downloads.active.firstOrNull { it.status == DlStatus.RUNNING && Downloads.isShown(it) }
         if (run != null) {
             track = run
             ui.removeCallbacks(hideRun)
