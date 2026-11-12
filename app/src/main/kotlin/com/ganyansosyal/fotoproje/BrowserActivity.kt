@@ -744,6 +744,14 @@ class BrowserActivity : Activity() {
         w.translationY = 0f
         bar.translationY = 0f
         trimTabs()
+        // Adres çubuğu odaktaysa updateChrome onu güncellemez: sekme değişirken/kapanırken eski adres kalıyordu
+        if (urlBox.hasFocus()) {
+            try {
+                (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
+                    .hideSoftInputFromWindow(urlBox.windowToken, 0)
+            } catch (_: Throwable) {}
+            urlBox.clearFocus()
+        }
         updateChrome()
         scheduleSave()
     }
