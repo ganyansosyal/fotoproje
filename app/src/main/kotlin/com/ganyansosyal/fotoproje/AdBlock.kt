@@ -31,10 +31,10 @@ object AdBlock {
         "mathtag.com", "yieldlab.net", "adition.com", "improvedigital.com", "gumgum.com",
         "media.net", "revcontent.com", "zemanta.com", "onetag-sys.com", "id5-sync.com",
         "liadm.com", "doubleverify.com", "hotjar.com", "ads-twitter.com",
-        "analytics.twitter.com", "ads.tiktok.com", "analytics.tiktok.com", "an.facebook.com",
+        "analytics.twitter.com", "ads.tiktok.com", "analytics.tiktok.com",
         "admatic.com.tr", "adnxs-simple.com", "adservice.google.com.tr"
     )
-    private val paths = listOf("facebook.net/en_US/fbevents.js")
+    private val paths = emptyList<String>()
 
     // ---- İnternetten indirilen hazır liste (Peter Lowe's ad server list) ----
     // Arka planda indirilir/okunur; sayfa açılışını ve kaydırmayı etkilemez. Hazır olana kadar yukarıdaki yerel liste çalışır.
@@ -44,7 +44,7 @@ object AdBlock {
     private const val MAX_BYTES = 3_000_000
     // Bunlar listede olsa bile asla engellenmez (siteleri bozar)
     private val NEVER = hashSetOf(
-        "x.com", "twitter.com", "twimg.com", "t.co", "facebook.com", "fbcdn.net", "instagram.com",
+        "x.com", "twitter.com", "twimg.com", "t.co", "fbcdn.net", "instagram.com",
         "cdninstagram.com", "tiktok.com", "youtube.com", "youtu.be", "ytimg.com", "googlevideo.com",
         "google.com", "googleapis.com", "gstatic.com", "googleusercontent.com", "cloudfront.net",
         "akamaihd.net", "amazonaws.com", "github.com", "microsoft.com", "apple.com", "localhost"

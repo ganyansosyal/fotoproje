@@ -53,7 +53,7 @@ object Media {
  var SEGQ=/[?&](bytestart|byterange|range|sq|seg|segment|chunk)=/i;
  var cand=[];
  function norm(u){ try{u=new URL(String(u),location.href).href;}catch(e){return ''} return /^https?:/i.test(u)?u:''; }
- // Instagram/Facebook parça isteklerindeki bytestart/byteend atılır: tam dosya adresi aday olur.
+ // Instagram parça isteklerindeki bytestart/byteend atılır: tam dosya adresi aday olur.
  function unrange(u){ if(!/[?&](bytestart|byteend)=/i.test(u)) return u;
   u=u.replace(/[?&](bytestart|byteend)=\d*/gi,function(m){ return m.charAt(0)==='?'?'?':''; });
   return u.replace('?&','?').replace(/\?${'$'}/,''); }
@@ -79,9 +79,9 @@ object Media {
  function sniff(t,u){ if(!t||!u) return; t=String(t).replace(/^\uFEFF/,'');
   if(/^\s*#EXTM3U/.test(t)) note(u,'m3u8'); else if(/<MPD[\s>]/.test(t)) note(u,'mpd'); }
  function head(buf){ try{ return String.fromCharCode.apply(null,new Uint8Array(buf,0,Math.min(512,buf.byteLength))); }catch(e){ return ''; } }
- // Instagram/Facebook: sessiz akışta ses dosyası hiç istenmez; adresi sayfanın JSON verisinde (video_versions,
+ // Instagram: sessiz akışta ses dosyası hiç istenmez; adresi sayfanın JSON verisinde (video_versions,
  // video_dash_manifest) bulunur. Yanıtlardaki ve sayfa içindeki JSON taranır, tüm .mp4 / DASH BaseURL adresleri aday olur.
- function igHost(){ try{ return /(^|\.)(instagram|facebook)\.com${'$'}/i.test(location.hostname); }catch(e){ return false; } }
+ function igHost(){ try{ return /(^|\.)instagram\.com${'$'}/i.test(location.hostname); }catch(e){ return false; } }
  function igWalk(o,d){ if(o==null||d>16) return;
   if(typeof o==='string'){
    if(o.length<20) return;
@@ -89,7 +89,7 @@ object Media {
    else if(/^https?:\/\/[^\s]+\.mp4(\?|${'$'})/i.test(o)) note(o,'mp4');
    return; }
   if(typeof o==='object'){ for(var k in o){ try{ igWalk(o[k],d+1); }catch(e){} } } }
- // Facebook GraphQL yanıtları çoğu zaman SATIR SATIR birden fazla JSON'dur (tek JSON.parse patlar):
+ // GraphQL yanıtları çoğu zaman SATIR SATIR birden fazla JSON'dur (tek JSON.parse patlar):
  // önce bütün, olmazsa satır satır, o da olmazsa düz metin taraması (ses adresi buradan yakalanır).
  function igScan(t){ try{ if(!t||t.length<200||t.length>4000000||t.indexOf('.mp4')<0) return;
    var ok=false, i=t.indexOf('{'), j=t.indexOf('['); if(i<0||(j>=0&&j<i)) i=j;
@@ -162,7 +162,7 @@ object Media {
  function stop(){ if(!act) return; act=null; last=''; if(wd){clearInterval(wd);wd=0;} send({stop:true}); }
  function sched(ms){ if(ft) return; ft=setTimeout(report,ms||500); }
  function poke(){ if(act) sched(700); }
- // Instagram/Facebook akışında sayfa adresi gönderi adresi değildir: videonun kendi gönderi bağlantısını bul
+ // Instagram akışında sayfa adresi gönderi adresi değildir: videonun kendi gönderi bağlantısını bul
  function xHost(){ try{ return /(^|[.])(x|twitter)[.]com/i.test(location.hostname); }catch(e){ return false; } }
  // X: videonun bulunduğu tweet'in kendi adresi (anasayfa akışında sayfa adresi tweet adresi değildir)
  function xlink(v){ try{
@@ -176,8 +176,7 @@ object Media {
  function permalink(v){ try{
   if(xHost()) return xlink(v);
   if(!igHost()) return location.href;
-  // Facebook: gönderi adresleri farklı biçimlerde olur (videos/, watch/?v=, posts/, reel/, video.php, story.php ...)
-  var fb=/(^|\.)facebook\.com${'$'}/i.test(location.hostname);
+  var fb=false;
   var RX=fb?/\/(reel\/\d|videos\/\d|watch\/?\?|video\.php\?|posts\/|permalink|story\.php|share\/[rvp]\/)/:/\/(reels?|p|tv)\/[A-Za-z0-9_-]+/;
   var SEL=fb?'a[href*="/reel/"],a[href*="/videos/"],a[href*="/watch/?"],a[href*="/watch?"],a[href*="video.php"],a[href*="/posts/"],a[href*="permalink"],a[href*="story.php"]':'a[href*="/reel/"],a[href*="/reels/"],a[href*="/p/"],a[href*="/tv/"]';
   if(RX.test(fb?location.pathname+location.search:location.pathname)&&location.pathname.indexOf('/audio')<0) return location.href;
@@ -187,41 +186,7 @@ object Media {
    // "Orijinal ses" bağlantısı (/reels/audio/...) gönderi adresi değildir, atlanır
    if(a){ for(k=0;k<a.length;k++){ h=a[k].getAttribute('href')||''; if(RX.test(h)&&h.indexOf('/audio')<0) return new URL(h,location.href).href; } }
   }
-  // Facebook akışta zaman damgası bağlantısının adresini gizler (href="#"): üzerine gelme olayıyla açtır, olmazsa oynatıcıdan video kimliğini bul
-  if(fb){ var f=fbFind(v,RX); if(f) return f; }
  }catch(e){} return location.href; }
- function fbFind(v,RX){ try{
-  var n=v, i, art=null, as, k, h, m, fn, p, key, d;
-  for(i=0;n&&i<40;i++,n=n.parentElement){ if(n.getAttribute&&n.getAttribute('role')==='article'){ art=n; break; } }
-  var root=art||(v.parentElement&&v.parentElement.parentElement)||document.body;
-  // 1) Zaman damgası bağlantılarını uyandır
-  as=root.querySelectorAll('a[role="link"],a[href="#"]');
-  for(k=0;k<as.length&&k<25;k++){
-   h=as[k].getAttribute('href')||'';
-   if(RX.test(h)&&h.indexOf('/audio')<0) return new URL(h,location.href).href;
-   if((as[k].textContent||'').length>24) continue;
-   try{ as[k].dispatchEvent(new MouseEvent('mouseover',{bubbles:true})); as[k].dispatchEvent(new MouseEvent('mousemove',{bubbles:true})); as[k].dispatchEvent(new FocusEvent('focusin',{bubbles:true})); }catch(e){}
-   h=as[k].getAttribute('href')||'';
-   if(RX.test(h)&&h.indexOf('/audio')<0) return new URL(h,location.href).href;
-  }
-  // 2) React bileşen özelliklerinden video kimliği
-  n=v;
-  for(i=0;n&&i<30;i++,n=n.parentElement){
-   key=null; for(d in n){ if(d.indexOf('__reactFiber$')===0||d.indexOf('__reactInternalInstance$')===0){ key=d; break; } }
-   if(!key) continue;
-   fn=n[key];
-   for(k=0;fn&&k<60;k++,fn=fn.return){
-    p=fn.memoizedProps; if(!p||typeof p!=='object') continue;
-    var id=p.videoID||p.video_id||p.videoId||(p.video&&p.video.id)||(p.videoData&&p.videoData.video_id);
-    if(id&&/^[0-9]{8,}${'$'}/.test(String(id))) return 'https://www.facebook.com/watch/?v='+id;
-   }
-   break;
-  }
-  // 3) Gönderinin HTML'inde video kimliği ara
-  h=root.innerHTML||''; if(h.length>600000) h=h.slice(0,600000);
-  m=/(?:\/reel\/|\/videos\/|watch\/?\?v=|\"video_id\":\"|\"videoID\":\"|\"videoId\":\")([0-9]{8,})/.exec(h);
-  if(m) return 'https://www.facebook.com/watch/?v='+m[1];
- }catch(e){} return null; }
  // Reklam algılama: oynatıcıda reklam durumu sınıfı ya da videonun üstünde "Reklam" etiketi varsa oynayan reklamdır
  var ADC=/(ad-showing|ad-playing|ad-interrupting|ad-running|vjs-ad-playing|vjs-ad-loading|jw-flag-ads|jw-state-ad|ima-ad-container|ads-playing|advertisement-playing|plyr--ad)/i;
  var ADT=/^(reklam|reklamı geç|reklamı atla|advertisement|ad|ads|sponsored|skip ad|skip ads|werbung|publicité|anuncio)( [0-9:]+)?/i;
@@ -345,7 +310,7 @@ object Media {
  var last=0, OK=8000, lx=-1, ly=-1;
  // TÜM sitelerde (Google, YouTube, film siteleri, sosyal medya...) yalnızca DOKUNULAN videoya izin verilir
  var strict=true;
- var feed=/(^|[.])(instagram[.]com|facebook[.]com|fb[.]watch|x[.]com|twitter[.]com|tiktok[.]com)/i.test(location.hostname);
+ var feed=/(^|[.])(instagram[.]com|fb[.]watch|x[.]com|twitter[.]com|tiktok[.]com)/i.test(location.hostname);
  function pt(e){ var t=e.changedTouches&&e.changedTouches[0]||e; if(t&&t.clientX!=null){ lx=t.clientX; ly=t.clientY; } }
  function mark(e){ if(e.isTrusted){ last=Date.now(); pt(e); } }
  // Videonun kendi alanı + hemen çevresindeki oynat düğmesi/kapsayıcısı (en çok 3 kat büyüklüğe kadar)
@@ -438,7 +403,7 @@ object Media {
 })();
 """
 
-    /** Instagram/Facebook parça isteklerindeki bytestart/byteend'i atar (tam dosya adresi kalır). */
+    /** Instagram parça isteklerindeki bytestart/byteend'i atar (tam dosya adresi kalır). */
     fun unrange(u: String): String {
         if (!Regex("[?&](bytestart|byteend)=", RegexOption.IGNORE_CASE).containsMatchIn(u)) return u
         var r = u.replace(Regex("[?&](bytestart|byteend)=\\d*", RegexOption.IGNORE_CASE)) { m ->

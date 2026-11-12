@@ -88,7 +88,7 @@ object VideoRules {
         ""
     }
 
-    /** Facebook/Instagram "efg" parametresinin çözülmüş JSON'u (yoksa null). */
+    /** Instagram "efg" parametresinin çözülmüş JSON'u (yoksa null). */
     fun efg(url: String): JSONObject? = try {
         val raw = query(url, "efg")
         if (raw.isEmpty()) null else {
@@ -116,7 +116,7 @@ object VideoRules {
      * Bu istek ses mi, görüntü mü, ikisi bir arada mı?
      * Sırayla bakılır (ilk kesin sonuç kazanır):
      *  1. Adres parametreleri: mimetype / mime_type / mime / contenttype = audio/..., video/...
-     *  2. Facebook/Instagram efg etiketi: "..._audio" -> ses, "progressive" -> muxed, "dash..." -> görüntü
+     *  2. Instagram efg etiketi: "..._audio" -> ses, "progressive" -> muxed, "dash..." -> görüntü
      *  3. İstek başlıkları: Sec-Fetch-Dest (audio|video), Accept (audio/... veya video/...)
      *  4. Dosya uzantısı (m4a, aac, opus, weba, mp3 -> ses)
      * Medya işareti olmayan istek (resim, js...) için null döner.
@@ -154,7 +154,7 @@ object VideoRules {
     }
 
     /**
-     * Bayt aralığı parametrelerini (bytestart / byteend) atar: Facebook videoyu parça parça ister,
+     * Bayt aralığı parametrelerini (bytestart / byteend) atar: video parça parça istenir,
      * parça adresi indirilirse dosyanın yalnızca bir kısmı gelir. Tam dosya adresi bu parametresiz adrestir.
      */
     fun canonical(url: String): String {
@@ -264,7 +264,7 @@ class VideoSniffer(
             if (!req.method.equals("GET", ignoreCase = true)) return
             val raw = req.url.toString()
             val reqHeaders = req.requestHeaders
-            FbNetLog.add(raw, reqHeaders?.get("Range")) // teşhis: Facebook CDN isteklerini kaydet
+            FbNetLog.add(raw, reqHeaders?.get("Range")) // teşhis: CDN isteklerini kaydet
 
             val role = VideoRules.role(raw, reqHeaders)
             var kind = VideoRules.classify(raw)
@@ -346,7 +346,7 @@ open class SniffingWebViewClient(private val sniffer: VideoSniffer) : WebViewCli
 }
 
 /**
- * Facebook/Instagram CDN (fbcdn) ağ isteği kaydı. Videonun sesi neden yakalanmadı sorusunu
+ * Instagram CDN (fbcdn) ağ isteği kaydı. Videonun sesi neden yakalanmadı sorusunu
  * cevaplamak için: her isteğin kodlama etiketi (efg -> vencode_tag), varlık kimliği,
  * bayt aralığı, sınıflandırma sonucu (kind) ve reklam filtresine takılıp takılmadığı tutulur.
  * Son 80 istek bellekte durur; imza / token parametreleri kaydedilmez.

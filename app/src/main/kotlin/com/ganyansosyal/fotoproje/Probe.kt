@@ -17,7 +17,7 @@ class MediaInfo(val url: String, var kind: String) {
     var size = 0L
     var usable = true
     var verified = false
-    /** Yalnızca ses içeren dosya (Instagram/Facebook'ta görüntü ve ses ayrı gelir). */
+    /** Yalnızca ses içeren dosya (Instagram'ta görüntü ve ses ayrı gelir). */
     var audioOnly = false
     var mp4Read = false
     /** Sessiz görüntü dosyasıyla eşleşen ayrı ses dosyası adresi. */
@@ -57,11 +57,11 @@ class MediaInfo(val url: String, var kind: String) {
 
 object Probe {
     private val FEED_SITES = Regex(
-        "(tiktok\\.com|threads\\.net|threads\\.com|x\\.com|twitter\\.com|instagram\\.com|facebook\\.com|fb\\.watch)",
+        "(tiktok\\.com|threads\\.net|threads\\.com|x\\.com|twitter\\.com|instagram\\.com|fb\\.watch)",
         RegexOption.IGNORE_CASE
     )
 
-    /** Akış sitesi (Instagram/TikTok/YouTube/X/Facebook...) olmayan, reklam/fragman karışabilen normal site mi. */
+    /** Akış sitesi (Instagram/TikTok/YouTube/X...) olmayan, reklam/fragman karışabilen normal site mi. */
     fun isAdSite(ref: String): Boolean =
         !Ytdlp.isSocial(ref) && !Ytdlp.isYoutube(ref) && Ytdlp.xPost(ref, "") == null && !FEED_SITES.containsMatchIn(ref)
 
@@ -304,7 +304,7 @@ object Probe {
     private fun isAudioCodec(c: String) =
         listOf("mp4a", "ac-3", "ec-3", "opus", "flac", "mp3", "vorbis").any { c.contains(it) }
 
-    /** Instagram/Facebook adreslerindeki "efg" parametresinden kodlama etiketi (örn. "..._audio"). */
+    /** Instagram adreslerindeki "efg" parametresinden kodlama etiketi (örn. "..._audio"). */
     private fun efgTag(url: String): String {
         return try {
             val raw = android.net.Uri.parse(url.substringBefore("#")).getQueryParameter("efg") ?: return ""
@@ -317,7 +317,7 @@ object Probe {
         }
     }
 
-    /** Facebook/Instagram adresindeki "efg" içinden video varlık kimliği (aynı videonun görüntü ve ses dosyası aynı kimliği taşır). */
+    /** Instagram adresindeki "efg" içinden video varlık kimliği (aynı videonun görüntü ve ses dosyası aynı kimliği taşır). */
     private fun assetId(url: String): String {
         return try {
             val raw = android.net.Uri.parse(url.substringBefore("#")).getQueryParameter("efg") ?: return ""
@@ -584,7 +584,7 @@ object Probe {
                 }
                 if (info.usable && info.duration <= 0) info.duration = retrieverDuration(url, referer)
             }
-            // Instagram/Facebook: etiket kesin söyler (sessiz DASH görüntüsü / ayrı ses dosyası)
+            // Instagram: etiket kesin söyler (sessiz DASH görüntüsü / ayrı ses dosyası)
             val tag = efgTag(url)
             if (tag.isNotEmpty() && kind != "m3u8" && kind != "mpd") {
                 if (tag.contains("audio")) {
@@ -648,7 +648,7 @@ object Probe {
         fun isMatch(e: MediaInfo) = e.usable && (e.url == exactSrc && exactSrc.isNotEmpty() ||
             e.duration > 0 && Math.abs(e.duration - expectDur) <= tolE)
         // Oynayan video çok kısaysa (< 30 sn) reklam olabilir: gerçek (uzun) videonun incelenmesi için biraz daha bekle
-        // Instagram/Facebook/YouTube/X akışlarında hiçbir şey değişmez (önceden yüklenen başka videolar karışmasın)
+        // Instagram/YouTube/X akışlarında hiçbir şey değişmez (önceden yüklenen başka videolar karışmasın)
         val adSite = isAdSite(referer)
         val grace = if (adSite && expectDur in 0.5..30.0 && ordered.size > 1) 2500L else 900L
         val t0 = System.currentTimeMillis()
@@ -734,7 +734,7 @@ object Probe {
             if (e.duration <= 0 && expectDur > 0 && (e.url == exactSrc || cands.size == 1)) e.duration = expectDur
             if (e.height <= 0 && height > 0 && (e.url == exactSrc || cands.size == 1)) e.height = height
         }
-        // Sessiz görüntü dosyası + ayrı ses dosyası (Instagram/Facebook): eşleştir, indirirken birleştirilir
+        // Sessiz görüntü dosyası + ayrı ses dosyası (Instagram): eşleştir, indirirken birleştirilir
         val audios = list.filter { it.audioOnly }
         if (audios.isNotEmpty()) audioPool = audios
         if (audios.isNotEmpty()) {

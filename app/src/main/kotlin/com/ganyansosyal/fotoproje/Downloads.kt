@@ -39,9 +39,9 @@ class DownloadTask(val id: String, @Volatile var url: String, val referer: Strin
     @Volatile var canPause = true
     var body: (() -> Unit)? = null
     var kind: String? = null   // mp4 / m3u8 / mpd / blob
-    var audio = ""             // Görüntüyle birleştirilecek ayrı ses dosyası adresi (Instagram/Facebook)
+    var audio = ""             // Görüntüyle birleştirilecek ayrı ses dosyası adresi (Instagram)
     val alts = java.util.concurrent.CopyOnWriteArrayList<Pair<String, String>>() // yedek kaynaklar (adres, tür)
-    @Volatile var allowSilent = false // Facebook: ses izi hiç bulunamazsa sessiz kaydetmeye izin
+    @Volatile var allowSilent = false // Ses izi hiç bulunamazsa sessiz kaydetmeye izin
     var page = ""              // Çözümleyiciye gönderilen sayfa adresi (süre dolunca yeniden çözmek için)
 }
 
@@ -202,9 +202,9 @@ object Downloads {
         val referer = task.referer
         return body@{
             val kind = task.kind ?: "mp4"
-            // Facebook düğmesi: sayfadan (WebView ile) bulunan sesli mp4 -> yt-dlp atlanır, doğrudan indirilir
+            // Doğrudan adres: sayfadan (WebView ile) bulunan sesli mp4 -> yt-dlp atlanır, doğrudan indirilir
             val forceDirect = task.url.contains("#fpdirect")
-            val isFbTask = Regex("(facebook\\.com|fbcdn\\.|fb\\.watch)", RegexOption.IGNORE_CASE)
+            val isFbTask = Regex("(fbcdn\\.|fb\\.watch)", RegexOption.IGNORE_CASE)
                 .containsMatchIn(task.url + " " + referer)
             val fbcdnUrl = Regex("fbcdn\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url)
             var muxedOk = false // ses+görüntü birlikte olduğu İNDİRMEDEN ÖNCE doğrulanan tek dosya
@@ -243,20 +243,12 @@ object Downloads {
             // Ana yol: yt-dlp + ffmpeg (ses/görüntü birleştirme, HLS/DASH, kodek uyumu)
             val yt = Ytdlp.isYoutube(task.url, referer)
             val social = Ytdlp.isSocial(task.url, referer)
-            // blob: (MSE) videolar adresten indirilemez; Instagram/Facebook/YouTube'da sayfa adresi kullanılır
+            // blob: (MSE) videolar adresten indirilemez; Instagram/YouTube'da sayfa adresi kullanılır
             val xPost = if (!social && !yt) Ytdlp.xPost(referer, task.page) else null
-            // Facebook: gönderi adresi bulunamadıysa (akış/feed) ama doğrudan video adresi varsa, yt-dlp'yi atlayıp doğrudan indir
-            // Facebook akışında gönderi adresi gizli olabilir: fbcdn adresindeki efg içinden video kimliği alınıp
-            // gönderi adresi türetilir (yt-dlp ses+görüntüyü birleştirir; doğrudan fbcdn dosyası çoğu zaman sessiz gelir)
-            val fbPost: String? = if (social && !yt && kind != "blob" && Ytdlp.postUrl(referer, task.page) == null &&
-                Regex("fbcdn\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url)
-            ) {
-                VideoRules.assetId(task.url).takeIf { it.matches(Regex("\\d{6,}")) }
-                    ?.let { "https://www.facebook.com/watch/?v=$it" }
-            } else null
+            val fbPost: String? = null
             val fbDirect = social && !yt && kind != "blob" && task.url.startsWith("http") &&
                 Ytdlp.postUrl(referer, task.page) == null && fbPost == null &&
-                Regex("(fbcdn|facebook)\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url)
+                Regex("fbcdn\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url)
             if ((kind != "blob" || yt || social || xPost != null) && !fbDirect && !forceDirect) {
                 val post = if (social) (Ytdlp.postUrl(referer, task.page) ?: fbPost) else xPost
                 val ytPage = if (yt) Ytdlp.youtubePage(referer, task.page) else null
@@ -281,15 +273,15 @@ object Downloads {
                             notifyUi()
                         }
                         task.note = r.info
-                        // Facebook: yt-dlp sessiz çıktıysa ve doğrudan fbcdn adresi varsa sessiz kaydetme, kendi yöntemimizi dene
+                        // yt-dlp sessiz çıktıysa ve doğrudan fbcdn adresi varsa sessiz kaydetme, kendi yöntemimizi dene
                         val fbSilentRetry = social && !yt && kind != "blob" &&
                             Regex("fbcdn\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url)
                         if (r.info.contains("SES YOK") && isFbTask && !fbcdnUrl) {
-                            // Facebook gönderi adresi: yt-dlp sessiz çıkardı -> sessiz kaydetme
+                            // Gönderi adresi: yt-dlp sessiz çıkardı -> sessiz kaydetme
                             try { File(r.path).delete() } catch (_: Throwable) {}
                             throw IOException(
-                                if (L.code == "tr") "Facebook: ses alınamadı, sessiz kaydedilmedi. Videoyu sesi açık oynatıp tekrar dene."
-                                else "Facebook: audio unavailable, not saved silently. Play the video with sound and retry."
+                                if (L.code == "tr") "Ses alınamadı, sessiz kaydedilmedi. Videoyu sesi açık oynatıp tekrar dene."
+                                else "Audio unavailable, not saved silently. Play the video with sound and retry."
                             )
                         }
                         if (r.info.contains("SES YOK") && ((!social && !yt && xPost == null && kind != "blob") || fbSilentRetry)) {
@@ -306,8 +298,8 @@ object Downloads {
                         throw e
                     } catch (e: Throwable) {
                         if (task.cancel.on) throw CanceledEx()
-                        // Instagram/Facebook/YouTube: eski yöntem sessiz/bozuk video üretiyordu, net hata göster
-                        // Facebook: yt-dlp olmazsa doğrudan video adresi varsa eski (ses birleştirmeli) yönteme düş
+                        // Instagram/YouTube: eski yöntem sessiz/bozuk video üretiyordu, net hata göster
+                        // yt-dlp olmazsa doğrudan video adresi varsa eski (ses birleştirmeli) yönteme düş
                         val fbFallback = social && !yt && kind != "blob" &&
                             Regex("fbcdn\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url)
                         if ((social && !fbFallback) || yt || (kind == "blob" && xPost == null)) {
@@ -325,7 +317,7 @@ object Downloads {
                 } catch (_: Throwable) { "" }
                 task.url = task.url.substringBefore("#fpa=")
             }
-            // Ağdan yakalanıp eşleşen ayrı ses adresi (Facebook/Instagram): görüntü adresine göre bul
+            // Ağdan yakalanıp eşleşen ayrı ses adresi (Instagram): görüntü adresine göre bul
             if (kind != "blob" && task.audio.isEmpty() && !muxedOk &&
                 Regex("(fbcdn|cdninstagram)\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url)
             ) {
@@ -454,7 +446,7 @@ object Downloads {
                             checkPlayable(path, kind)
                         }
                     }
-                    // Facebook: ses hiçbir yoldan bulunamadıysa indirmeyi çöpe atma, sessiz kaydet ve not düş
+                    // Ses hiçbir yoldan bulunamadıysa indirmeyi çöpe atma, sessiz kaydet ve not düş
                     if (task.audio.isEmpty() && Mux.tracks(path)?.second == false &&
                         Regex("fbcdn\\.", RegexOption.IGNORE_CASE).containsMatchIn(url)
                     ) {
@@ -464,8 +456,8 @@ object Downloads {
                         if (!recOk) {
                             try { File(path).delete() } catch (_: Throwable) {}
                             throw IOException(
-                                if (L.code == "tr") "Facebook: ses alınamadı, sessiz kaydedilmedi. Videoyu kendi sayfasında açıp sesi açarak oynat ve tekrar indir. [" + FbNetLog.summary() + "]"
-                                else "Facebook: audio unavailable, not saved silently. Open the video on its own page, play it with sound and retry. [" + FbNetLog.summary() + "]"
+                                if (L.code == "tr") "Ses alınamadı, sessiz kaydedilmedi. Videoyu kendi sayfasında açıp sesi açarak oynat ve tekrar indir. [" + FbNetLog.summary() + "]"
+                                else "Audio unavailable, not saved silently. Open the video on its own page, play it with sound and retry. [" + FbNetLog.summary() + "]"
                             )
                         }
                     }
@@ -497,8 +489,8 @@ object Downloads {
                             if (!recordWithSound()) {
                                 try { File(path).delete() } catch (_: Throwable) {}
                                 throw IOException(
-                                    if (L.code == "tr") "Facebook: ses indirilemedi, sessiz kaydedilmedi. Videoyu sesi açık oynatıp tekrar dene."
-                                    else "Facebook: audio could not be downloaded, not saved silently. Play the video with sound and retry."
+                                    if (L.code == "tr") "Ses indirilemedi, sessiz kaydedilmedi. Videoyu sesi açık oynatıp tekrar dene."
+                                    else "Audio could not be downloaded, not saved silently. Play the video with sound and retry."
                                 )
                             }
                             recovered = true
@@ -564,7 +556,7 @@ object Downloads {
         }
     }
 
-    /** Instagram/Facebook sayfasından (ve embed sayfasından) hem görüntü hem ses izi olan .mp4 adresini bulur. */
+    /** Instagram sayfasından (ve embed sayfasından) hem görüntü hem ses izi olan .mp4 adresini bulur. */
     private fun findProgressive(page: String, cancel: CancelFlag): String? {
         val pages = ArrayList<String>()
         if (page.startsWith("http")) pages.add(page)
@@ -863,7 +855,7 @@ object Downloads {
                 dest = d
                 sepAudio = null
             } else if (requireAudio) {
-                // Facebook düğmesi: birleşmediyse sessiz video bırakma
+                // Birleşmediyse sessiz video bırakma
                 try { File(tmpPath).delete() } catch (_: Throwable) {}
                 throw IOException(
                     if (L.code == "tr") "Ses ve görüntü birleştirilemedi, sessiz video kaydedilmedi."

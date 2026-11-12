@@ -18,7 +18,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 
 /**
- * Sosyal medya (Instagram / X / Facebook / TikTok / Threads) açılınca sağdan kayarak gelen
+ * Sosyal medya (Instagram / X / TikTok / Threads) açılınca sağdan kayarak gelen
  * tam ekran karşılama paneli ("Kâğıt" tasarım sistemi, bkz. Theme.kt). Her site için siteye her girişte gösterilir.
  * Kapatmak için: "Başla" düğmesi, sağa kaydırma ya da geri tuşu.
  */
@@ -27,7 +27,6 @@ object SocialIntro {
 
     private val IG = Brand("Instagram", "IG")
     private val X = Brand("X", "X")
-    private val FB = Brand("Facebook", "f")
     private val TT = Brand("TikTok", "♪")
     private val TH = Brand("Threads", "@")
 
@@ -42,7 +41,6 @@ object SocialIntro {
         return when {
             d("instagram.com") -> IG
             d("x.com") || d("twitter.com") -> X
-            d("facebook.com") || d("fb.com") || d("fb.watch") -> FB
             d("tiktok.com") -> TT
             d("threads.net") || d("threads.com") -> TH
             else -> null

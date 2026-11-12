@@ -37,7 +37,7 @@ object Ytdlp {
             if (!ensure(ctx)) return
             val sp = ctx.getSharedPreferences("fp_ytdlp", Context.MODE_PRIVATE)
             val now = System.currentTimeMillis()
-            // Facebook/Instagram çözümleyici düzeltmeleri önce nightly'ye girer (STABLE haftalarca geriden gelir)
+            // Instagram çözümleyici düzeltmeleri önce nightly'ye girer (STABLE haftalarca geriden gelir)
             if (now - sp.getLong("upd_nightly", 0L) < 6L * 3600_000L) return
             YoutubeDL.getInstance().updateYoutubeDL(ctx, YoutubeDL.UpdateChannel.NIGHTLY)
             sp.edit().putLong("upd_nightly", now).apply()
@@ -45,10 +45,10 @@ object Ytdlp {
         }
     }
 
-    private val SOCIAL = Regex("(instagram\\.com|cdninstagram\\.|fbcdn\\.|facebook\\.com|fb\\.watch)", RegexOption.IGNORE_CASE)
+    private val SOCIAL = Regex("(instagram\\.com|cdninstagram\\.|fbcdn\\.|fb\\.watch)", RegexOption.IGNORE_CASE)
     private val YT = Regex("(youtube\\.com|youtu\\.be|googlevideo\\.com|ytimg\\.com|youtube-nocookie\\.com)", RegexOption.IGNORE_CASE)
 
-    private val FB = Regex("(facebook\\.com|fb\\.watch|fbcdn\\.)", RegexOption.IGNORE_CASE)
+    private val FB = Regex("(fb\\.watch|fbcdn\\.)", RegexOption.IGNORE_CASE)
 
     class PageInfo(val title: String, val duration: Double)
 
@@ -81,7 +81,7 @@ object Ytdlp {
         urls.firstOrNull { it.startsWith("http") && YTPAGE.containsMatchIn(it) }?.substringBefore("#")
 
     private val POST = Regex(
-        "(instagram\\.com/(?:[^/?#]+/)?(?:reels?|p|tv)/(?!audio\\b)[A-Za-z0-9_-]+|facebook\\.com/[^#]*(?:/reel/|/videos/|/watch/?\\?(?:[^#]*&)?v=|/video\\.php\\?(?:[^#]*&)?v=|/posts/|/permalink/|/permalink\\.php\\?|/story\\.php\\?|/share/[rvp]/)|fb\\.watch/)",
+        "(instagram\\.com/(?:[^/?#]+/)?(?:reels?|p|tv)/(?!audio\\b)[A-Za-z0-9_-]+|fb\\.watch/)",
         RegexOption.IGNORE_CASE
     )
 
@@ -100,7 +100,7 @@ object Ytdlp {
     /** Adaylar arasından gerçek gönderi (reel/video) adresini döner; yoksa null. */
     fun postUrl(vararg urls: String): String? = urls.firstOrNull { it.startsWith("http") && POST.containsMatchIn(it) }?.substringBefore("#")
 
-    /** WebView çerezlerini yt-dlp'nin okuyacağı Netscape çerez dosyasına yazar (Instagram/Facebook girişi için). */
+    /** WebView çerezlerini yt-dlp'nin okuyacağı Netscape çerez dosyasına yazar (Instagram girişi için). */
     private fun cookieFile(ctx: Context, url: String, base: String): File? {
         return try {
             if (isYoutube(url)) return null
@@ -166,40 +166,10 @@ object Ytdlp {
      * 2. deneme (1. bozuksa): ffmpeg ile indir + kapsayıcıyı zorla onar.
      * Hata olursa IOException (mesajı yt-dlp'nin son hata satırı ya da doğrulama nedeni).
      */
-    /** Facebook video kimliğinden, yt-dlp'nin farklı çözümleyicilerine giden alternatif adresler. */
-    private fun fbAlternatives(src: String): List<String> {
-        if (!FB.containsMatchIn(src)) return emptyList()
-        val id = Regex("[?&]v=(\\d{6,})").find(src)?.groupValues?.get(1)
-            ?: Regex("/reels?/(\\d{6,})").find(src)?.groupValues?.get(1)
-            ?: return emptyList()
-        return listOf(
-            "https://www.facebook.com/reel/$id",
-            "https://m.facebook.com/watch/?v=$id&_rdr",
-            "https://www.facebook.com/video.php?v=$id"
-        ).filter { it != src }
-    }
-
-    /** Facebook'ta bir adres çözülemezse (Cannot parse data / HTTP 500) aynı videonun diğer adres biçimlerini dener. */
     fun download(
         ctx: Context, task: DownloadTask, src: String, referer: String,
         report: (Double, String) -> Unit
-    ): Result {
-        val alts = fbAlternatives(src)
-        if (alts.isEmpty()) return downloadOne(ctx, task, src, referer, report)
-        var last: Throwable? = null
-        for (s in listOf(src) + alts) {
-            try {
-                return downloadOne(ctx, task, s, referer, report)
-            } catch (e: CanceledEx) {
-                throw e
-            } catch (e: Throwable) {
-                if (task.cancel.on) throw CanceledEx()
-                last = e
-                report(-1.0, "Facebook başka adresle deneniyor…")
-            }
-        }
-        throw last ?: IOException("yt-dlp: Facebook videosu çözülemedi")
-    }
+    ): Result = downloadOne(ctx, task, src, referer, report)
 
     private fun downloadOne(
         ctx: Context, task: DownloadTask, src: String, referer: String,
@@ -208,22 +178,13 @@ object Ytdlp {
         if (!ensure(ctx)) throw IOException("yt-dlp başlatılamadı: " + (initError ?: "?"))
         var why: String? = null
         var silent: String? = null // sesi olmayan ama sağlam çıkan ilk sonuç (ikinci deneme de olmazsa bu verilir)
-        var fbNoCookies = false // Facebook sayfası HTTP 500 verirse çerezsiz yeniden dene
         for (attempt in 1..2) {
             val path = try {
-                runOnce(ctx, task, src, referer, attempt == 2, report, anyAudio = silent != null, noCookies = fbNoCookies)
+                runOnce(ctx, task, src, referer, attempt == 2, report, anyAudio = silent != null, noCookies = false)
             } catch (e: CanceledEx) {
                 throw e
             } catch (e: Throwable) {
                 if (silent != null) return Result(silent, "yt-dlp #1 · " + describe(silent) + " · SES YOK")
-                // Facebook sayfayı (çerez/oturum yüzünden) 500 ile reddedebilir: bir kez çerezsiz dene
-                if (attempt == 1 && !fbNoCookies && FB.containsMatchIn(src) &&
-                    (e.message ?: "").let { it.contains("500") || it.contains("Unable to download webpage", true) }
-                ) {
-                    fbNoCookies = true
-                    report(-1.0, "Facebook yeniden deneniyor…")
-                    continue
-                }
                 throw e
             }
             why = check(path)
@@ -268,7 +229,7 @@ object Ytdlp {
         // H.264 + AAC (her telefonda oynar); olmazsa en iyi kombinasyon
         req.addOption(
             "-f",
-            // 2. deneme (1. sessiz çıktı): Instagram/Facebook'ta önce görüntü+ses birlikte gelen (muxed) biçim
+            // 2. deneme (1. sessiz çıktı): Instagram'ta önce görüntü+ses birlikte gelen (muxed) biçim
             if (anyAudio && isSocial(src)) "b/bv*[vcodec^=avc]+ba/bv*+ba"
             else if (anyAudio) "bv*[vcodec^=avc]+ba/bv*+ba/b"
             else "bv*[vcodec^=avc1]+ba[acodec^=mp4a]/bv*[vcodec^=avc]+ba/b[vcodec^=avc1]/bv*+ba/b"
@@ -279,7 +240,7 @@ object Ytdlp {
         req.addOption("--retries", "3")
         req.addOption("--fragment-retries", "5")
         req.addOption("--socket-timeout", "25")
-        // Facebook: WebView'in mobil UA'sı yt-dlp'nin masaüstü sayfa çözümleyicisiyle uyuşmaz (HTTP 500); yt-dlp'nin kendi UA'sı kullanılır
+        // WebView'in mobil UA'sı yt-dlp'nin masaüstü sayfa çözümleyicisiyle uyuşmaz (HTTP 500); yt-dlp'nin kendi UA'sı kullanılır
         if (!FB.containsMatchIn(src)) req.addOption("--user-agent", Net.ua)
         if (second) {
             req.addOption("--downloader", "ffmpeg")

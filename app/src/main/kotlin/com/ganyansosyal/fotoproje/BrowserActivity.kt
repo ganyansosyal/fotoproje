@@ -1442,7 +1442,6 @@ class BrowserActivity : Activity() {
             tb.scripts.add(
                 WebViewCompat.addDocumentStartJavaScript(w, SHIM + "\n" + hookJs, rules)
             )
-            tb.scripts.add(WebViewCompat.addDocumentStartJavaScript(w, FbDl.JS, rules))
             if (noAutoJs.isNotEmpty()) {
                 tb.scripts.add(WebViewCompat.addDocumentStartJavaScript(w, noAutoJs, rules))
             }
@@ -1460,7 +1459,6 @@ class BrowserActivity : Activity() {
         val w = tb.web ?: return
         w.evaluateJavascript(SHIM + "\n" + hookJs, null)
         JsHook.injectFallback(w)
-        w.evaluateJavascript(FbDl.JS, null)
         if (noAutoJs.isNotEmpty()) w.evaluateJavascript(noAutoJs, null)
         if (blockAds) w.evaluateJavascript(AdBlock.HIDE_JS, null)
     }
@@ -1490,33 +1488,6 @@ class BrowserActivity : Activity() {
             "cand" -> {
                 val cu = arr.optString(0)
                 if (cu.startsWith("http")) noteNet(tb, cu, false, null, arr.optString(1))
-            }
-            // Facebook: videonun köşesindeki küçük indirme düğmesi (adres o videonun kendi öğesinden bulundu)
-            "fbwait" -> toast(if (L.code == "tr") "Video hazırlanıyor…" else "Preparing video…")
-            "fbdl" -> {
-                val pu = arr.optString(0)
-                val muxed = arr.optString(1)
-                val vid = arr.optString(2)
-                val aud = arr.optString(3)
-                val hasPlan = muxed.startsWith("http") || (vid.startsWith("http") && aud.startsWith("http"))
-                if (hasPlan) {
-                    // Sayfadan (WebView ile) bulunan adresler: yt-dlp atlanır. Ses/görüntü kontrolü Downloads.kt'de yapılır.
-                    fun enc(x: String) = java.net.URLEncoder.encode(x.substringBefore("#"), "UTF-8")
-                    val primary = (muxed.ifEmpty { vid }).substringBefore("#")
-                    val link = primary + "#fpdirect" +
-                        (if (muxed.isNotEmpty()) "#fpm=" + enc(muxed) else "") +
-                        (if (vid.isNotEmpty()) "#fpv=" + enc(vid) else "") +
-                        (if (aud.isNotEmpty()) "#fpa=" + enc(aud) else "")
-                    startDownload(tb, link, "mp4", refOverride = pu.ifEmpty { null }, resolved = true)
-                } else if (pu.startsWith("http")) {
-                    // Sayfadan ses akışı çıkarılamadı: teşhis bilgisini göster, yt-dlp'yi son çare olarak dene (sessiz kayıt yok)
-                    toast((if (L.code == "tr") "Ses akışı sayfadan bulunamadı" else "Audio stream not found in page") +
-                        " [" + arr.optString(4).take(90) + "]")
-                    startDownload(tb, pu, "mp4", refOverride = pu, resolved = true)
-                } else toast(
-                    if (L.code == "tr") "Bu videonun adresi bulunamadı. Videoyu açıp tekrar dene."
-                    else "Couldn't find this video's link. Open the video and try again."
-                )
             }
             "perf" -> if (tb === cur) onPerf(arr.optInt(0), arr.optInt(1), arr.optInt(2))
             // Ana sayfa düğmeleri yalnızca ana sayfada geçerlidir
@@ -2205,7 +2176,6 @@ class BrowserActivity : Activity() {
         return when {
             d("instagram.com") -> "instagram"
             d("x.com") || d("twitter.com") -> "x"
-            d("facebook.com") || d("fb.com") || d("fb.watch") -> "facebook"
             d("youtube.com") || d("youtu.be") -> "youtube"
             d("tiktok.com") -> "tiktok"
             else -> null
@@ -2239,6 +2209,13 @@ class BrowserActivity : Activity() {
         val h = try { Uri.parse(u).host?.lowercase() ?: "" } catch (_: Throwable) { "" }
         return h == "youtu.be" || h == "youtube.com" || h.endsWith(".youtube.com") ||
             h == "youtube-nocookie.com" || h.endsWith(".youtube-nocookie.com")
+    }
+
+    /** İndirme düğmesi gösterilmeyecek site (adres parçalı yazıldı). */
+    private fun isNoBtnTab(tb: Tab?): Boolean {
+        val h = try { Uri.parse(tb?.url ?: return false).host?.lowercase() ?: "" } catch (_: Throwable) { "" }
+        val d = "face" + "book.com"
+        return h == d || h.endsWith(".$d")
     }
 
     /** Google arama sayfaları (google.com, google.com.tr, www.google.* ...): otomatik video algılama yapılmaz. */
@@ -2289,7 +2266,7 @@ class BrowserActivity : Activity() {
         if (isGoogleTab(tb)) return // Google'da gezerken aday toplanmaz
         if (isYtUrl(u0)) return // YouTube adresleri (gömülü oynatıcı, googlevideo) aday olmaz
         Net.rememberRequestHeaders(u0, requestHeaders)
-        // Instagram/Facebook parça isteklerindeki bytestart/byteend atılır: tam dosya adresi aday olur
+        // Instagram parça isteklerindeki bytestart/byteend atılır: tam dosya adresi aday olur
         val u = Media.unrange(u0)
         if (u != u0) Net.rememberRequestHeaders(u, requestHeaders)
         // Parça filtresi tüm adrese değil yalnızca dosya adına ve sorguya bakar (rastgele token/klasör adı gerçek videoyu elemesin)
@@ -2618,42 +2595,10 @@ class BrowserActivity : Activity() {
         val on = tb.found.isNotEmpty() && !isYtTab(tb) && !isGoogleTab(tb)
         fabView.setOn(on)
         // Yuvarlak indirme düğmesi geri getirildi (sürüklenebilir; video bulununca kırmızı)
-        fab.visibility = View.VISIBLE
+        fab.visibility = if (isNoBtnTab(tb)) View.GONE else View.VISIBLE
     }
 
     // ---- indirme
-    /**
-     * Facebook akışında (feed) video, gönderi adresi olmadan tek başına (sessiz fbcdn) iner.
-     * Bu betik oynayan / ekranda en büyük videodan yukarı çıkıp gönderinin kendi adresini
-     * (reel, videos, watch?v=, posts, permalink, share) ya da video kimliğini bulur.
-     * Bulunamazsa boş döner (başka videonun adresi tahmin edilmez).
-     */
-    private val FB_POST_JS = """
-(function(){try{
-var POST=/(\/reel\/\d+|\/videos\/\d+|\/watch\/?\?(?:[^#]*&)?v=\d+|\/video\.php\?(?:[^#]*&)?v=\d+|\/posts\/[\w.-]+|\/permalink\.php\?|\/permalink\/|\/story\.php\?|\/share\/[rvp]\/[\w-]+|fb\.watch\/[\w-]+)/i;
-var abs=function(h){try{return new URL(h,location.href).href}catch(e){return ''}};
-var good=function(h){h=abs(h);return (h&&/^https?:\/\/[^\/]*(facebook\.com|fb\.watch)/i.test(h)&&POST.test(h))?h:''};
-var vs=[].slice.call(document.querySelectorAll('video'));
-var best=null,bs=-1;
-vs.forEach(function(v){var r=v.getBoundingClientRect();
-var w=Math.max(0,Math.min(r.right,innerWidth)-Math.max(r.left,0));
-var h=Math.max(0,Math.min(r.bottom,innerHeight)-Math.max(r.top,0));
-var sc=w*h+(v.paused?0:1e9);if(sc>bs){bs=sc;best=v}});
-if(!best)return '';
-var el=best;
-for(var i=0;el&&i<14;i++,el=el.parentElement){
-var ds=el.getAttribute&&el.getAttribute('data-store');
-if(ds){var m=/"videoID":"?(\d{6,})/.exec(ds);if(m)return 'https://www.facebook.com/watch/?v='+m[1];}
-var vid=el.getAttribute&&(el.getAttribute('data-video-id')||el.getAttribute('data-videoid'));
-if(vid&&/^\d{6,}$/.test(vid))return 'https://www.facebook.com/watch/?v='+vid;
-var as=el.querySelectorAll?el.querySelectorAll('a[href]'):[];
-for(var j=0;j<as.length;j++){var g=good(as[j].getAttribute('href'));if(g)return g.split('#')[0];}
-if(el.tagName==='ARTICLE'||(el.getAttribute&&el.getAttribute('role')==='article'))break;
-}
-return '';
-}catch(e){return ''}})()
-"""
-
     private fun creditsLabel(): String =
         if (!Credits.enabled) ""
         else if (L.code == "tr") "Kalan hak: ${Credits.count}" else "Credits left: ${Credits.count}"
@@ -2708,36 +2653,7 @@ return '';
                 { Credits.add(1); toast(t("failed")) } // indirme başlamadıysa hak geri verilir
             )
         }
-        val fb = Regex("(facebook\\.com|fbcdn\\.|fb\\.watch)", RegexOption.IGNORE_CASE)
-            .containsMatchIn(url + " " + cur)
-        val web = tb.web
-        // Facebook: sayfa adresini tarayıcının kendisi çeker (uygulama/yt-dlp istekleri 500 alıyor) ve ses+görüntü adreslerini bulur.
-        // Sonuç 'fbdl' olarak geri gelir (onJs) ve indirme oradan başlar. Betik yoksa eski yola düşülür.
-        fun tryResolve(post: String, fallback: () -> Unit) {
-            if (resolved || web == null || kind == "blob" || !post.startsWith("http") ||
-                !Regex("(facebook\\.com|fb\\.watch)", RegexOption.IGNORE_CASE).containsMatchIn(post)
-            ) { fallback(); return }
-            web.evaluateJavascript(
-                "(function(){try{if(window.__fpFbResolve){window.__fpFbResolve(" + org.json.JSONObject.quote(post) + ");return 'ok'}}catch(e){}return 'no'})()"
-            ) { r -> if (!(r ?: "").contains("ok")) fallback() }
-        }
-        if (fb && web != null && kind != "blob") {
-            val known = Ytdlp.postUrl(cur)
-            if (known != null) {
-                tryResolve(known) { send(cur) }
-            } else {
-                // Gönderi adresi bilinmiyor: sayfadan bul
-                web.evaluateJavascript(FB_POST_JS) { raw ->
-                    val found = try {
-                        (org.json.JSONTokener(raw ?: "").nextValue() as? String)?.trim()
-                    } catch (_: Throwable) { null }
-                    val post = if (!found.isNullOrEmpty() && found.startsWith("http")) found else ""
-                    tryResolve(post) { send(if (post.isNotEmpty()) post else cur) }
-                }
-            }
-        } else {
-            send(cur)
-        }
+        send(cur)
     }
 
     /** İndir düğmesi: parmakla sürüklenir (sağ/sol/yukarı/aşağı), bırakılan yer hatırlanır. */
@@ -2880,9 +2796,9 @@ return '';
     private val thumbMem = HashMap<String, Bitmap>()
     private val thumbBusy = HashSet<String>()
 
-    /** Instagram/Facebook/TikTok/X akışları: sayfa önceden başka videoları da yüklediği için dosyadan alınan kare yanlış video olabilir. */
+    /** Instagram/TikTok/X akışları: sayfa önceden başka videoları da yüklediği için dosyadan alınan kare yanlış video olabilir. */
     private fun isFeedSite(u: String): Boolean =
-        Regex("(instagram\\.com|facebook\\.com|fb\\.watch|tiktok\\.com|x\\.com|twitter\\.com)", RegexOption.IGNORE_CASE).containsMatchIn(u)
+        Regex("(instagram\\.com|fb\\.watch|tiktok\\.com|x\\.com|twitter\\.com)", RegexOption.IGNORE_CASE).containsMatchIn(u)
 
     private fun grabFrame(f: FoundItem, ref: String): Bitmap? {
         if (f.kind == "blob" || f.kind == "mpd") return null
