@@ -202,6 +202,9 @@ object Downloads {
         val referer = task.referer
         return body@{
             val kind = task.kind ?: "mp4"
+            // Facebook düğmesi: sayfadan (WebView ile) bulunan sesli mp4 -> yt-dlp atlanır, doğrudan indirilir
+            val forceDirect = task.url.contains("#fpdirect")
+            if (forceDirect) task.url = task.url.replace("#fpdirect", "")
             var silentRes: Ytdlp.Result? = null // yt-dlp'nin sessiz çıkardığı dosya (diğer yöntem de olmazsa bu kaydedilir)
             // Ana yol: yt-dlp + ffmpeg (ses/görüntü birleştirme, HLS/DASH, kodek uyumu)
             val yt = Ytdlp.isYoutube(task.url, referer)
@@ -220,7 +223,7 @@ object Downloads {
             val fbDirect = social && !yt && kind != "blob" && task.url.startsWith("http") &&
                 Ytdlp.postUrl(referer, task.page) == null && fbPost == null &&
                 Regex("(fbcdn|facebook)\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url)
-            if ((kind != "blob" || yt || social || xPost != null) && !fbDirect) {
+            if ((kind != "blob" || yt || social || xPost != null) && !fbDirect && !forceDirect) {
                 val post = if (social) (Ytdlp.postUrl(referer, task.page) ?: fbPost) else xPost
                 val ytPage = if (yt) Ytdlp.youtubePage(referer, task.page) else null
                 if ((social && post == null) || (yt && ytPage == null)) {

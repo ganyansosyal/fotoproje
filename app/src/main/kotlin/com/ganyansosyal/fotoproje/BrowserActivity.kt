@@ -1492,10 +1492,16 @@ class BrowserActivity : Activity() {
                 if (cu.startsWith("http")) noteNet(tb, cu, false, null, arr.optString(1))
             }
             // Facebook: videonun köşesindeki küçük indirme düğmesi (adres o videonun kendi öğesinden bulundu)
+            "fbwait" -> toast(if (L.code == "tr") "Video hazırlanıyor…" else "Preparing video…")
             "fbdl" -> {
                 val pu = arr.optString(0)
-                if (pu.startsWith("http")) startDownload(tb, pu, "mp4", refOverride = pu)
-                else toast(
+                val direct = arr.optString(1)
+                if (direct.startsWith("http")) {
+                    // Sesli (muxed) mp4 adresi bulundu: yt-dlp'yi atlayıp doğrudan indir (#fpdirect işareti Downloads.kt'de okunur)
+                    startDownload(tb, direct.substringBefore("#") + "#fpdirect", "mp4", refOverride = pu.ifEmpty { null })
+                } else if (pu.startsWith("http")) {
+                    startDownload(tb, pu, "mp4", refOverride = pu)
+                } else toast(
                     if (L.code == "tr") "Bu videonun adresi bulunamadı. Videoyu açıp tekrar dene."
                     else "Couldn't find this video's link. Open the video and try again."
                 )
