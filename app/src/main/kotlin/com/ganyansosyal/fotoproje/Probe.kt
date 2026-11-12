@@ -638,13 +638,18 @@ object Probe {
         val tolE = maxOf(1.5, expectDur * 0.03)
         fun isMatch(e: MediaInfo) = e.usable && (e.url == exactSrc && exactSrc.isNotEmpty() ||
             e.duration > 0 && Math.abs(e.duration - expectDur) <= tolE)
+        // Oynayan video çok kısaysa (< 30 sn) reklam olabilir: gerçek (uzun) videonun incelenmesi için biraz daha bekle
+        // Instagram/Facebook/YouTube/X akışlarında hiçbir şey değişmez (önceden yüklenen başka videolar karışmasın)
+        val adSite = !Ytdlp.isSocial(referer) && !Ytdlp.isYoutube(referer) && Ytdlp.xPost(referer, "") == null &&
+            !Regex("(tiktok\\.com|threads\\.net|threads\\.com|x\\.com|twitter\\.com|instagram\\.com|facebook\\.com|fb\\.watch)", RegexOption.IGNORE_CASE).containsMatchIn(referer)
+        val grace = if (adSite && expectDur in 0.5..30.0 && ordered.size > 1) 2500L else 900L
         val t0 = System.currentTimeMillis()
         var left = ordered.size
         var matchAt = 0L
         while (left > 0) {
             val waitMs = when {
                 // Eşleşen dosya bulundu: ayrı ses dosyası için kısa bir süre daha bekle, sonra göster
-                matchAt > 0 -> 900 - (System.currentTimeMillis() - matchAt)
+                matchAt > 0 -> grace - (System.currentTimeMillis() - matchAt)
                 // Eşleşme yok: en çok 7 sn bekle; geride kalanlar arka planda önbelleğe dolar
                 else -> 7000 - (System.currentTimeMillis() - t0)
             }
@@ -677,7 +682,9 @@ object Probe {
         // dosyaları gösterilir (Instagram akışında önceden yüklenen başka videolar karışmasın).
         // Eşleşen yoksa liste boş kalır (başka video karışmaz).
         var cands = filtered
-        if (expectDur > 0.5) {
+        // Oynayan video 30 sn'den kısaysa ve listede 2 dk+ video varsa, oynayan reklam sayılır: eşleştirme yapılmaz
+        val adPlaying = adSite && expectDur in 0.5..30.0 && filtered.any { it.duration >= 120 }
+        if (expectDur > 0.5 && !adPlaying) {
             val tol = maxOf(1.5, expectDur * 0.03)
             val matches = filtered.filter { it.duration > 0 && Math.abs(it.duration - expectDur) <= tol || it.url == exactSrc }
             if (matches.isNotEmpty()) {
@@ -688,6 +695,10 @@ object Probe {
                 // Yalnızca oynatıcının kendi blob'u kalır; doğru dosya gelince (yeni adaylar) liste yeniden kurulur.
                 cands = filtered.filter { it.kind == "blob" }
             }
+        }
+        if (adPlaying) {
+            val keep = cands.filter { it.duration <= 0 || it.duration >= 30 }
+            if (keep.isNotEmpty()) cands = keep
         }
         // Reklam akışları kısa olur: uzun (>= 5 dk) bir video varsa kısa (< 2 dk) adaylar listeden çıkar
         if (cands.any { it.duration >= 300 }) {
