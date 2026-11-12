@@ -204,6 +204,9 @@ object Downloads {
             val kind = task.kind ?: "mp4"
             // Facebook düğmesi: sayfadan (WebView ile) bulunan sesli mp4 -> yt-dlp atlanır, doğrudan indirilir
             val forceDirect = task.url.contains("#fpdirect")
+            val isFbTask = Regex("(facebook\\.com|fbcdn\\.|fb\\.watch)", RegexOption.IGNORE_CASE)
+                .containsMatchIn(task.url + " " + referer)
+            val fbcdnUrl = Regex("fbcdn\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url)
             var muxedOk = false // ses+görüntü birlikte olduğu İNDİRMEDEN ÖNCE doğrulanan tek dosya
             if (forceDirect) {
                 fun frag(n: String): String = Regex("#" + n + "=([^#]*)").find(task.url)?.groupValues?.get(1)?.let {
@@ -281,6 +284,14 @@ object Downloads {
                         // Facebook: yt-dlp sessiz çıktıysa ve doğrudan fbcdn adresi varsa sessiz kaydetme, kendi yöntemimizi dene
                         val fbSilentRetry = social && !yt && kind != "blob" &&
                             Regex("fbcdn\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url)
+                        if (r.info.contains("SES YOK") && isFbTask && !fbcdnUrl) {
+                            // Facebook gönderi adresi: yt-dlp sessiz çıkardı -> sessiz kaydetme
+                            try { File(r.path).delete() } catch (_: Throwable) {}
+                            throw IOException(
+                                if (L.code == "tr") "Facebook: ses alınamadı, sessiz kaydedilmedi. Videoyu sesi açık oynatıp tekrar dene."
+                                else "Facebook: audio unavailable, not saved silently. Play the video with sound and retry."
+                            )
+                        }
                         if (r.info.contains("SES YOK") && ((!social && !yt && xPost == null && kind != "blob") || fbSilentRetry)) {
                             // yt-dlp görüntüyü aldı ama sesi alamadı: kendi indiricimizle (ayrı ses akışını da alır) dene.
                             // O da olmazsa sessiz dosya yine de kaydedilir.
@@ -540,13 +551,13 @@ object Downloads {
                     outPath = np
                 }
             }
-            finish(task, outPath, if (sepAudio) apath else null, requireAudio = forceDirect)
+            finish(task, outPath, if (sepAudio) apath else null, requireAudio = forceDirect || isFbTask)
             } catch (e: CanceledEx) {
                 throw e
             } catch (e: Throwable) {
                 // Kendi yöntemimiz de olmadı: yt-dlp'nin sessiz ama sağlam dosyası varsa onu kaydet
                 val sr = silentRes
-                if (sr == null || task.cancel.on) throw e
+                if (sr == null || task.cancel.on || isFbTask) throw e
                 task.note = sr.info
                 finish(task, sr.path, null)
             }

@@ -1507,9 +1507,12 @@ class BrowserActivity : Activity() {
                         (if (muxed.isNotEmpty()) "#fpm=" + enc(muxed) else "") +
                         (if (vid.isNotEmpty()) "#fpv=" + enc(vid) else "") +
                         (if (aud.isNotEmpty()) "#fpa=" + enc(aud) else "")
-                    startDownload(tb, link, "mp4", refOverride = pu.ifEmpty { null })
+                    startDownload(tb, link, "mp4", refOverride = pu.ifEmpty { null }, resolved = true)
                 } else if (pu.startsWith("http")) {
-                    startDownload(tb, pu, "mp4", refOverride = pu)
+                    // Sayfadan ses akışı çıkarılamadı: teşhis bilgisini göster, yt-dlp'yi son çare olarak dene (sessiz kayıt yok)
+                    toast((if (L.code == "tr") "Ses akışı sayfadan bulunamadı" else "Audio stream not found in page") +
+                        " [" + arr.optString(4).take(90) + "]")
+                    startDownload(tb, pu, "mp4", refOverride = pu, resolved = true)
                 } else toast(
                     if (L.code == "tr") "Bu videonun adresi bulunamadı. Videoyu açıp tekrar dene."
                     else "Couldn't find this video's link. Open the video and try again."
@@ -2678,12 +2681,12 @@ return '';
 
     private fun startDownload(
         tb: Tab, url: String, kind: String, name: String? = null, others: List<FoundItem> = emptyList(),
-        refOverride: String? = null
+        refOverride: String? = null, resolved: Boolean = false
     ) {
         if (isYtTab(tb)) { toast(t("ytNoDl")); return }
         // Kredi yoksa önce reklam; izlenince +5 hak verilir ve indirme kendiliğinden başlar
         if (!Credits.has()) {
-            askAd { startDownload(tb, url, kind, name, others, refOverride) }
+            askAd { startDownload(tb, url, kind, name, others, refOverride, resolved) }
             return
         }
         try { tb.web?.settings?.userAgentString?.takeIf { it.isNotBlank() }?.let { Net.ua = it } } catch (_: Throwable) {}
@@ -2708,13 +2711,29 @@ return '';
         val fb = Regex("(facebook\\.com|fbcdn\\.|fb\\.watch)", RegexOption.IGNORE_CASE)
             .containsMatchIn(url + " " + cur)
         val web = tb.web
-        if (fb && web != null && Ytdlp.postUrl(cur) == null && kind != "blob") {
-            // Gönderi adresi bilinmiyor: sayfadan bul, yt-dlp'ye ver (ses+görüntü birlikte gelir)
-            web.evaluateJavascript(FB_POST_JS) { raw ->
-                val found = try {
-                    (org.json.JSONTokener(raw ?: "").nextValue() as? String)?.trim()
-                } catch (_: Throwable) { null }
-                send(if (!found.isNullOrEmpty() && found.startsWith("http")) found else cur)
+        // Facebook: sayfa adresini tarayıcının kendisi çeker (uygulama/yt-dlp istekleri 500 alıyor) ve ses+görüntü adreslerini bulur.
+        // Sonuç 'fbdl' olarak geri gelir (onJs) ve indirme oradan başlar. Betik yoksa eski yola düşülür.
+        fun tryResolve(post: String, fallback: () -> Unit) {
+            if (resolved || web == null || kind == "blob" || !post.startsWith("http") ||
+                !Regex("(facebook\\.com|fb\\.watch)", RegexOption.IGNORE_CASE).containsMatchIn(post)
+            ) { fallback(); return }
+            web.evaluateJavascript(
+                "(function(){try{if(window.__fpFbResolve){window.__fpFbResolve(" + org.json.JSONObject.quote(post) + ");return 'ok'}}catch(e){}return 'no'})()"
+            ) { r -> if (!(r ?: "").contains("ok")) fallback() }
+        }
+        if (fb && web != null && kind != "blob") {
+            val known = Ytdlp.postUrl(cur)
+            if (known != null) {
+                tryResolve(known) { send(cur) }
+            } else {
+                // Gönderi adresi bilinmiyor: sayfadan bul
+                web.evaluateJavascript(FB_POST_JS) { raw ->
+                    val found = try {
+                        (org.json.JSONTokener(raw ?: "").nextValue() as? String)?.trim()
+                    } catch (_: Throwable) { null }
+                    val post = if (!found.isNullOrEmpty() && found.startsWith("http")) found else ""
+                    tryResolve(post) { send(if (post.isNotEmpty()) post else cur) }
+                }
             }
         } else {
             send(cur)

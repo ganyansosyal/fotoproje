@@ -95,8 +95,8 @@ function pickDash(text,id){
   }
   return (bv&&ba)?{v:bv.u,a:ba.u}:null;
 }
-function pickAll(text,id){
-  if(!text)return {m:'',v:'',a:''};
+function pickAll(text,id,strict){
+  if(!text||(strict&&!id))return {m:'',v:'',a:''};
   var m=pickMuxed(text,id),d=pickDash(text,id);
   return {m:m,v:d?d.v:'',a:d?d.a:''};
 }
@@ -104,26 +104,75 @@ function videoId(post){
   var m=/[?&]v=(\d{6,})/.exec(post)||/\/(?:reels?|videos)\/(\d{6,})/.exec(post);
   return m?m[1]:'';
 }
+
+// ---- Sayfanın kendi ağ yanıtları (GraphQL): video verisi çoğu zaman HTML'de değil burada gelir
+var netBuf=[];
+function keep(t){
+  try{
+    if(!t||t.length<200||t.length>6000000)return;
+    if(t.indexOf('browser_native')<0&&t.indexOf('dash_manifest')<0&&t.indexOf('playable_url')<0)return;
+    netBuf.push(t);if(netBuf.length>14)netBuf.shift();
+  }catch(e){}
+}
+try{
+  var oF=window.fetch;
+  if(typeof oF==='function')window.fetch=function(){
+    var p=oF.apply(this,arguments);
+    try{p.then(function(r){try{
+      var ct=(r.headers.get('content-type')||'').toLowerCase();
+      if(/json|javascript|text|html/.test(ct))r.clone().text().then(keep).catch(function(){});
+    }catch(e){}}).catch(function(){});}catch(e){}
+    return p;
+  };
+  var oS=XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.send=function(){
+    try{this.addEventListener('load',function(){try{
+      var rt=this.responseType;
+      if(rt===''||rt==='text')keep(this.responseText);
+    }catch(e){}});}catch(e){}
+    return oS.apply(this,arguments);
+  };
+}catch(e){}
+
 function directFor(post){
   return new Promise(function(res){
-    var id=videoId(post),done=false;
-    function fin(x){if(!done){done=true;res(x||{m:'',v:'',a:''});}}
-    setTimeout(function(){fin(null)},15000);
+    var id=videoId(post),done=false,dbg=['id='+(id||'-')];
+    function fin(x){if(!done){done=true;x=x||{m:'',v:'',a:''};x.dbg=dbg.join(' ');res(x);}}
+    setTimeout(function(){dbg.push('timeout');fin(null)},15000);
     function ok(x){return x&&(x.m||(x.v&&x.a));}
+    function fromBuf(){
+      try{var x=pickAll(netBuf.join('\n'),id,true);dbg.push('net='+netBuf.length+(ok(x)?'+':'-'));return x;}catch(e){return null;}
+    }
     function fromDoc(){
       try{var ss=document.querySelectorAll('script[type="application/json"]'),t=[];
         for(var i=0;i<ss.length&&i<400;i++)t.push(ss[i].textContent);
-        return pickAll(t.join('\n'),id);}catch(e){return null;}
+        var x=pickAll(t.join('\n'),id,true);dbg.push('doc='+t.length+(ok(x)?'+':'-'));return x;}catch(e){return null;}
     }
-    if(!post||/fb\.watch/i.test(post)){fin(fromDoc());return;}
+    function rest(){var x=fromBuf();if(ok(x))return x;x=fromDoc();return x;}
+    if(!post||/fb\.watch/i.test(post)){fin(rest());return;}
     var pu;
-    try{pu=new URL(post);pu.protocol=location.protocol;pu.host=location.host;}catch(e){fin(fromDoc());return;}
-    fetch(pu.href,{credentials:'include'}).then(function(r){return r.text()}).then(function(t){
-      var x=pickAll(t,id);
-      fin(ok(x)?x:fromDoc());
-    }).catch(function(){fin(fromDoc());});
+    try{pu=new URL(post);pu.protocol=location.protocol;pu.host=location.host;}catch(e){fin(rest());return;}
+    fetch(pu.href,{credentials:'include'}).then(function(r){
+      dbg.push('http='+r.status);return r.text();
+    }).then(function(t){
+      var x=pickAll(t,id,false);dbg.push('html='+(t?t.length:0)+(ok(x)?'+':'-'));
+      fin(ok(x)?x:rest());
+    }).catch(function(e){dbg.push('fetchErr');fin(rest());});
   });
 }
+function resolveAndSend(u){
+  if(busy)return; busy=true;
+  setTimeout(function(){busy=false},20000);
+  try{__fp.h('fbwait','[]')}catch(x){}
+  directFor(u).then(function(d){
+    busy=false;
+    try{__fp.h('fbdl',JSON.stringify([u,d.m||'',d.v||'',d.a||'',d.dbg||'']))}catch(x){}
+  },function(){
+    busy=false;
+    try{__fp.h('fbdl',JSON.stringify([u,'','','','err']))}catch(x){}
+  });
+}
+window.__fpFbResolve=function(u){resolveAndSend(String(u||''));};
 
 var layer=null,btns=new Map();
 function ensureLayer(){
@@ -145,17 +194,8 @@ function mk(v){
   ['touchstart','touchend','pointerdown','pointerup','mousedown','mouseup'].forEach(function(n){b.addEventListener(n,stop,{passive:true})});
   b.addEventListener('click',function(e){
     e.preventDefault();e.stopPropagation();
-    if(busy)return; busy=true;
-    setTimeout(function(){busy=false},20000);
     var u='';try{u=postFor(v)}catch(x){}
-    try{__fp.h('fbwait','[]')}catch(x){}
-    directFor(u).then(function(d){
-      busy=false;
-      try{__fp.h('fbdl',JSON.stringify([u,d.m||'',d.v||'',d.a||'']))}catch(x){}
-    },function(){
-      busy=false;
-      try{__fp.h('fbdl',JSON.stringify([u,'','','']))}catch(x){}
-    });
+    resolveAndSend(u);
   },true);
   return b;
 }
