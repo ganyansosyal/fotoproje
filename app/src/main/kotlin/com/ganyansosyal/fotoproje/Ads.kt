@@ -27,10 +27,10 @@ object Credits {
     }
 }
 
-/** AdMob ödüllü reklam. TEST kimliği kullanılıyor: yayına çıkarken kendi reklam birimi kimliğini yaz. */
+/** AdMob ödüllü reklam. GERÇEK kimlik: kendi telefonunda AdMob panelinden test cihazı olarak ekle, reklama tıklama. */
 object Ads {
-    // TEST ödüllü reklam birimi (Google'ın resmi test kimliği). Gerçek kimlik: ca-app-pub-XXXX/YYYY
-    private const val UNIT_ID = "ca-app-pub-3940256099942544/5224354917"
+    // Gerçek ödüllü reklam birimi (indirme_odul)
+    private const val UNIT_ID = "ca-app-pub-1340335815297540/5900117294"
 
     private var ad: RewardedAd? = null
     private var loading = false
