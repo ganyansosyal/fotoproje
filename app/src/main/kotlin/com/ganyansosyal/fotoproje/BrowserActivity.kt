@@ -1619,6 +1619,7 @@ class BrowserActivity : Activity() {
     private fun scanPage(tb: Tab, silent: Boolean = false) {
         val w = tb.web ?: return
         if (isYtTab(tb)) return // YouTube'da tarama yok
+        if (silent && isGoogleTab(tb)) return // Google'da kendiliğinden tarama yok (düğmeye basınca yine çalışır)
         w.evaluateJavascript(Media.SCAN_JS) { raw ->
             val urls = ArrayList<String>()
             val netHints = HashMap<String, String>()
@@ -1634,7 +1635,7 @@ class BrowserActivity : Activity() {
                 val now = System.currentTimeMillis()
                 tb.netCands.filter { now - it.t < 120_000 }.forEach { urls.add(it.url); netHints[it.url] = it.kind }
             }
-            val candidates = urls.distinct().take(100)
+            val candidates = urls.distinct().filter { !isYtUrl(it) }.take(100)
             if ((!silent && !tb.autoShow) || tb.found.isNotEmpty()) return@evaluateJavascript
             if (silent && candidates.isEmpty()) return@evaluateJavascript
             if (candidates.isEmpty()) {
@@ -2203,6 +2204,23 @@ class BrowserActivity : Activity() {
             h == "youtube-nocookie.com" || h.endsWith(".youtube-nocookie.com")
     }
 
+    /** Google arama sayfaları (google.com, google.com.tr, www.google.* ...): otomatik video algılama yapılmaz. */
+    private fun isGoogleTab(tb: Tab?): Boolean {
+        val u = tb?.url ?: return false
+        val h = try { Uri.parse(u).host?.lowercase() ?: "" } catch (_: Throwable) { "" }
+        return Regex("^(www\\.)?google\\.[a-z]{2,3}(\\.[a-z]{2})?$").matches(h)
+    }
+
+    /** Adres YouTube'a mı ait? (gömülü oynatıcılar, googlevideo akışları, ytimg önizlemeleri dahil) */
+    private fun isYtUrl(u: String?): Boolean {
+        if (u.isNullOrEmpty()) return false
+        val h = try { Uri.parse(u).host?.lowercase() ?: "" } catch (_: Throwable) { "" }
+        return h == "youtu.be" || h == "youtube.com" || h.endsWith(".youtube.com") ||
+            h == "youtube-nocookie.com" || h.endsWith(".youtube-nocookie.com") ||
+            h.endsWith(".googlevideo.com") || h == "googlevideo.com" ||
+            h.endsWith(".ytimg.com") || h == "ytimg.com"
+    }
+
     private fun kindOf(u: String): String? {
         if (u.startsWith("blob:")) return "blob"
         val l = u.lowercase()
@@ -2231,6 +2249,8 @@ class BrowserActivity : Activity() {
     ) {
         if (u0.length > 2500) return
         if (isYtTab(tb)) return // YouTube'da ağ adayı toplanmaz
+        if (isGoogleTab(tb)) return // Google'da gezerken aday toplanmaz
+        if (isYtUrl(u0)) return // YouTube adresleri (gömülü oynatıcı, googlevideo) aday olmaz
         Net.rememberRequestHeaders(u0, requestHeaders)
         // Instagram/Facebook parça isteklerindeki bytestart/byteend atılır: tam dosya adresi aday olur
         val u = Media.unrange(u0)
@@ -2290,11 +2310,14 @@ class BrowserActivity : Activity() {
     // ---- oynatıcı bildirimi (hookJs'ten)
     private fun onPlayer(tb: Tab, raw: String) {
         if (isYtTab(tb)) return // YouTube'da video algılanmaz
+        if (isGoogleTab(tb)) return // Google'da video algılanmaz
         val m = try {
             JSONObject(raw)
         } catch (_: Exception) {
             return
         }
+        // Gömülü YouTube oynatıcısı (başka sitede iframe): tepki verme
+        if (isYtUrl(m.optString("src", "")) || isYtUrl(m.optString("ref", ""))) return
         val id = m.optString("id")
         if (m.optBoolean("stop", false)) {
             if (id != tb.playerId) return
@@ -2374,7 +2397,7 @@ class BrowserActivity : Activity() {
         val hints = HashMap<String, String>(tb.pHints)
         for (c in net) hints[c.url] = c.kind
         return mapOf(
-            "urls" to urls.filter { it.startsWith("http") || it.startsWith("blob:") },
+            "urls" to urls.filter { (it.startsWith("http") || it.startsWith("blob:")) && !isYtUrl(it) },
             "hints" to hints,
             "ref" to (tb.pRef ?: tb.web?.url ?: ""),
             "dur" to (if (tb.pLive) 0.0 else tb.pDur),
@@ -2555,7 +2578,7 @@ class BrowserActivity : Activity() {
 
     private fun updateFab() {
         val tb = cur ?: return
-        val on = tb.found.isNotEmpty() && !isYtTab(tb)
+        val on = tb.found.isNotEmpty() && !isYtTab(tb) && !isGoogleTab(tb)
         fabView.setOn(on)
         // Yuvarlak indirme düğmesi geri getirildi (sürüklenebilir; video bulununca kırmızı)
         fab.visibility = View.VISIBLE
