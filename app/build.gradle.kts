@@ -57,7 +57,6 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.3.1")
     implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
     implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
-    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.26.5")
     // LevelPlay + AdMob adaptörü (adaptör Google'ın yeni ads-mobile-sdk kütüphanesini ister; play-services-ads ile birlikte kullanılmaz)
     implementation("com.unity3d.ads-mediation:mediation-sdk:9.5.0")
     implementation("com.unity3d.ads-mediation:admob-adapter:5.11.0")
