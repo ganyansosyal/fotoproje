@@ -230,38 +230,9 @@ object Downloads {
                     )
                 }
                 val src = ytPage ?: post ?: task.url.substringBefore("#fpq=").substringBefore("#fpa=")
-                var ytNote: String? = null
-                // YouTube: önce NewPipeExtractor (kendi JavaScript motoru var), olmazsa yt-dlp
-                if (ytPage != null) {
-                    try {
-                        task.label = if (L.code == "tr") "YouTube çözülüyor…" else "Resolving YouTube…"
-                        notifyUi(true)
-                        val pk = NewPipeYt.pick(ytPage)
-                        val tmpDir = ctx.cacheDir
-                        val vp = File(tmpDir, "video_${task.createdAt}.mp4").path
-                        val ap = File(tmpDir, "ses_${task.createdAt}.m4a").path
-                        Streams.direct(pk.videoUrl, vp, NewPipeYt.headers, task.cancel, { p, l ->
-                            task.progress = p
-                            task.label = l
-                            notifyUi()
-                        }, onTotal = { task.total = maxOf(task.total, it) })
-                        if (pk.audioUrl != null) {
-                            task.label = if (L.code == "tr") "Ses indiriliyor…" else "Downloading audio…"
-                            notifyUi(true)
-                            Streams.direct(pk.audioUrl, ap, NewPipeYt.headers, task.cancel, { _, _ -> })
-                            task.note = "NewPipe · " + pk.desc
-                            finish(task, vp, ap)
-                        } else {
-                            task.note = "NewPipe · " + pk.desc
-                            finish(task, vp, null)
-                        }
-                        return@body
-                    } catch (e: CanceledEx) {
-                        throw e
-                    } catch (e: Throwable) {
-                        if (task.cancel.on) throw CanceledEx()
-                        ytNote = (e.message ?: e.javaClass.simpleName).take(120)
-                    }
+                // YouTube indirme desteklenmiyor
+                if (yt) {
+                    throw IOException(if (L.code == "tr") "YouTube videoları indirilemez." else "YouTube videos can't be downloaded.")
                 }
                 if (src.startsWith("http")) {
                     try {
@@ -295,7 +266,6 @@ object Downloads {
                         val fbFallback = social && !yt && kind != "blob" &&
                             Regex("fbcdn\\.", RegexOption.IGNORE_CASE).containsMatchIn(task.url)
                         if ((social && !fbFallback) || yt || (kind == "blob" && xPost == null)) {
-                            if (ytNote != null) throw IOException("NewPipe: " + ytNote + " | " + (e.message ?: "?"))
                             throw e
                         }
                         task.note = "yt-dlp olmadı (" + (e.message ?: "?").take(400) + "), eski yöntem"
