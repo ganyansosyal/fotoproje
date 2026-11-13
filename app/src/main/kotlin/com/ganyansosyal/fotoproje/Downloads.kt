@@ -32,7 +32,30 @@ class DownloadTask(val id: String, @Volatile var url: String, val referer: Strin
     @Volatile var note: String? = null
     @Volatile var size = 0L
     @Volatile var total = 0L // indirilecek toplam bayt (bilinmiyorsa 0); küçük dosyaları listede gizlemek için
+    @Volatile var speed = 0.0 // bayt/sn (düzleştirilmiş); toplam boyut bilinmiyorsa 0
+    @Volatile var speedAt = 0L // hız son ne zaman güncellendi (eskiyse gösterilmez)
+    private var spT = 0L
+    private var spP = 0.0
     @Volatile var progress = 0.0 // 0..1, <0: belirsiz
+        set(v) {
+            val now = System.currentTimeMillis()
+            if (v < 0.0 || v < field) {
+                speed = 0.0
+                spT = 0L
+            } else if (total > 0L && v > field) {
+                if (spT == 0L) {
+                    spT = now
+                    spP = v
+                } else if (now - spT >= 700) {
+                    val inst = (v - spP) * total / ((now - spT) / 1000.0)
+                    speed = if (speed <= 0.0) inst else speed * 0.6 + inst * 0.4
+                    speedAt = now
+                    spT = now
+                    spP = v
+                }
+            }
+            field = v
+        }
     @Volatile var label = ""
     @Volatile var cancel = CancelFlag()
     @Volatile var pausing = false

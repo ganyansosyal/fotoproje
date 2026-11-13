@@ -79,11 +79,12 @@ class SettingsActivity : Activity() {
     // ---------------------------------------------------------------- yapı taşları
     private fun header(txt: String) {
         val t = TextView(this)
-        t.text = txt
+        t.text = txt.uppercase(java.util.Locale.getDefault())
         t.setTextColor(accent)
         t.typeface = Typeface.DEFAULT_BOLD
-        t.textSize = 16f
-        t.setPadding(dp(8), dp(22), dp(8), dp(8))
+        t.textSize = 12f
+        t.letterSpacing = 0.08f
+        t.setPadding(dp(4), dp(24), dp(4), dp(10))
         box.addView(t)
     }
 
@@ -91,7 +92,7 @@ class SettingsActivity : Activity() {
         val g = LinearLayout(this)
         g.orientation = LinearLayout.VERTICAL
         g.background = GradientDrawable().apply {
-            cornerRadius = dp(20).toFloat()
+            cornerRadius = dp(14).toFloat()
             setColor(card)
             setStroke(dp(1), line)
         }
@@ -161,6 +162,116 @@ class SettingsActivity : Activity() {
             .show()
     }
 
+    private fun tr(a: String, b: String) = if (L.code == "tr") a else b
+
+    private fun gb(b: Long): String =
+        if (b >= 1_073_741_824L) String.format(java.util.Locale.getDefault(), "%.1f GB", b / 1_073_741_824.0)
+        else String.format(java.util.Locale.getDefault(), "%.0f MB", b / 1_048_576.0)
+
+    /** İndirme adresinin altında depolama durumu: indirilenler / diğer kullanılan / boş. */
+    private fun storageRow(): View {
+        val r = LinearLayout(this)
+        r.orientation = LinearLayout.VERTICAL
+        r.setPadding(dp(18), dp(2), dp(18), dp(16))
+        var total = 0L
+        var free = 0L
+        var used = 0L
+        try {
+            val st = android.os.StatFs(android.os.Environment.getExternalStorageDirectory().path)
+            total = st.totalBytes
+            free = st.availableBytes
+        } catch (_: Throwable) {}
+        try {
+            java.io.File(Downloads.displayPath).walkTopDown().forEach { if (it.isFile) used += it.length() }
+        } catch (_: Throwable) {}
+        if (total <= 0L) return r
+        val dlW = if (used > 0) (used.toFloat() / total).coerceAtLeast(0.015f) else 0f
+        val otherW = ((total - free - used).toFloat() / total).coerceAtLeast(0f)
+        val freeW = (1f - dlW - otherW).coerceAtLeast(0f)
+        val bar = LinearLayout(this)
+        bar.weightSum = dlW + otherW + freeW
+        bar.background = GradientDrawable().apply { cornerRadius = dp(4).toFloat(); setColor(th.surface2) }
+        bar.clipToOutline = true
+        bar.outlineProvider = android.view.ViewOutlineProvider.BACKGROUND
+        fun seg(w: Float, c: Int) {
+            if (w <= 0f) return
+            val v = View(this)
+            v.setBackgroundColor(c)
+            bar.addView(v, LinearLayout.LayoutParams(0, -1, w))
+        }
+        seg(dlW, accent)
+        seg(otherW, (fg and 0x00FFFFFF) or 0x55000000)
+        r.addView(bar, LinearLayout.LayoutParams(-1, dp(8)))
+        val lg = LinearLayout(this)
+        val a = TextView(this)
+        a.text = tr("İndirilenler ", "Downloads ") + gb(used)
+        a.setTextColor(sub)
+        a.textSize = 12f
+        val b = TextView(this)
+        b.text = gb(free) + tr(" boş", " free")
+        b.setTextColor(sub)
+        b.textSize = 12f
+        b.gravity = Gravity.END
+        lg.addView(a, LinearLayout.LayoutParams(0, -2, 1f))
+        lg.addView(b, LinearLayout.LayoutParams(0, -2, 1f))
+        r.addView(lg, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        return r
+    }
+
+    /** Önbellek / geçmiş / çerez temizleme: üç satır yerine tek düğme sırası. */
+    private fun clearRow(): View {
+        val r = LinearLayout(this)
+        r.setPadding(dp(14), dp(12), dp(14), dp(14))
+        fun btn(txt: String, act: () -> Unit) {
+            val b = TextView(this)
+            b.text = txt
+            b.textSize = 13f
+            b.typeface = Typeface.DEFAULT_BOLD
+            b.setTextColor(fg)
+            b.gravity = Gravity.CENTER
+            b.background = GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setStroke(dp(1), line) }
+            b.setOnClickListener { act(); toast(L.t("cleared")) }
+            r.addView(b, LinearLayout.LayoutParams(0, dp(42), 1f).apply { setMargins(dp(4), 0, dp(4), 0) })
+        }
+        btn(tr("Önbellek", "Cache")) { try { WebView(this).clearCache(true) } catch (_: Throwable) {} }
+        btn(tr("Geçmiş", "History")) { Store.clearHistory() }
+        btn(tr("Çerezler", "Cookies")) { try { CookieManager.getInstance().removeAllCookies(null) } catch (_: Throwable) {} }
+        return r
+    }
+
+    /** Tema: Açık / Koyu parçalı seçici. */
+    private fun themeRow(): View {
+        val r = LinearLayout(this)
+        r.orientation = LinearLayout.VERTICAL
+        r.setPadding(dp(18), dp(14), dp(18), dp(14))
+        val t = TextView(this)
+        t.text = L.t("theme")
+        t.setTextColor(fg)
+        t.textSize = 16f
+        r.addView(t)
+        val seg = LinearLayout(this)
+        seg.setPadding(dp(4), dp(4), dp(4), dp(4))
+        seg.background = GradientDrawable().apply { cornerRadius = dp(12).toFloat(); setColor(th.surface2) }
+        fun opt(label: String, key: String) {
+            val on = Store.theme == key
+            val b = TextView(this)
+            b.text = label
+            b.gravity = Gravity.CENTER
+            b.textSize = 14f
+            b.typeface = Typeface.DEFAULT_BOLD
+            b.setTextColor(if (on) fg else sub)
+            if (on) b.background = GradientDrawable().apply {
+                cornerRadius = dp(9).toFloat(); setColor(bg); setStroke(dp(1), line)
+            }
+            b.setOnClickListener { if (!on) { Store.setString("theme", key); recreate() } }
+            seg.addView(b, LinearLayout.LayoutParams(0, dp(38), 1f).apply { setMargins(dp(2), 0, dp(2), 0) })
+        }
+        opt(L.t("themeLight"), "light")
+        opt(L.t("themeDark"), "dark")
+        r.addView(seg, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+        return r
+    }
+
     private fun toast(m: String) = Toast.makeText(this, m, Toast.LENGTH_SHORT).show()
 
     private fun info(title: String, body: String) {
@@ -205,6 +316,7 @@ class SettingsActivity : Activity() {
                     Store.publicFolder.toString()
                 ) { Store.setBool("publicFolder", it == "true"); render() }
             },
+            storageRow(),
             switchRow(L.t("wifiOnly"), null, Store.wifiOnly) { Store.setBool("wifiOnly", it) }
         )
         header(L.t("browser"))
@@ -218,18 +330,7 @@ class SettingsActivity : Activity() {
                     Store.setString("engine", it); render()
                 }
             },
-            row(L.t("clearCache")) {
-                try { WebView(this).clearCache(true) } catch (_: Throwable) {}
-                toast(L.t("cleared"))
-            },
-            row(L.t("clearHistory")) {
-                Store.clearHistory()
-                toast(L.t("cleared"))
-            },
-            row(L.t("clearCookies")) {
-                try { CookieManager.getInstance().removeAllCookies(null) } catch (_: Throwable) {}
-                toast(L.t("cleared"))
-            }
+            clearRow()
         )
         header(L.t("general"))
         group(
@@ -242,13 +343,7 @@ class SettingsActivity : Activity() {
                     Store.lang
                 ) { Store.setString("lang", it); recreate() }
             },
-            row(L.t("theme"), if (Store.dark) L.t("themeDark") else L.t("themeLight")) {
-                pick(
-                    L.t("theme"),
-                    listOf("light" to L.t("themeLight"), "dark" to L.t("themeDark")),
-                    Store.theme
-                ) { Store.setString("theme", it); recreate() }
-            },
+            themeRow(),
             switchRow(L.t("syncGallery"), if (Store.syncGallery) L.t("on") else L.t("off"), Store.syncGallery) {
                 Store.setBool("syncGallery", it); render()
             }

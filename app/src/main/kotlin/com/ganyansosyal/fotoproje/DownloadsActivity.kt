@@ -98,7 +98,7 @@ class DownloadsActivity : Activity() {
         val tabs = LinearLayout(this)
         tabs.orientation = LinearLayout.HORIZONTAL
         tabs.setPadding(dp(4), dp(4), dp(4), dp(4))
-        tabs.background = rounded(track, 16)
+        tabs.background = rounded(track, 12)
         tabProg = tabView(L.t("progress")) { showDone = false; render() }
         tabDone = tabView(L.t("done")) { showDone = true; Downloads.markSeen(); render() }
         tabs.addView(tabProg, LinearLayout.LayoutParams(0, dp(44), 1f).apply { setMargins(dp(2), 0, dp(2), 0) })
@@ -184,7 +184,7 @@ class DownloadsActivity : Activity() {
         val c = LinearLayout(this)
         c.orientation = LinearLayout.VERTICAL
         c.setPadding(dp(14), dp(14), dp(14), dp(14))
-        c.background = rounded(card, 22, line)
+        c.background = rounded(card, 14, line)
         val lp = LinearLayout.LayoutParams(-1, -2)
         lp.setMargins(0, dp(6), 0, dp(6))
         c.layoutParams = lp
@@ -211,6 +211,23 @@ class DownloadsActivity : Activity() {
         row.orientation = LinearLayout.HORIZONTAL
         row.gravity = Gravity.END
         return row
+    }
+
+    /** " · 3,1 MB/sn · 4 sn kaldı" (toplam boyut ve hız biliniyorsa), yoksa boş. */
+    private fun speedText(t: DownloadTask): String {
+        val sp = t.speed
+        if (t.status != DlStatus.RUNNING || sp <= 0.0 || t.total <= 0L || t.progress !in 0.0..0.999) return ""
+        if (System.currentTimeMillis() - t.speedAt > 4000) return ""
+        val loc = java.util.Locale.getDefault()
+        val rate = if (sp >= 1_048_576.0) String.format(loc, "%.1f MB/%s", sp / 1_048_576.0, if (L.code == "tr") "sn" else "s")
+        else String.format(loc, "%.0f KB/%s", sp / 1024.0, if (L.code == "tr") "sn" else "s")
+        val secs = ((1.0 - t.progress) * t.total / sp).toLong().coerceAtLeast(1)
+        val eta = if (L.code == "tr") {
+            if (secs > 59) "${secs / 60} dk kaldı" else "$secs sn kaldı"
+        } else {
+            if (secs > 59) "${secs / 60} min left" else "$secs s left"
+        }
+        return " · $rate · $eta"
     }
 
     private fun activeRow(t: DownloadTask): View {
@@ -252,7 +269,7 @@ class DownloadsActivity : Activity() {
             meta.setTextColor(danger)
             meta.maxLines = 2
         } else {
-            meta.text = if (t.label.isEmpty()) L.t("queued") else t.label
+            meta.text = (if (t.label.isEmpty()) L.t("queued") else t.label) + speedText(t)
             meta.setTextColor(sub)
         }
         col.addView(meta, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(3) })

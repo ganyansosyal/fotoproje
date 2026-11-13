@@ -22,7 +22,7 @@ object Credits {
 
     /** LevelPlay anahtarları girilmediyse sistem kapalıdır: indirme serbest, reklam sorulmaz. */
     /** Ana şalter: true iken ödüllü reklam/kredi sistemi açık; false iken kapalı (indirme serbest). */
-    const val REWARD_ADS = true
+    const val REWARD_ADS = false // TEST: kapalı. Yayına çıkarken true yap.
 
     val enabled: Boolean get() = REWARD_ADS && Ads.configured
 
@@ -61,7 +61,7 @@ object Ads {
     val ready: Boolean get() = try { ad?.isAdReady() == true } catch (_: Throwable) { false }
 
     fun init(ctx: Context) {
-        if (!configured || initDone || initing) return
+        if (!Credits.REWARD_ADS || !configured || initDone || initing) return
         initing = true
         try {
             val req = LevelPlayInitRequest.Builder(APP_KEY).build()

@@ -34,7 +34,7 @@ object HomeHtml {
             tiles.append("<a class=\"t\" href=\"${esc(u)}\"><div class=\"i\">$img</div><span>${esc(name)}</span></a>")
         }
         tiles.append(
-            "<a class=\"t\" href=\"#\" id=\"addfav\"><div class=\"i\" style=\"background:#2563eb;color:#fff\">+</div>" +
+            "<a class=\"t\" href=\"#\" id=\"addfav\"><div class=\"i add\" style=\"background:transparent;border:1.5px dashed $line;color:$sub\">+</div>" +
                 "<span>${esc(L.t("add"))}</span></a>"
         )
         return TEMPLATE
@@ -52,17 +52,20 @@ object HomeHtml {
 *{-webkit-tap-highlight-color:transparent}
 html,body{margin:0;background:@@bg@@;color:@@fg@@;font-family:sans-serif;overscroll-behavior-y:auto}
 body{padding:20px 16px 32px;min-height:100vh;box-sizing:border-box}
-h1{text-align:center;font-weight:600;font-size:22px;margin:22px 0 6px}
-p{text-align:center;margin:0 0 20px;color:@@sub@@;font-size:12px}
-form{max-width:520px;margin:0 auto 30px}
-input{width:100%;box-sizing:border-box;padding:12px 16px;border-radius:8px;
-background:@@card@@;color:@@fg@@;font-size:14px;outline:none;border:1px solid @@line@@}
+h1{text-align:left;font-weight:800;font-size:27px;letter-spacing:-.02em;margin:20px 4px 8px}
+p{text-align:left;margin:0 4px 20px;color:@@sub@@;font-size:14px}
+form{max-width:520px;margin:0 auto 32px;position:relative}
+form:before{content:"";position:absolute;left:16px;top:50%;width:18px;height:18px;margin-top:-9px;opacity:.55;
+background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='6.5'/%3E%3Cpath d='M16 16l4.5 4.5'/%3E%3C/svg%3E") center/contain no-repeat}
+input{width:100%;box-sizing:border-box;height:54px;padding:0 16px 0 46px;border-radius:14px;
+background:@@card@@;color:@@fg@@;font-size:16px;outline:none;border:1.5px solid @@line@@}
+input:focus{border-color:#0f766e}
 .g{display:grid;grid-template-columns:repeat(4,1fr);gap:20px 6px;max-width:520px;margin:auto}
-.t{text-decoration:none;color:@@fg@@;text-align:center;font-size:11px;transform:translate3d(0,0,0);will-change:transform;transition:transform .15s ease-out}
+.t{text-decoration:none;color:@@fg@@;text-align:center;font-size:12px;transform:translate3d(0,0,0);will-change:transform;transition:transform .15s ease-out}
 .t:active{transform:translate3d(0,0,0) scale(.92)}
-.i{width:54px;height:54px;border-radius:50%;margin:0 auto 6px;background:#8a93a6;overflow:hidden;transition:background .25s;
+.i{width:56px;height:56px;border-radius:14px;margin:0 auto 7px;box-sizing:border-box;background:#8a93a6;overflow:hidden;transition:background .25s;
 display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:600}
-.i img{width:36px;height:36px;border-radius:50%;background:#fff;padding:6px;box-sizing:border-box;object-fit:contain;opacity:0;transition:opacity .2s}
+.i img{width:36px;height:36px;border-radius:9px;background:#fff;padding:6px;box-sizing:border-box;object-fit:contain;opacity:0;transition:opacity .2s}
 .i img.ok,.i img.show{opacity:1}
 .i img.ok{transition:none}
 .t span{display:block;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
