@@ -73,7 +73,7 @@ object Streams {
     ) {
         if (urls.isEmpty()) throw IOException("Video parçaları bulunamadı")
         // Küçük videolar eskisi gibi 6 bağlantı; çok parçalı (büyük) videolar 4 bağlantı
-        val conns = 8
+        val conns = 6
         Native.segments(urls, init, path, headers, keys, ivs, seq, conns, cancel) { a, b ->
             if (b > 0) report(start + span * a / b, "$label: $a/$b")
         }
@@ -81,7 +81,7 @@ object Streams {
 
     fun direct(
         url: String, path: String, headers: Map<String, String>, cancel: CancelFlag,
-        report: Report, conns: Int = 8, strict: Boolean = false,
+        report: Report, conns: Int = 6, strict: Boolean = false,
         onTotal: ((Long) -> Unit)? = null
     ) {
         Native.direct(url, path, headers, conns, strict, cancel) { a, b ->

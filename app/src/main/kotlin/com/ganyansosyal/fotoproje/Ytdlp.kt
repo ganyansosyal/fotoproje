@@ -246,7 +246,7 @@ object Ytdlp {
             req.addOption("--downloader", "ffmpeg")
             req.addOption("--fixup", "force")
         } else {
-            req.addOption("--concurrent-fragments", "10")
+            req.addOption("--concurrent-fragments", "6")
         }
         if (referer.startsWith("http")) req.addOption("--referer", referer)
         val cf = if (noCookies) null else cookieFile(ctx, src, base)

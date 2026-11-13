@@ -1627,6 +1627,7 @@ class BrowserActivity : Activity() {
     private fun scanPage(tb: Tab, silent: Boolean = false) {
         val w = tb.web ?: return
         if (isYtTab(tb)) return // YouTube'da tarama yok
+        if (isNoBtnTab(tb)) return // Bu sitede tarama yok
         if (silent && isGoogleTab(tb)) return // Google'da kendiliğinden tarama yok (düğmeye basınca yine çalışır)
         w.evaluateJavascript(Media.SCAN_JS) { raw ->
             val urls = ArrayList<String>()
@@ -2222,7 +2223,7 @@ class BrowserActivity : Activity() {
     private fun isGoogleTab(tb: Tab?): Boolean {
         val u = tb?.url ?: return false
         val h = try { Uri.parse(u).host?.lowercase() ?: "" } catch (_: Throwable) { "" }
-        return Regex("^(www\\.)?google\\.[a-z]{2,3}(\\.[a-z]{2})?$").matches(h)
+        return isNoBtnTab(tb) || Regex("^(www\\.)?google\\.[a-z]{2,3}(\\.[a-z]{2})?$").matches(h)
     }
 
     /** Adres YouTube'a mı ait? (gömülü oynatıcılar, googlevideo akışları, ytimg önizlemeleri dahil) */
