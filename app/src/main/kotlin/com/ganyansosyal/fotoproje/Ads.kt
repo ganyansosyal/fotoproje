@@ -22,7 +22,7 @@ object Credits {
 
     /** LevelPlay anahtarları girilmediyse sistem kapalıdır: indirme serbest, reklam sorulmaz. */
     /** Ana şalter: true iken ödüllü reklam/kredi sistemi açık; false iken kapalı (indirme serbest). */
-    const val REWARD_ADS = false // TEST: kapalı. Yayına çıkarken true yap.
+    const val REWARD_ADS = true // Yayın: açık. Test için false yap.
 
     val enabled: Boolean get() = REWARD_ADS && Ads.configured
 
