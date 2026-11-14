@@ -56,6 +56,9 @@ object Ads {
     // Yedek: doğrudan AdMob "Ödüllü geçiş reklamı" (beta). LevelPlay reklamı yoksa bu açılır.
     private const val RI_UNIT_ID = "ca-app-pub-1340335815297540/7952111701"
 
+    // Test için false: yedek (ödüllü geçiş) reklam kapalı, sadece LevelPlay denenir. Tekrar açmak için true yap.
+    private const val USE_RI = false
+
     val configured: Boolean
         get() = !APP_KEY.startsWith("BURAYA") && !AD_UNIT_ID.startsWith("BURAYA")
 
@@ -114,7 +117,7 @@ object Ads {
 
     /** Yedek reklam: AdMob ödüllü geçiş reklamı (doğrudan AdMob SDK). */
     private fun loadRi() {
-        if (riLoading || ri != null) return
+        if (!USE_RI || riLoading || ri != null) return
         riLoading = true
         try {
             RewardedInterstitialAd.load(
