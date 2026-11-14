@@ -28,6 +28,8 @@ object RewardDialog {
         activity: Activity,
         hak: Int = 5,
         tr: Boolean = true,
+        adsDone: Int = 0,
+        adsNeed: Int = 3,
         onWatch: () -> Unit,
         onCancel: () -> Unit = {}
     ) {
@@ -79,7 +81,7 @@ object RewardDialog {
 
         // Alt yazi
         root.addView(TextView(activity).apply {
-            text = if (tr) "Kısa bir reklam izle, indirmeye devam et." else "Watch a short ad to keep downloading."
+            text = if (tr) "$adsNeed reklam izle, gün boyu sınırsız indirme!  ($adsDone/$adsNeed)" else "Watch $adsNeed ads, unlimited downloads all day!  ($adsDone/$adsNeed)"
             textSize = 15f
             setTextColor(TEXT_SUB)
             gravity = Gravity.CENTER
@@ -91,7 +93,7 @@ object RewardDialog {
 
         // Odul rozeti
         root.addView(TextView(activity).apply {
-            text = if (tr) "🎁  +$hak indirme hakkı" else "🎁  +$hak downloads"
+            text = if (tr) "🎁  Gün boyu sınırsız indirme" else "🎁  Unlimited downloads all day"
             textSize = 16f
             setTextColor(TEAL)
             typeface = Typeface.DEFAULT_BOLD

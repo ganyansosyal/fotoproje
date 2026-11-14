@@ -2602,20 +2602,26 @@ class BrowserActivity : Activity() {
     // ---- indirme
     private fun creditsLabel(): String =
         if (!Credits.enabled) ""
-        else if (L.code == "tr") "Kalan hak: ${Credits.count}" else "Credits left: ${Credits.count}"
+        else if (Credits.freeToday) (if (L.code == "tr") "Gün boyu sınırsız indirme" else "Unlimited downloads all day")
+        else ""
 
     /** Hak bitti: "Reklam izle, 5 indirme kazan" penceresi. Reklam izlenince onGranted çağrılır. */
     private fun askAd(onGranted: () -> Unit) {
         val tr = L.code == "tr"
-        RewardDialog.show(this, Credits.PER_AD, tr, onWatch = {
+        RewardDialog.show(this, Credits.PER_AD, tr, Credits.adsToday, Credits.ADS_FOR_FREE, onWatch = {
             if (!Ads.ready) {
                 toast("Reklam: " + Ads.lastError)
                 Ads.load(this)
             } else {
                 Ads.show(this,
                     onReward = {
-                        Credits.add(Credits.PER_AD)
-                        ui.post { onGranted() }
+                        if (Credits.onAdWatched()) {
+                            toast(if (tr) "Tebrikler! Gün boyu sınırsız indirme 🎉" else "Done! Unlimited downloads all day 🎉")
+                            ui.post { onGranted() }
+                        } else {
+                            // 3 reklama ulaşana kadar pencere tekrar açılır (1/3, 2/3)
+                            ui.post { askAd(onGranted) }
+                        }
                     },
                     onFail = {
                         if (!Credits.has()) toast(if (tr) "Ödül alınamadı. Reklamı sonuna kadar izle." else "No reward. Watch the full ad.")
@@ -2651,7 +2657,7 @@ class BrowserActivity : Activity() {
                     "alts" to others.filter { it.url != url && it.kind != "blob" }.map { it.kind + "|" + it.url }
                 ),
                 { r -> toast((if (r is String) r else t("downloadStarted")) + creditsLabel().let { if (it.isEmpty()) "" else "  •  " + it }) },
-                { Credits.add(1); toast(t("failed")) } // indirme başlamadıysa hak geri verilir
+                { Credits.refund(); toast(t("failed")) } // indirme başlamadıysa hak geri verilir
             )
         }
         send(cur)
@@ -3117,7 +3123,7 @@ class BrowserActivity : Activity() {
                 .setNegativeButton(if (tr) "Vazgeç" else "Cancel", null)
                 .show()
         }
-        val dlLabel = if (Credits.has()) t("download") + (if (Credits.enabled) " (" + Credits.count + ")" else "")
+        val dlLabel = if (Credits.has()) t("download") + (if (Credits.freeToday) " ∞" else "")
             else (if (L.code == "tr") "Reklam izle" else "Watch ad")
         val dl = action(if (Credits.has()) "⤓" else "▶", dlLabel, acc) {
             val f = items[sel]

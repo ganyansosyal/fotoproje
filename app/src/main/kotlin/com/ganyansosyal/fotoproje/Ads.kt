@@ -24,7 +24,7 @@ import com.unity3d.mediation.rewarded.LevelPlayReward
 import com.unity3d.mediation.rewarded.LevelPlayRewardedAd
 import com.unity3d.mediation.rewarded.LevelPlayRewardedAdListener
 
-/** İndirme hakkı (kredi): reklam izleyince +5, her indirmede -1. */
+/** 3 reklam izleyen kullanıcıya gece 12'ye kadar indirme bedava. */
 object Credits {
     const val PER_AD = 3
     private fun p() = Store.app.getSharedPreferences("fp_credits", Context.MODE_PRIVATE)
@@ -35,17 +35,44 @@ object Credits {
 
     val enabled: Boolean get() = REWARD_ADS && Ads.configured
 
-    val count: Int get() = p().getInt("n", 0)
-    fun has() = !enabled || count > 0
+    /** Gece 12'ye kadar bedava için izlenmesi gereken reklam sayısı. */
+    const val ADS_FOR_FREE = 3
 
-    @Synchronized fun add(n: Int) { p().edit().putInt("n", count + n).apply() }
-    @Synchronized fun use(): Boolean {
-        if (!enabled) return true
-        val c = count
-        if (c <= 0) return false
-        p().edit().putInt("n", c - 1).apply()
-        return true
+    private fun today(): String = java.text.SimpleDateFormat("yyyyMMdd", java.util.Locale.US).format(java.util.Date())
+
+    /** Saat geri alındıysa (hile) bedava hak ve reklam sayacı sıfırlanır. En son görülen saat saklanır. */
+    @Synchronized private fun checkClock() {
+        val now = System.currentTimeMillis()
+        val last = p().getLong("last", 0L)
+        if (now < last - 5 * 60_000L) {
+            p().edit().remove("free_day").putInt("ads", 0).putLong("last", now).apply()
+        } else if (now > last) {
+            p().edit().putLong("last", now).apply()
+        }
     }
+
+    /** Bugün izlenen reklam sayısı (gece 12'de sıfırlanır). */
+    val adsToday: Int get() = checkClock().let { 0 } + if (p().getString("day", "") == today()) p().getInt("ads", 0) else 0
+
+    /** Bugün 3 reklam izlendiyse gece 12'ye kadar indirme bedava. */
+    val freeToday: Boolean get() = enabled && checkClock().let { true } && p().getString("free_day", "") == today()
+
+    fun has() = !enabled || freeToday
+
+    /** Reklam izlendi: sayacı artır. 3. reklamda true döner (gece 12'ye kadar bedava açıldı). */
+    @Synchronized fun onAdWatched(): Boolean {
+        checkClock()
+        val t = today()
+        val n = (if (p().getString("day", "") == t) p().getInt("ads", 0) else 0) + 1
+        val e = p().edit().putString("day", t).putInt("ads", n)
+        val unlocked = n >= ADS_FOR_FREE && p().getString("free_day", "") != t
+        if (unlocked) e.putString("free_day", t)
+        e.apply()
+        return unlocked
+    }
+
+    fun use(): Boolean = !enabled || freeToday
+    fun refund() {}
 }
 
 /** LevelPlay (içinde AdMob) ödüllü reklam. */
@@ -56,8 +83,8 @@ object Ads {
     // Yedek: doğrudan AdMob "Ödüllü geçiş reklamı" (beta). LevelPlay reklamı yoksa bu açılır.
     private const val RI_UNIT_ID = "ca-app-pub-1340335815297540/7952111701"
 
-    // Test için false: yedek (ödüllü geçiş) reklam kapalı, sadece LevelPlay denenir. Tekrar açmak için true yap.
-    private const val USE_RI = false
+    // Yedek (ödüllü geçiş) reklam açık. Kapatmak için false yap.
+    private const val USE_RI = true
 
     val configured: Boolean
         get() = !APP_KEY.startsWith("BURAYA") && !AD_UNIT_ID.startsWith("BURAYA")
