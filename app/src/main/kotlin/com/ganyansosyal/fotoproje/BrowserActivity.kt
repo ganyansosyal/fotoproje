@@ -2609,8 +2609,7 @@ class BrowserActivity : Activity() {
         val tr = L.code == "tr"
         RewardDialog.show(this, Credits.PER_AD, tr, onWatch = {
             if (!Ads.ready) {
-                val why = Ads.lastError.let { if (it.isBlank()) "" else "\n($it)" }
-                toast((if (tr) "Reklam hazırlanıyor, birkaç saniye sonra tekrar dene" else "Ad is loading, try again shortly") + why)
+                toast("Reklam: " + Ads.lastError)
                 Ads.load(this)
             } else {
                 Ads.show(this,
