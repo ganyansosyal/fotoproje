@@ -73,7 +73,8 @@ object Ads {
     private var riRetry = false
 
     /** Son hata (teşhis için): init veya yükleme başarısız olursa buraya yazılır. */
-    @Volatile var lastError: String = ""
+    @Volatile private var errRaw: String = ""
+    val lastError: String get() = if (errRaw.isBlank()) "init=" + initDone + " yukleniyor=" + loading + " hazir=" + lpReady else errRaw
 
     private var cbReward: (() -> Unit)? = null
     private var cbFail: (() -> Unit)? = null
@@ -99,11 +100,11 @@ object Ads {
                 }
                 override fun onInitFailed(error: LevelPlayInitError) {
                     initing = false // sonraki load() çağrısında yeniden denenir
-                    lastError = "init: " + error.errorCode + " " + error.errorMessage
-                    Log.e("Ads", lastError)
+                    errRaw = "init: " + error.errorCode + " " + error.errorMessage
+                    Log.e("Ads", errRaw)
                 }
             })
-        } catch (t: Throwable) { initing = false; lastError = "init exc: " + t.message; Log.e("Ads", lastError, t) }
+        } catch (t: Throwable) { initing = false; errRaw = "init exc: " + t.message; Log.e("Ads", errRaw, t) }
     }
 
     fun load(ctx: Context) {
@@ -130,8 +131,8 @@ object Ads {
                     }
                     override fun onAdFailedToLoad(adError: LoadAdError) {
                         riLoading = false
-                        lastError = "ri: " + adError.message
-                        Log.e("Ads", lastError)
+                        errRaw = "ri: " + adError.message
+                        Log.e("Ads", errRaw)
                         if (!riRetry) {
                             riRetry = true
                             ui.postDelayed({ riRetry = false; loadRi() }, 30_000)
@@ -141,8 +142,8 @@ object Ads {
             )
         } catch (t: Throwable) {
             riLoading = false
-            lastError = "ri exc: " + t.message
-            Log.e("Ads", lastError, t)
+            errRaw = "ri exc: " + t.message
+            Log.e("Ads", errRaw, t)
         }
     }
 
@@ -155,7 +156,7 @@ object Ads {
             }
             override fun onAdFailedToShowFullScreenContent(fullScreenContentError: FullScreenContentError) {
                 ri = null
-                lastError = "ri show: " + fullScreenContentError.message
+                errRaw = "ri show: " + fullScreenContentError.message
                 ui.post { load(Store.app); finish(false) }
             }
         }
@@ -168,7 +169,7 @@ object Ads {
             })
         } catch (t: Throwable) {
             ri = null
-            lastError = "ri show exc: " + t.message
+            errRaw = "ri show exc: " + t.message
             finish(false)
         }
     }
@@ -201,8 +202,8 @@ object Ads {
 
         override fun onAdLoadFailed(error: LevelPlayAdError) {
             loading = false
-            lastError = "load: " + error.errorCode + " " + error.errorMessage
-            Log.e("Ads", lastError)
+            errRaw = "load: " + error.errorCode + " " + error.errorMessage
+            Log.e("Ads", errRaw)
             // Reklam yoksa 30 sn sonra yeniden dene
             ui.postDelayed({ ad?.let { load(Store.app) } }, 30_000)
         }
